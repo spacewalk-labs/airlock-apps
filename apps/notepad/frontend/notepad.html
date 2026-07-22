@@ -80,6 +80,33 @@
   }
   #toast.show { opacity: 0.96; }
   #toast.err { background: var(--warn); color: #fff; }
+  /* ---- lightbox (zoom) + drawing annotation ---- */
+  .thumb img { cursor: zoom-in; }
+  #lb-overlay { position:fixed; inset:0; z-index:50; display:flex; flex-direction:column;
+    background:rgba(0,0,0,.86); overscroll-behavior:contain; -webkit-touch-callout:none; }
+  .lb-bar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 12px;
+    background:rgba(0,0,0,.35); }
+  .lb-bar .spacer { flex:1 1 auto; }
+  .lb-btn { font:inherit; font-size:.9em; min-height:40px; padding:8px 12px;
+    border-radius:8px; border:1px solid rgba(255,255,255,.35);
+    background:rgba(255,255,255,.08); color:#fff; cursor:pointer; }
+  .lb-btn:hover { border-color:#fff; }
+  .lb-btn.on { background:#fff; color:#111; border-color:#fff; }
+  .lb-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .lb-btn:disabled { opacity:.45; cursor:not-allowed; }
+  .lb-tools { display:none; }                          /* shown only in draw mode */
+  #lb-overlay.draw .lb-tools { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+  .lb-swatch { width:30px; height:30px; min-height:0; padding:0; border-radius:50%;
+    border:2px solid rgba(255,255,255,.5); cursor:pointer; }
+  .lb-swatch.on { border-color:#fff; box-shadow:0 0 0 2px #111, 0 0 0 4px #fff; }
+  .lb-stage { flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center;
+    overflow:hidden; padding:6px; box-sizing:border-box; }
+  .lb-frame { position:relative; display:inline-flex; max-width:100%; max-height:100%; line-height:0; }
+  .lb-img { display:block; max-width:100%; max-height:100%; object-fit:contain;
+    user-select:none; -webkit-user-select:none; -webkit-user-drag:none; }
+  .lb-canvas { position:absolute; inset:0; width:100%; height:100%; touch-action:none;
+    user-select:none; -webkit-user-select:none; cursor:crosshair; display:none; }
+  #lb-overlay.draw .lb-canvas { display:block; }
 </style>
 </head>
 <body>
@@ -128,6 +155,11 @@
   var MAX_SIDE = 2400, MAX_PX = 16777216, QUALITY = 0.9, THUMB_SIDE = 220; // iOS 16Mpx canvas guard + JPEG 90%
   var MAX_ENCODED = 12 * 1024 * 1024;  // ~12MB guard on the base64 payload
   var FILE_MAX = 50 * 1024 * 1024;     // matches backend FILE_MAX_BYTES
+
+  var viewMap = new Map();             // "N" -> full-size view dataURL (zoom + drawing source)
+  var DRAW_COLORS = ['#e5484d', '#f5d90a', '#3b82f6', '#ffffff'];
+  var MAX_CANVAS_PX = 16000000, MAX_CANVAS_SIDE = 4096;  // iOS canvas guards
+  var MIN_DIST = 1.4, EXPORT_Q = 0.85;                   // point thinning (px) + annotated JPEG quality
 
   function toast(msg, isErr) {
     toastEl.textContent = msg;
@@ -188,6 +220,8 @@
   function addImgThumb(n, path, thumbUrl) {
     var d = document.createElement('div'); d.className = 'thumb'; d.dataset.n = n;
     var im = document.createElement('img'); im.src = thumbUrl; im.alt = 'image ' + n;
+    im.title = 'Click to zoom / annotate';
+    im.addEventListener('click', function () { openViewer(String(n)); });
     var lb = document.createElement('span'); lb.className = 'lbl'; lb.textContent = '[image' + n + ']'; lb.title = path;
     var rm = document.createElement('button'); rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×'; rm.title = 'Remove';
     rm.addEventListener('click', function () { removeImg(n, d); });
@@ -196,7 +230,7 @@
   }
 
   function removeImg(n, d) {
-    imgMap.delete(String(n)); d.remove();
+    imgMap.delete(String(n)); viewMap.delete(String(n)); d.remove();
     editor.value = editor.value.replace(new RegExp('\\[image' + n + '\\]\\s?', 'g'), '');
     save();
     if (!strip.querySelector('.thumb')) emptyHint.style.display = '';
@@ -222,6 +256,7 @@
           insertToken('[image' + j.n + ']');
           addImgThumb(j.n, j.path, out.thumb);
           imgMap.set(String(j.n), j.path);
+          viewMap.set(String(j.n), out.upload);   // full-size source for zoom/annotate
           toast('[image' + j.n + '] saved -> ' + j.path);
         });
     }).catch(function (e) { toast('Error: ' + e.message, true); });
@@ -373,12 +408,280 @@
   // ---- clear (uploaded files stay on the server) ----
   document.getElementById('clearBtn').addEventListener('click', function () {
     if (editor.value && !confirm('Clear the note and thumbnails? Uploaded files stay on the server.')) return;
-    editor.value = ''; imgMap.clear(); fileMap.clear(); fileSeq = 0;
+    closeViewer();
+    editor.value = ''; imgMap.clear(); fileMap.clear(); viewMap.clear(); fileSeq = 0;
     strip.querySelectorAll('.thumb').forEach(function (el) { el.remove(); });
     emptyHint.style.display = '';
     save();
     editor.focus();
   });
+
+  // ================= lightbox (zoom) + drawing annotation =================
+  // Single modal instance. lbox != null means the modal is open.
+  var lbox = null;
+
+  function lbBtn(label, aria) {
+    var b = document.createElement('button'); b.type = 'button'; b.className = 'lb-btn';
+    b.textContent = label; if (aria) b.setAttribute('aria-label', aria);
+    return b;
+  }
+
+  function openViewer(n) {
+    var src = viewMap.get(String(n));
+    if (!src) return;
+    closeViewer();                                   // prevent double-open
+    var prevFocus = document.activeElement;
+
+    var overlay = document.createElement('div');
+    overlay.id = 'lb-overlay';
+    overlay.setAttribute('role', 'dialog'); overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-label', 'View / annotate image ' + n);
+
+    var bar = document.createElement('div'); bar.className = 'lb-bar';
+    var drawToggle = lbBtn('✏️ Draw', 'Start draw mode');
+    var tools = document.createElement('span'); tools.className = 'lb-tools';
+    var penBtn = lbBtn('✏️ Pen', 'Pen'); penBtn.classList.add('on');
+    var eraBtn = lbBtn('🧽 Eraser', 'Eraser');
+    var swatches = DRAW_COLORS.map(function (c, i) {
+      var b = document.createElement('button'); b.type = 'button';
+      b.className = 'lb-swatch' + (i === 0 ? ' on' : '');
+      b.style.background = c; b.setAttribute('aria-label', 'Color ' + (i + 1)); b.title = c;
+      b.addEventListener('click', function () { pickColor(c, b); });
+      return b;
+    });
+    var undoBtn = lbBtn('↶ Undo', 'Undo');
+    var clearDraw = lbBtn('Clear', 'Clear all annotations');
+    var saveBtn = lbBtn('Replace with annotated', 'Replace with annotated'); saveBtn.classList.add('primary');
+    tools.appendChild(penBtn); tools.appendChild(eraBtn);
+    swatches.forEach(function (s) { tools.appendChild(s); });
+    tools.appendChild(undoBtn); tools.appendChild(clearDraw); tools.appendChild(saveBtn);
+    var spacer = document.createElement('span'); spacer.className = 'spacer';
+    var closeBtn = lbBtn('✕', 'Close');
+    bar.appendChild(drawToggle); bar.appendChild(tools); bar.appendChild(spacer); bar.appendChild(closeBtn);
+
+    var stage = document.createElement('div'); stage.className = 'lb-stage';
+    var frame = document.createElement('div'); frame.className = 'lb-frame';
+    var img = document.createElement('img'); img.className = 'lb-img'; img.alt = 'image ' + n; img.src = src;
+    var canvas = document.createElement('canvas'); canvas.className = 'lb-canvas';
+    frame.appendChild(img); frame.appendChild(canvas); stage.appendChild(frame);
+    overlay.appendChild(bar); overlay.appendChild(stage);
+    document.body.appendChild(overlay);
+
+    // body scroll-lock (iOS: position fixed + preserve scrollY)
+    var scrollY = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position = 'fixed'; document.body.style.top = (-scrollY) + 'px';
+    document.body.style.left = '0'; document.body.style.right = '0'; document.body.style.width = '100%';
+
+    lbox = {
+      n: String(n), overlay: overlay, img: img, canvas: canvas, ctx: null,
+      strokes: [], cur: null, mode: 'pen', color: DRAW_COLORS[0], width: 4,
+      scrollY: scrollY, prevFocus: prevFocus, pointerId: null, prev: null, prevMid: null,
+      saving: false, imgReady: !!(img.complete && img.naturalWidth),
+      penBtn: penBtn, eraBtn: eraBtn, saveBtn: saveBtn, undoBtn: undoBtn,
+      clearDraw: clearDraw, swatches: swatches, drawToggle: drawToggle, onKey: null
+    };
+    img.addEventListener('load', function () { if (lbox) lbox.imgReady = true; });
+
+    drawToggle.addEventListener('click', enterDraw);
+    penBtn.addEventListener('click', function () { setMode('pen'); });
+    eraBtn.addEventListener('click', function () { setMode('eraser'); });
+    undoBtn.addEventListener('click', function () { if (lbox) { lbox.strokes.pop(); redrawAll(); } });
+    clearDraw.addEventListener('click', function () { if (lbox) { lbox.strokes = []; redrawAll(); } });
+    saveBtn.addEventListener('click', saveAnnotated);
+    closeBtn.addEventListener('click', closeViewer);
+    // click empty stage to close — view mode only (avoids misfire while drawing)
+    stage.addEventListener('click', function (e) {
+      if (e.target === stage && !overlay.classList.contains('draw')) closeViewer();
+    });
+
+    lbox.onKey = function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); closeViewer(); return; }
+      if (e.key === 'Tab') {                                  // minimal focus trap
+        var f = overlay.querySelectorAll('button:not(:disabled)');
+        if (!f.length) return;
+        var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    document.addEventListener('keydown', lbox.onKey);
+
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('lostpointercapture', onUp);
+
+    drawToggle.focus();
+  }
+
+  function enterDraw() {
+    if (!lbox || lbox.overlay.classList.contains('draw')) return;
+    if (!lbox.imgReady || !setupCanvas()) { toast('Image still loading — try again in a moment', true); return; }
+    lbox.overlay.classList.add('draw'); lbox.drawToggle.classList.add('on');
+  }
+
+  function setMode(m) {
+    if (!lbox) return;
+    lbox.mode = m;
+    lbox.penBtn.classList.toggle('on', m === 'pen');
+    lbox.eraBtn.classList.toggle('on', m === 'eraser');
+  }
+
+  function pickColor(c, btn) {
+    if (!lbox) return;
+    lbox.color = c; setMode('pen');
+    lbox.swatches.forEach(function (s) { s.classList.remove('on'); });
+    btn.classList.add('on');
+  }
+
+  function setupCanvas() {
+    var nw = lbox.img.naturalWidth, nh = lbox.img.naturalHeight;
+    if (!nw || !nh) return false;
+    var cap = Math.min(1, MAX_CANVAS_SIDE / nw, MAX_CANVAS_SIDE / nh, Math.sqrt(MAX_CANVAS_PX / (nw * nh)));
+    var cw = Math.max(1, Math.round(nw * cap)), ch = Math.max(1, Math.round(nh * cap));
+    lbox.canvas.width = cw; lbox.canvas.height = ch;
+    var ctx = lbox.canvas.getContext('2d', { desynchronized: true });
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    lbox.ctx = ctx; lbox.width = Math.max(3, Math.round(cw / 250));
+    redrawAll();
+    return true;
+  }
+
+  function canvasPoint(e) {                                    // CSS px -> canvas px (no extra DPR mult)
+    var r = lbox.canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (lbox.canvas.width / (r.width || 1)),
+             y: (e.clientY - r.top) * (lbox.canvas.height / (r.height || 1)) };
+  }
+
+  function applyStyle(ctx, st) {
+    ctx.globalCompositeOperation = st.mode === 'eraser' ? 'destination-out' : 'source-over';
+    ctx.strokeStyle = st.color; ctx.fillStyle = st.color; ctx.lineWidth = st.width;
+  }
+
+  function onDown(e) {
+    if (!lbox || !lbox.ctx || lbox.pointerId !== null || e.isPrimary === false) return;
+    e.preventDefault();
+    lbox.pointerId = e.pointerId;
+    try { lbox.canvas.setPointerCapture(e.pointerId); } catch (err) {}
+    var p = canvasPoint(e);
+    var w = lbox.mode === 'eraser' ? lbox.width * 3 : lbox.width;
+    lbox.cur = { mode: lbox.mode, color: lbox.color, width: w, pts: [p] };
+    lbox.prev = p; lbox.prevMid = p;
+    applyStyle(lbox.ctx, lbox.cur);                           // a single tap shows as a dot
+    lbox.ctx.beginPath(); lbox.ctx.arc(p.x, p.y, w / 2, 0, Math.PI * 2); lbox.ctx.fill();
+  }
+
+  function onMove(e) {
+    if (!lbox || !lbox.ctx || lbox.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    var p = canvasPoint(e), prev = lbox.prev;
+    var dx = p.x - prev.x, dy = p.y - prev.y;
+    if (dx * dx + dy * dy < MIN_DIST * MIN_DIST) return;       // point thinning
+    var mid = { x: (prev.x + p.x) / 2, y: (prev.y + p.y) / 2 };
+    applyStyle(lbox.ctx, lbox.cur);
+    lbox.ctx.beginPath(); lbox.ctx.moveTo(lbox.prevMid.x, lbox.prevMid.y);
+    lbox.ctx.quadraticCurveTo(prev.x, prev.y, mid.x, mid.y); lbox.ctx.stroke();
+    lbox.cur.pts.push(p); lbox.prev = p; lbox.prevMid = mid;
+  }
+
+  function onUp(e) {
+    if (!lbox || lbox.pointerId === null || (e && e.pointerId !== lbox.pointerId)) return;
+    try { lbox.canvas.releasePointerCapture(lbox.pointerId); } catch (err) {}
+    lbox.pointerId = null;
+    if (lbox.cur && lbox.cur.pts.length) lbox.strokes.push(lbox.cur);
+    lbox.cur = null;
+    if (lbox.ctx) lbox.ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function redrawAll() {
+    if (!lbox || !lbox.ctx) return;
+    var ctx = lbox.ctx, cv = lbox.canvas;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    lbox.strokes.forEach(function (st) {
+      applyStyle(ctx, st);
+      var pts = st.pts;
+      if (pts.length === 1) {
+        ctx.beginPath(); ctx.arc(pts[0].x, pts[0].y, st.width / 2, 0, Math.PI * 2); ctx.fill(); return;
+      }
+      var prevMid = pts[0];
+      for (var i = 1; i < pts.length; i++) {                  // same midpoint segments as live
+        var mid = { x: (pts[i - 1].x + pts[i].x) / 2, y: (pts[i - 1].y + pts[i].y) / 2 };
+        ctx.beginPath(); ctx.moveTo(prevMid.x, prevMid.y);
+        ctx.quadraticCurveTo(pts[i - 1].x, pts[i - 1].y, mid.x, mid.y); ctx.stroke();
+        prevMid = mid;
+      }
+      ctx.beginPath(); ctx.moveTo(prevMid.x, prevMid.y);
+      ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y); ctx.stroke();
+    });
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  function setBusy(b) {
+    if (!lbox) return;
+    [lbox.saveBtn, lbox.undoBtn, lbox.clearDraw, lbox.penBtn, lbox.eraBtn].forEach(function (el) { if (el) el.disabled = b; });
+    if (lbox.saveBtn) lbox.saveBtn.textContent = b ? 'Replacing…' : 'Replace with annotated';
+  }
+
+  function makeThumb(srcCanvas) {
+    var s = Math.min(1, THUMB_SIDE / Math.max(srcCanvas.width, srcCanvas.height));
+    var tw = Math.max(1, Math.round(srcCanvas.width * s)), th = Math.max(1, Math.round(srcCanvas.height * s));
+    var t = document.createElement('canvas'); t.width = tw; t.height = th;
+    t.getContext('2d').drawImage(srcCanvas, 0, 0, tw, th);
+    return t.toDataURL('image/jpeg', 0.6);
+  }
+
+  function saveAnnotated() {
+    if (!lbox || lbox.saving) return;
+    if (!lbox.ctx) { toast('Tap ✏️ Draw first to add annotations', true); return; }
+    var cv = lbox.canvas;
+    var ex = document.createElement('canvas'); ex.width = cv.width; ex.height = cv.height;
+    var ectx = ex.getContext('2d');
+    var dataUrl = '';
+    try {
+      ectx.drawImage(lbox.img, 0, 0, cv.width, cv.height);     // base + annotations composite
+      ectx.drawImage(cv, 0, 0);
+      dataUrl = ex.toDataURL('image/jpeg', EXPORT_Q);
+    } catch (err) { toast('Compositing failed: ' + err.message, true); return; }
+    if (!dataUrl || dataUrl.length < 32 || dataUrl.indexOf('data:image/jpeg') !== 0) {
+      toast('Export failed (image too large?) — try again', true); return;   // toDataURL "data:," / empty guard
+    }
+    var n = lbox.n;
+    lbox.saving = true; setBusy(true);
+    fetch('/publish/api/upload-image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl })
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!lbox) return;
+        lbox.saving = false; setBusy(false);
+        if (!res.ok || !res.j.ok) { toast('Replace failed: ' + (res.j.error || 'HTTP') + ' — your drawing is kept', true); return; }
+        // === swap only after a successful upload (atomic). Keep token N; res.j.n is just the server file number ===
+        imgMap.set(n, res.j.path); viewMap.set(n, dataUrl);
+        var thumbImg = strip.querySelector('.thumb[data-n="' + n + '"] img');
+        if (thumbImg) thumbImg.src = makeThumb(ex);
+        toast('[image' + n + '] replaced with annotated -> ' + res.j.path);
+        closeViewer();
+      }).catch(function (e) {
+        if (!lbox) return;
+        lbox.saving = false; setBusy(false);
+        toast('Replace error: ' + e.message + ' — your drawing is kept', true);
+      });
+  }
+
+  function closeViewer() {
+    if (!lbox) return;
+    var o = lbox.overlay, scrollY = lbox.scrollY || 0, pf = lbox.prevFocus;
+    document.removeEventListener('keydown', lbox.onKey);
+    try { lbox.canvas.width = 0; lbox.canvas.height = 0; } catch (e) {}   // free canvas memory
+    if (o && o.parentNode) o.parentNode.removeChild(o);
+    document.body.style.position = ''; document.body.style.top = '';
+    document.body.style.left = ''; document.body.style.right = ''; document.body.style.width = '';
+    window.scrollTo(0, scrollY);
+    lbox = null;
+    if (pf && pf.focus) { try { pf.focus(); } catch (e) {} }
+  }
 
   // ---- trigger the 24h cleanup on load (ignore failures) ----
   fetch('/publish/api/uploads-cleanup').then(function (r) { return r.json(); })
