@@ -1,0 +1,75 @@
+/*
+ * fb-branding/custom.css — Markwand 톤을 filebrowser SPA 에 적용
+ * 한계: fb SPA 의 hashed class name → 모든 영역 100% override 불가
+ *       핵심 selector (action button, link, focus, scrollbar) 만 잡음
+ *       review High 4 의 "공식 branding hook 우선" 정신 — 가능한 범위만
+ */
+
+:root, html, body, #app {
+  /* fb 의 brand color 를 Markwand teal 로 */
+  --primary-color: #0f766e;
+  --accent: #0f766e;
+  --md-primary-fg-color: #0f766e;
+}
+
+/* fb 의 #FFFFFF body → Markwand warm */
+body, #app, .shell {
+  background: #fbf7ef !important;
+  color: #20231f !important;
+  font-family: -apple-system, BlinkMacSystemFont, 'Avenir Next', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Segoe UI', Roboto, sans-serif !important;
+}
+
+/* dark — prefers-color-scheme 또는 fb 의 .dark-theme */
+@media (prefers-color-scheme: dark) {
+  body, #app, .shell {
+    background: #101411 !important;
+    color: #edf4ec !important;
+  }
+}
+body.dark, body.dark-theme, .dark body, .dark #app {
+  background: #101411 !important;
+  color: #edf4ec !important;
+}
+
+/* top bar / header — fb 의 파란 #2979ff → teal */
+header, nav, .nav, #navbar, .top, .toolbar,
+header.header, header.uploader,
+.action.copy-clipboard {
+  background: #0f766e !important;
+  color: #ffffff !important;
+}
+header a, nav a, .nav a { color: #ffffff !important; }
+
+/* primary button */
+button.button--flat, button.button, .button,
+.action, .floating button, .floating .action {
+  color: #0f766e !important;
+}
+button.button--flat:hover, button.button:hover { background: rgba(15, 118, 110, 0.10) !important; }
+
+/* 선택 / 강조 */
+.selected, .item.selected, .item.active, .row.active {
+  background: rgba(15, 118, 110, 0.15) !important;
+  color: #0f766e !important;
+}
+
+/* link */
+a, a:visited { color: #0f766e !important; }
+a:hover { color: #115e59 !important; }
+
+/* breadcrumb */
+.breadcrumbs, #breadcrumbs, nav.breadcrumbs {
+  background: transparent !important;
+  color: #667066 !important;
+}
+
+/* editor (Ace) wrapper */
+#editor, .editor, .ace_editor {
+  font-family: 'JetBrains Mono', 'SFMono-Regular', 'Cascadia Code', Consolas, monospace !important;
+}
+
+/* scrollbar */
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: rgba(15, 118, 110, 0.35); border-radius: 999px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(15, 118, 110, 0.55); }
+*::-webkit-scrollbar-track { background: transparent; }

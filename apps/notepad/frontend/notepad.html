@@ -1,0 +1,390 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Notepad</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%230066cc'/%3E%3Crect x='26' y='30' width='48' height='7' rx='3.5' fill='white'/%3E%3Crect x='26' y='47' width='48' height='7' rx='3.5' fill='white'/%3E%3Crect x='26' y='64' width='30' height='7' rx='3.5' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f5f7; --surface: #fff; --text: #1d1d1f; --muted: #6e6e73;
+    --line: #d2d2d7; --accent: #0066cc; --warn: #c0392b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #000; --surface: #1c1c1e; --text: #f5f5f7; --muted: #98989d;
+            --line: #38383a; --accent: #2997ff; --warn: #ff6961; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 17px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: max(env(safe-area-inset-top), 1.5rem) 1.25rem 3rem;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); font-size: 0.95rem; margin: 0 0 1.25rem; }
+  .sub code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: rgba(127, 127, 127, 0.16); padding: 0.05em 0.35em; border-radius: 5px;
+  }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  button {
+    font: inherit; font-size: 0.95rem; padding: 0.6rem 0.95rem;
+    min-height: 44px; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--surface); color: var(--text); cursor: pointer;
+    transition: border-color .08s ease, transform .08s ease;
+  }
+  button:hover { border-color: var(--accent); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { filter: brightness(1.08); }
+  #editor {
+    width: 100%; min-height: 40vh; resize: vertical; padding: 0.9rem;
+    border: 1px solid var(--line); border-radius: 14px;
+    background: var(--surface); color: var(--text);
+    font-family: var(--mono); font-size: 0.95rem; line-height: 1.55;
+  }
+  #editor:focus { outline: none; border-color: var(--accent); }
+  .strip { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+  .strip .hint { color: var(--muted); font-size: 0.85rem; padding: 0.5rem 0; }
+  .thumb {
+    position: relative; width: 108px; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  }
+  .thumb img { display: block; width: 108px; height: 80px; object-fit: cover; }
+  .thumb .lbl {
+    display: block; font-family: var(--mono); font-size: 0.72rem; color: var(--muted);
+    padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .thumb .rm {
+    position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; min-height: 0;
+    padding: 0; line-height: 1; border: none; border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 14px;
+  }
+  .thumb.file {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 80px; gap: 4px; padding: 8px 4px;
+  }
+  .thumb.file .ico { font-size: 24px; line-height: 1; }
+  .thumb.file .lbl { width: 100%; text-align: center; }
+  body.drag .wrap { outline: 2px dashed var(--accent); outline-offset: 8px; border-radius: 14px; }
+  .warn { font-size: 0.8rem; color: var(--muted); margin-top: 1.25rem; }
+  .warn b { color: var(--warn); }
+  .warn code { font-family: var(--mono); font-size: 0.9em; }
+  #toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); max-width: 90vw;
+    background: var(--text); color: var(--bg); padding: 0.6rem 1rem; border-radius: 12px;
+    font-size: 0.88rem; opacity: 0; pointer-events: none; transition: opacity .2s ease; z-index: 10;
+  }
+  #toast.show { opacity: 0.96; }
+  #toast.err { background: var(--warn); color: #fff; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Notepad</h1>
+  <p class="sub">
+    Write here, then <b>paste</b> a clipboard image (or pick a photo) &mdash; it is saved to
+    <code>~/uploads/</code> and an <code>[imageN]</code> token is inserted. Attach any file
+    (PPTX, PDF, zip, &hellip;) to insert a <code>[fileN]</code> token. Hit <b>Copy</b> and paste into
+    your terminal so an agent can read the files by path.
+  </p>
+  <div class="toolbar">
+    <button id="pasteBtn" class="primary" style="display:none" type="button">Paste from clipboard</button>
+    <button id="pickBtn" type="button">Add photo</button>
+    <button id="filePickBtn" type="button">Attach file</button>
+    <button id="copyBtn" class="primary" type="button">Copy</button>
+    <button id="clearBtn" type="button">Clear</button>
+    <input id="imgInput" type="file" accept="image/*" multiple hidden>
+    <input id="fileInput" type="file" multiple hidden>
+  </div>
+  <textarea id="editor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off"
+    placeholder="Write here and paste images&#10;e.g. Take a look at this error [image1] — what is causing it?"></textarea>
+  <div class="strip" id="strip">
+    <span class="hint" id="emptyHint">No uploads yet &mdash; paste an image or attach a file and thumbnails appear here.</span>
+  </div>
+  <p class="warn">
+    <b>All uploads (images and files) in <code>~/uploads/</code> are automatically deleted after 24 hours &mdash; no exceptions.</b>
+    This is not permanent storage. Never upload secrets or sensitive data.
+  </p>
+</div>
+<div id="toast"></div>
+<script>
+(function () {
+  var editor = document.getElementById('editor');
+  var strip = document.getElementById('strip');
+  var emptyHint = document.getElementById('emptyHint');
+  var imgInput = document.getElementById('imgInput');
+  var fileInput = document.getElementById('fileInput');
+  var toastEl = document.getElementById('toast');
+
+  var imgMap = new Map();   // "N" -> "~/uploads/imageNNN-....jpg"  (for copy-time token expansion)
+  var fileMap = new Map();  // "N" -> "~/uploads/<name>"
+  var fileSeq = 0;          // client-side [fileN] counter (upload-file returns no n)
+
+  var STORE_KEY = 'airlock.notepad.text';
+  var MAX_SIDE = 2400, MAX_PX = 16777216, QUALITY = 0.9, THUMB_SIDE = 220; // iOS 16Mpx canvas guard + JPEG 90%
+  var MAX_ENCODED = 12 * 1024 * 1024;  // ~12MB guard on the base64 payload
+  var FILE_MAX = 50 * 1024 * 1024;     // matches backend FILE_MAX_BYTES
+
+  function toast(msg, isErr) {
+    toastEl.textContent = msg;
+    toastEl.className = 'show' + (isErr ? ' err' : '');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { toastEl.className = ''; }, 2600);
+  }
+
+  // ---- persistence (text only) ----
+  function save() { try { localStorage.setItem(STORE_KEY, editor.value); } catch (e) {} }
+  try { var saved = localStorage.getItem(STORE_KEY); if (saved) editor.value = saved; } catch (e) {}
+  editor.addEventListener('input', save);
+
+  // ---- helpers ----
+  function stripPrefix(dataUrl) {           // "data:...;base64,XXXX" -> "XXXX"
+    var i = dataUrl.indexOf(',');
+    return i >= 0 ? dataUrl.slice(i + 1) : dataUrl;
+  }
+
+  function insertToken(tok) {
+    var s = editor.selectionStart, e = editor.selectionEnd, v = editor.value;
+    var before = v.slice(0, s), after = v.slice(e);
+    var sep = (before && !/\s$/.test(before)) ? ' ' : '';
+    var ins = sep + tok + ' ';
+    editor.value = before + ins + after;
+    var pos = (before + ins).length;
+    editor.selectionStart = editor.selectionEnd = pos;
+    editor.focus();
+    save();
+  }
+
+  // ---- image: decode once, produce upload JPEG + small thumbnail ----
+  function downscaleToJpeg(blob) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      var url = URL.createObjectURL(blob);
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var w = img.naturalWidth, h = img.naturalHeight;
+        if (!w || !h) { reject(new Error('empty image')); return; }
+        function render(maxSide, q) {
+          var scale = Math.min(1, maxSide / Math.max(w, h));
+          if (w * h * scale * scale > MAX_PX) scale = Math.min(scale, Math.sqrt(MAX_PX / (w * h)));
+          var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+          var c = document.createElement('canvas'); c.width = cw; c.height = ch;
+          c.getContext('2d').drawImage(img, 0, 0, cw, ch);
+          return c.toDataURL('image/jpeg', q);
+        }
+        try {
+          resolve({ upload: render(MAX_SIDE, QUALITY), thumb: render(THUMB_SIDE, 0.6) });
+        } catch (e) { reject(new Error('canvas encoding failed')); }
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('image decode failed')); };
+      img.src = url;
+    });
+  }
+
+  function addImgThumb(n, path, thumbUrl) {
+    var d = document.createElement('div'); d.className = 'thumb'; d.dataset.n = n;
+    var im = document.createElement('img'); im.src = thumbUrl; im.alt = 'image ' + n;
+    var lb = document.createElement('span'); lb.className = 'lbl'; lb.textContent = '[image' + n + ']'; lb.title = path;
+    var rm = document.createElement('button'); rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×'; rm.title = 'Remove';
+    rm.addEventListener('click', function () { removeImg(n, d); });
+    d.appendChild(im); d.appendChild(lb); d.appendChild(rm);
+    strip.appendChild(d); emptyHint.style.display = 'none';
+  }
+
+  function removeImg(n, d) {
+    imgMap.delete(String(n)); d.remove();
+    editor.value = editor.value.replace(new RegExp('\\[image' + n + '\\]\\s?', 'g'), '');
+    save();
+    if (!strip.querySelector('.thumb')) emptyHint.style.display = '';
+  }
+
+  // ---- blob -> compress -> upload -> [imageN] token + thumbnail (no token on failure) ----
+  function processImage(blob) {
+    downscaleToJpeg(blob).then(function (out) {
+      var b64 = stripPrefix(out.upload);
+      if (b64.length > MAX_ENCODED) {
+        toast('Image is too large after encoding — try a smaller screenshot or crop it.', true);
+        return;
+      }
+      return fetch('/publish/api/upload-image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res || !res.ok || !res.j.ok) {
+            toast('Upload failed: ' + ((res && res.j && res.j.error) || 'HTTP'), true); return;
+          }
+          var j = res.j;
+          insertToken('[image' + j.n + ']');
+          addImgThumb(j.n, j.path, out.thumb);
+          imgMap.set(String(j.n), j.path);
+          toast('[image' + j.n + '] saved -> ' + j.path);
+        });
+    }).catch(function (e) { toast('Error: ' + e.message, true); });
+  }
+
+  // ---- arbitrary file (PPTX/PDF/zip/...) -> ~/uploads, [fileN] token ----
+  function readAsDataURL(blob) {
+    return new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(r.result); };
+      r.onerror = function () { reject(new Error('file read failed')); };
+      r.readAsDataURL(blob);
+    });
+  }
+
+  function addFileChip(n, name, path) {
+    var d = document.createElement('div'); d.className = 'thumb file'; d.dataset.fn = n;
+    var ico = document.createElement('span'); ico.className = 'ico'; ico.textContent = '📎'; // paperclip
+    var lb = document.createElement('span'); lb.className = 'lbl'; lb.textContent = '[file' + n + '] ' + name; lb.title = path;
+    var rm = document.createElement('button'); rm.className = 'rm'; rm.type = 'button'; rm.textContent = '×'; rm.title = 'Remove';
+    rm.addEventListener('click', function () { removeFile(n, d); });
+    d.appendChild(ico); d.appendChild(lb); d.appendChild(rm);
+    strip.appendChild(d); emptyHint.style.display = 'none';
+  }
+
+  function removeFile(n, d) {
+    fileMap.delete(String(n)); d.remove();
+    editor.value = editor.value.replace(new RegExp('\\[file' + n + '\\]\\s?', 'g'), '');
+    save();
+    if (!strip.querySelector('.thumb')) emptyHint.style.display = '';
+  }
+
+  function processFile(file) {
+    if (file.size > FILE_MAX) {
+      toast(file.name + ' is too large (> ' + (FILE_MAX / 1048576 | 0) + 'MB)', true); return;
+    }
+    toast('Uploading ' + file.name + '...');
+    readAsDataURL(file).then(function (dataUrl) {
+      return fetch('/publish/api/upload-file', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name, data: stripPrefix(dataUrl) })
+      }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.j.ok) { toast('Upload failed: ' + (res.j.error || 'HTTP'), true); return; }
+          var j = res.j, n = ++fileSeq;
+          insertToken('[file' + n + ']');
+          addFileChip(n, j.name, j.path);
+          fileMap.set(String(n), j.path);
+          toast('[file' + n + '] saved -> ' + j.path);
+        });
+    }).catch(function (e) { toast('Error: ' + e.message, true); });
+  }
+
+  // ---- pick photo (always works — iPad photo library / screenshots) ----
+  document.getElementById('pickBtn').addEventListener('click', function () { imgInput.click(); });
+  imgInput.addEventListener('change', function () {
+    for (var i = 0; i < imgInput.files.length; i++) {
+      if (imgInput.files[i].type.indexOf('image/') === 0) processImage(imgInput.files[i]);
+    }
+    imgInput.value = '';
+  });
+
+  // ---- attach file ----
+  document.getElementById('filePickBtn').addEventListener('click', function () { fileInput.click(); });
+  fileInput.addEventListener('change', function () {
+    for (var i = 0; i < fileInput.files.length; i++) processFile(fileInput.files[i]);
+    fileInput.value = '';
+  });
+
+  // ---- drag & drop (image -> compress path, else file upload) ----
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { e.preventDefault(); document.body.classList.add('drag'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (ev === 'dragleave' && e.relatedTarget) return;
+      document.body.classList.remove('drag');
+    });
+  });
+  document.addEventListener('drop', function (e) {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    for (var i = 0; i < e.dataTransfer.files.length; i++) {
+      var f = e.dataTransfer.files[i];
+      if (f.type && f.type.indexOf('image/') === 0) processImage(f); else processFile(f);
+    }
+  });
+
+  // ---- paste event (works on plain HTTP too — primary path) ----
+  editor.addEventListener('paste', function (ev) {
+    var dt = ev.clipboardData || window.clipboardData;
+    if (!dt || !dt.items) return;
+    var handled = false;
+    for (var i = 0; i < dt.items.length; i++) {
+      var it = dt.items[i];
+      if (it.type && it.type.indexOf('image') === 0) {
+        var blob = it.getAsFile();
+        if (blob) { processImage(blob); handled = true; }
+      }
+    }
+    if (handled) ev.preventDefault();   // swallow image paste; plain text pastes through
+  });
+
+  // ---- clipboard button (secure context = HTTPS only) ----
+  var pasteBtn = document.getElementById('pasteBtn');
+  if (window.isSecureContext && navigator.clipboard && navigator.clipboard.read) {
+    pasteBtn.style.display = '';
+    pasteBtn.addEventListener('click', function () {
+      navigator.clipboard.read().then(function (items) {
+        var found = false, chain = Promise.resolve();
+        items.forEach(function (it) {
+          var type = it.types.find(function (t) { return t.indexOf('image/') === 0; });
+          if (type) { found = true; chain = chain.then(function () { return it.getType(type).then(processImage); }); }
+        });
+        return chain.then(function () { if (!found) toast('No image in clipboard', true); });
+      }).catch(function (e) { toast('Clipboard read failed: ' + e.message, true); });
+    });
+  }
+
+  // ---- copy: expand every [imageN]/[fileN] token to its server path, then copy ----
+  // navigator.clipboard.writeText fails on plain HTTP (non-secure context) — fall back to
+  // a hidden textarea + execCommand('copy'). This fallback is required, not optional.
+  function fallbackCopy(text) {
+    var ta = document.createElement('textarea'); ta.value = text;
+    ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.left = '0'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.focus(); ta.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta); return ok;
+  }
+  function copyText(text) {
+    if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text)
+        .then(function () { return true; })
+        .catch(function () { return fallbackCopy(text); });
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = editor.value
+      .replace(/\[image(\d+)\]/g, function (m, n) { return imgMap.get(n) || m; })
+      .replace(/\[file(\d+)\]/g, function (m, n) { return fileMap.get(n) || m; })
+      .trim();
+    if (!text) { toast('Nothing to copy', true); return; }
+    copyText(text).then(function (ok) {
+      toast(ok ? 'Copied — paste into your terminal' : 'Copy failed — select the text and copy manually', !ok);
+    });
+  });
+
+  // ---- clear (uploaded files stay on the server) ----
+  document.getElementById('clearBtn').addEventListener('click', function () {
+    if (editor.value && !confirm('Clear the note and thumbnails? Uploaded files stay on the server.')) return;
+    editor.value = ''; imgMap.clear(); fileMap.clear(); fileSeq = 0;
+    strip.querySelectorAll('.thumb').forEach(function (el) { el.remove(); });
+    emptyHint.style.display = '';
+    save();
+    editor.focus();
+  });
+
+  // ---- trigger the 24h cleanup on load (ignore failures) ----
+  fetch('/publish/api/uploads-cleanup').then(function (r) { return r.json(); })
+    .then(function (j) { if (j && j.removed) toast('Cleaned up ' + j.removed + ' old upload(s)'); })
+    .catch(function () {});
+})();
+</script>
+</body>
+</html>

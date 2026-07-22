@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# devterm-shell — attach-or-create a tmux session named by ttyd's url-arg.
+# Opening ?arg=build gives session "build"; no arg gives "main". Closing the
+# browser and reopening the same URL resumes the same session (tmux keeps running).
+set -euo pipefail
+sess="${1:-main}"
+sess="${sess//[^A-Za-z0-9_-]/}"
+[ -n "$sess" ] || sess=main
+exec tmux new-session -A -s "$sess"

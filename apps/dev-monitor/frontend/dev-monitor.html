@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Monitor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20x='2.5'%20y='4'%20width='19'%20height='13'%20rx='2'%20fill='none'%20stroke='%230066cc'%20stroke-width='2'/%3E%3Cpath%20d='M8%2020.5h8'%20stroke='%230066cc'%20stroke-width='2'%20stroke-linecap='round'/%3E%3Cpath%20d='M6%2011l3-2.5%203%203%204-4'%20fill='none'%20stroke='%230066cc'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --bg: #f5f5f7; --surface: #fff; --text: #1d1d1f; --muted: #6e6e73;
+      --line: #d2d2d7; --accent: #0066cc; --accent-contrast: #fff;
+      --success: #1a8f3c; --warning: #b8860b; --danger: #c0392b;
+      --hover: #ececf0; --code-bg: #f0f0f3;
+      --font-sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --r: 14px; --r-sm: 8px; --r-pill: 999px;
+      --shadow: 0 1px 2px rgba(0,0,0,.05), 0 1px 3px rgba(0,0,0,.04);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #000; --surface: #1c1c1e; --text: #f5f5f7; --muted: #98989d;
+        --line: #38383a; --accent: #2997ff; --accent-contrast: #001528;
+        --success: #30d158; --warning: #ffd60a; --danger: #ff453a;
+        --hover: #2c2c2e; --code-bg: #0e0e10; --shadow: none;
+      }
+    }
+    :root[data-theme="light"] {
+      --bg: #f5f5f7; --surface: #fff; --text: #1d1d1f; --muted: #6e6e73;
+      --line: #d2d2d7; --accent: #0066cc; --accent-contrast: #fff;
+      --success: #1a8f3c; --warning: #b8860b; --danger: #c0392b;
+      --hover: #ececf0; --code-bg: #f0f0f3; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 1px 3px rgba(0,0,0,.04);
+    }
+    :root[data-theme="dark"] {
+      --bg: #000; --surface: #1c1c1e; --text: #f5f5f7; --muted: #98989d;
+      --line: #38383a; --accent: #2997ff; --accent-contrast: #001528;
+      --success: #30d158; --warning: #ffd60a; --danger: #ff453a;
+      --hover: #2c2c2e; --code-bg: #0e0e10; --shadow: none;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; min-height: 100vh; }
+    body {
+      background: var(--bg); color: var(--text); font-family: var(--font-sans);
+      font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+    }
+    .shell { max-width: 1100px; margin: 0 auto; padding: max(env(safe-area-inset-top), 20px) 18px 48px; }
+
+    .ic { width: 1em; height: 1em; display: inline-block; vertical-align: -0.14em; flex: none; }
+
+    /* topbar */
+    .topbar {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+      box-shadow: var(--shadow);
+    }
+    .topbar .title { font-size: 1.25rem; font-weight: 600; color: var(--text); flex: 1; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+    .topbar .title .ic { width: 1.1em; height: 1.1em; color: var(--accent); }
+    .topbar .meta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); }
+    .theme-group { display: flex; gap: 4px; }
+    .theme-group button {
+      background: transparent; border: 1px solid var(--line); color: var(--text);
+      padding: 4px 10px; border-radius: var(--r-pill); cursor: pointer; font-size: 13px; line-height: 1;
+    }
+    .theme-group button:hover { background: var(--hover); }
+    .theme-group button[aria-pressed="true"] { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+
+    /* sections */
+    .section { margin-bottom: 24px; }
+    .section h2 {
+      font-size: 1.05rem; margin: 0 0 12px; color: var(--text);
+      display: flex; align-items: center; gap: 8px; font-weight: 600;
+    }
+    .section h2 .ic { color: var(--accent); width: 1.05em; height: 1.05em; }
+    .section h2 .hint { font-size: 12px; color: var(--muted); font-weight: 400; font-family: var(--font-mono); }
+
+    /* cards */
+    .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    @media (max-width: 820px) { .cards { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 460px) { .cards { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--surface); border: 1px solid var(--line);
+      border-radius: var(--r); padding: 16px; box-shadow: var(--shadow);
+    }
+    .card .h { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+    .card .h .ic { color: var(--accent); }
+    .card .v { font-size: 1.5rem; font-weight: 600; color: var(--text); line-height: 1.1; }
+    .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; font-family: var(--font-mono); }
+    .card.warn { border-left: 3px solid var(--warning); }
+    .card.warn .v { color: var(--warning); }
+    .card.danger { border-left: 3px solid var(--danger); }
+    .card.danger .v { color: var(--danger); }
+    .card .bar { height: 6px; background: var(--hover); border-radius: var(--r-pill); overflow: hidden; margin-top: 10px; }
+    .card .bar > span { display: block; height: 100%; background: var(--accent); transition: width 250ms; }
+    .card.warn .bar > span { background: var(--warning); }
+    .card.danger .bar > span { background: var(--danger); }
+
+    /* process tables */
+    .proc-list { margin-top: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow-x: auto; box-shadow: var(--shadow); }
+    .proc-list table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 420px; }
+    .proc-list th { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-weight: 500; }
+    .proc-list th.num, .proc-list td.num { text-align: right; white-space: nowrap; }
+    .proc-list td { padding: 8px 14px; border-bottom: 1px solid var(--line); }
+    .proc-list tr:last-child td { border-bottom: 0; }
+    .proc-list code { font-family: var(--font-mono); font-size: 12px; }
+    .proc-list .u { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+    .proc-list .dim { color: var(--muted); font-size: 12px; }
+    .proc-list .xn { color: var(--accent); font-size: 12px; }
+
+    /* services */
+    .svc-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; box-shadow: var(--shadow); }
+    .svc-row {
+      display: grid; grid-template-columns: 16px 1fr auto auto; gap: 12px; align-items: center;
+      padding: 12px 16px; border-bottom: 1px solid var(--line); font-size: 13px;
+    }
+    .svc-row:last-child { border-bottom: 0; }
+    .svc-row .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+    .svc-row.inactive .dot { background: var(--muted); }
+    .svc-row.failed .dot { background: var(--danger); }
+    .svc-row .name { font-family: var(--font-mono); }
+    .svc-row .scope { font-size: 12px; color: var(--muted); }
+    .svc-row .uptime { color: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+
+    /* network */
+    .net-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 820px) { .net-grid { grid-template-columns: 1fr; } }
+    .net-block { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; box-shadow: var(--shadow); }
+    .net-block h3 { font-size: 12px; margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+    .net-block h3 + h3 { margin-top: 14px; }
+    .net-block .row { display: flex; gap: 12px; padding: 4px 0; font-size: 13px; }
+    .net-block .row .label { color: var(--muted); min-width: 96px; font-family: var(--font-mono); font-size: 12px; }
+    .net-block .row code { background: var(--code-bg); padding: 1px 6px; border-radius: var(--r-sm); font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+    .net-block .peer { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
+    .net-block .peer .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex: none; }
+    .net-block .peer.off .dot { background: var(--muted); }
+    .net-block .peer .ip { color: var(--muted); font-family: var(--font-mono); font-size: 12px; margin-left: auto; }
+
+    /* storage */
+    .stg-list { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; box-shadow: var(--shadow); }
+    .stg-row { display: grid; grid-template-columns: 1fr 140px 90px; gap: 12px; align-items: center; padding: 7px 0; font-size: 13px; }
+    @media (max-width: 560px) { .stg-row { grid-template-columns: 1fr 80px; } .stg-row .bar { display: none; } }
+    .stg-row .path { font-family: var(--font-mono); font-size: 12px; color: var(--text); }
+    .stg-row .size { font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: right; }
+    .stg-row .bar { height: 6px; background: var(--hover); border-radius: var(--r-pill); overflow: hidden; }
+    .stg-row .bar > span { display: block; height: 100%; background: var(--accent); }
+    .stg-row.warn .bar > span { background: var(--warning); }
+    .stg-row.warn .size { color: var(--warning); }
+
+    /* logs */
+    .log-head select { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 2px 6px; font-family: var(--font-mono); font-size: 12px; }
+    .log-block { background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; font-family: var(--font-mono); font-size: 12px; max-height: 260px; overflow: auto; }
+    .log-row { display: grid; grid-template-columns: 150px 56px 1fr; gap: 12px; padding: 2px 0; color: var(--text); }
+    @media (max-width: 560px) { .log-row { grid-template-columns: 1fr; gap: 0; } }
+    .log-row .ts { color: var(--muted); }
+    .log-row .lv { text-transform: uppercase; font-weight: 600; }
+    .log-row .lv.info { color: var(--accent); }
+    .log-row .lv.warn { color: var(--warning); }
+    .log-row .lv.err  { color: var(--danger); }
+
+    details.section > summary {
+      cursor: pointer; font-size: 1.05rem; font-weight: 600; color: var(--text);
+      padding: 6px 0; display: flex; align-items: center; gap: 8px; list-style: none;
+    }
+    details.section > summary::-webkit-details-marker { display: none; }
+    details.section > summary .ic { color: var(--accent); width: 1.05em; height: 1.05em; }
+    details.section > summary .hint { font-size: 12px; color: var(--muted); font-weight: 400; font-family: var(--font-mono); }
+    details.section[open] > summary { margin-bottom: 12px; }
+
+    .empty { color: var(--muted); padding: 12px; }
+    .err { color: var(--danger); }
+  </style>
+</head>
+<body>
+
+<!-- inline icon sprite (self-contained, same-document <use> refs) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="ic-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M8 20.5h8"/><path d="M6 11l3-2.5 3 3 4-4"/>
+  </symbol>
+  <symbol id="ic-host" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/>
+  </symbol>
+  <symbol id="ic-disk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.66 3.58 3 8 3s8-1.34 8-3V6"/><path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3"/>
+  </symbol>
+  <symbol id="ic-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="6" y="6" width="12" height="12" rx="1.5"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>
+  </symbol>
+  <symbol id="ic-memory" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="2" y="7" width="20" height="10" rx="1.5"/><path d="M6 7v-2M10 7v-2M14 7v-2M18 7v-2M7 12h2M11 12h2M15 12h2"/>
+  </symbol>
+  <symbol id="ic-services" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>
+  </symbol>
+  <symbol id="ic-network" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.5 3.5 6 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-6-3.5-9s1-6.5 3.5-9z"/>
+  </symbol>
+  <symbol id="ic-storage" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>
+  </symbol>
+  <symbol id="ic-logs" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/>
+  </symbol>
+</svg>
+
+<div class="shell">
+
+  <div class="topbar">
+    <span class="title"><svg class="ic"><use href="#ic-monitor"/></svg> Monitor</span>
+    <span class="meta" id="ms-meta">loading…</span>
+    <div class="theme-group" role="group" aria-label="Theme">
+      <button data-theme-btn="system" aria-pressed="true" title="System">Auto</button>
+      <button data-theme-btn="light"  aria-pressed="false" title="Light">Light</button>
+      <button data-theme-btn="dark"   aria-pressed="false" title="Dark">Dark</button>
+    </div>
+  </div>
+
+  <!-- Host + Disk (snapshot) -->
+  <div class="section">
+    <h2><svg class="ic"><use href="#ic-host"/></svg> Host <span class="hint">— hostname · OS · uptime · disk snapshot</span></h2>
+    <div class="cards" id="cards">
+      <div class="card"><div class="h"><svg class="ic"><use href="#ic-host"/></svg><span>Host</span></div><div class="v">…</div></div>
+      <div class="card"><div class="h"><svg class="ic"><use href="#ic-disk"/></svg><span>Disk /</span></div><div class="v">…</div></div>
+    </div>
+  </div>
+
+  <!-- CPU -->
+  <div class="section">
+    <h2><svg class="ic"><use href="#ic-cpu"/></svg> CPU <span class="hint">— now · 1h/1d average · top consumers</span></h2>
+    <div class="cards" id="cpu-cards">
+      <div class="card"><div class="h"><span>Now</span></div><div class="v">…</div></div>
+      <div class="card"><div class="h"><span>1h avg</span></div><div class="v">…</div></div>
+      <div class="card"><div class="h"><span>1d avg</span></div><div class="v">…</div></div>
+    </div>
+    <div class="proc-list" id="cpu-top"><div class="empty">loading…</div></div>
+  </div>
+
+  <!-- Memory -->
+  <div class="section">
+    <h2><svg class="ic"><use href="#ic-memory"/></svg> Memory <span class="hint">— now · 1h/1d average · top consumers</span></h2>
+    <div class="cards" id="mem-cards">
+      <div class="card"><div class="h"><span>Now</span></div><div class="v">…</div></div>
+      <div class="card"><div class="h"><span>1h avg</span></div><div class="v">…</div></div>
+      <div class="card"><div class="h"><span>1d avg</span></div><div class="v">…</div></div>
+    </div>
+    <div class="proc-list" id="mem-top"><div class="empty">loading…</div></div>
+  </div>
+
+  <!-- Services -->
+  <details class="section">
+    <summary><svg class="ic"><use href="#ic-services"/></svg> Services <span class="hint">— systemd user/system units · expand</span></summary>
+    <div class="svc-list" id="svc-list"><div class="empty">loading…</div></div>
+  </details>
+
+  <!-- Network -->
+  <details class="section">
+    <summary><svg class="ic"><use href="#ic-network"/></svg> Network <span class="hint">— tailscale peers + listen ports · expand</span></summary>
+    <div class="net-grid" id="net-grid">
+      <div class="net-block"><h3>Tailscale (self)</h3><div class="empty">loading…</div></div>
+      <div class="net-block"><h3>Listen ports</h3><div class="empty">loading…</div></div>
+    </div>
+  </details>
+
+  <!-- Storage -->
+  <div class="section">
+    <h2><svg class="ic"><use href="#ic-storage"/></svg> Storage <span class="hint">— mount + directory sizes (measured on first fetch, may take seconds)</span></h2>
+    <div class="stg-list" id="stg-list"><div class="empty">loading…</div></div>
+  </div>
+
+  <!-- Recent logs -->
+  <div class="section log-head">
+    <h2><svg class="ic"><use href="#ic-logs"/></svg> Recent logs <span class="hint">— <select id="log-unit"><option value="airlock-dev-monitor">airlock-dev-monitor</option></select></span></h2>
+    <div class="log-block" id="log-block"><div class="empty">loading…</div></div>
+  </div>
+
+</div>
+
+<script>
+  // ---- theme ----
+  var THEME_KEY = 'airlock-monitor-theme';
+  var theme = localStorage.getItem(THEME_KEY) || 'system';
+  function setTheme(t) {
+    theme = t;
+    document.documentElement.setAttribute('data-theme', t);
+    try { localStorage.setItem(THEME_KEY, t); } catch (_) {}
+    document.querySelectorAll('.theme-group [data-theme-btn]').forEach(function (b) {
+      b.setAttribute('aria-pressed', b.dataset.themeBtn === t ? 'true' : 'false');
+    });
+  }
+  document.querySelectorAll('.theme-group [data-theme-btn]').forEach(function (b) {
+    b.addEventListener('click', function () { setTheme(b.dataset.themeBtn); });
+  });
+  setTheme(theme);
+
+  // ---- api ----
+  var API = '/monitor/api';
+  function escHTML(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  function humanSize(bytes) {
+    if (!bytes) return '0 B';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024*1024) return (bytes/1024).toFixed(0) + ' KB';
+    if (bytes < 1024*1024*1024) return (bytes/(1024*1024)).toFixed(1) + ' MB';
+    return (bytes/(1024*1024*1024)).toFixed(1) + ' GB';
+  }
+  function pctClass(p) { return p >= 90 ? 'danger' : p >= 75 ? 'warn' : ''; }
+  function j(url) { return fetch(url, { cache: 'no-store' }).then(function (r) { return r.json(); }); }
+
+  function loadOverview() {
+    return Promise.all([j(API + '/overview'), j(API + '/history')]).then(function (vals) {
+      var d = vals[0], hist = vals[1];
+      var h = d.host, c = d.cpu, m = d.memory, ds = d.disk;
+      document.getElementById('cards').innerHTML =
+        '<div class="card"><div class="h"><svg class="ic"><use href="#ic-host"/></svg><span>Host</span></div>' +
+          '<div class="v" style="font-size:1.2rem">' + escHTML(h.hostname) + '</div>' +
+          '<div class="sub">' + escHTML(h.os) + ' · kernel ' + escHTML(h.kernel.slice(0,12)) + ' · up ' + escHTML(h.uptime_human) + '</div></div>' +
+        '<div class="card ' + pctClass(ds.percent) + '"><div class="h"><svg class="ic"><use href="#ic-disk"/></svg><span>Disk /</span></div>' +
+          '<div class="v">' + humanSize(ds.used_bytes) + ' <span style="color:var(--muted);font-size:0.6em">(' + ds.percent + '%)</span></div>' +
+          '<div class="sub">capacity ' + humanSize(ds.total_bytes) + (ds.total_bytes - ds.used_bytes > 0 ? ' · ' + humanSize(ds.total_bytes - ds.used_bytes) + ' free' : '') + '</div>' +
+          '<div class="bar"><span style="width:' + ds.percent + '%"></span></div></div>';
+
+      var h1 = hist['1h'] || {}, hd = hist['1d'] || {};
+      var cpuCoresNow = (c.percent * c.cores / 100).toFixed(2);
+      var memTotalGB = (m.total_bytes / 1073741824).toFixed(0);
+      document.getElementById('cpu-cards').innerHTML =
+        '<div class="card ' + pctClass(c.percent) + '"><div class="h"><span>Now</span></div>' +
+          '<div class="v" style="font-weight:500">' + cpuCoresNow + ' <span style="font-size:0.6em;color:var(--muted)">core</span></div>' +
+          '<div class="sub"><strong>' + c.percent + '%</strong> of ' + c.cores + ' cores · load ' + c.loadavg.join(' / ') + '</div>' +
+          '<div class="bar"><span style="width:' + Math.min(100, c.percent) + '%"></span></div></div>' +
+        cpuAvgCard('1h avg', h1, c.cores) + cpuAvgCard('1d avg', hd, c.cores);
+
+      var memUsedGB = (m.used_bytes / 1073741824).toFixed(1);
+      document.getElementById('mem-cards').innerHTML =
+        '<div class="card ' + pctClass(m.percent) + '"><div class="h"><span>Now</span></div>' +
+          '<div class="v" style="font-weight:500">' + memUsedGB + ' <span style="font-size:0.6em;color:var(--muted)">GB</span></div>' +
+          '<div class="sub"><strong>' + m.percent + '%</strong> of ' + memTotalGB + ' GB · cache ' + humanSize(m.cache_bytes) + ' · swap ' + humanSize(m.swap_used_bytes) + '/' + humanSize(m.swap_total_bytes) + '</div>' +
+          '<div class="bar"><span style="width:' + m.percent + '%"></span></div></div>' +
+        memAvgCard('1h avg', h1, m.total_bytes, memTotalGB) + memAvgCard('1d avg', hd, m.total_bytes, memTotalGB);
+
+      document.getElementById('ms-meta').textContent = h.hostname + ' · refreshed ' + new Date().toLocaleTimeString();
+    }).catch(function (e) {
+      document.getElementById('cards').innerHTML = '<div class="card danger"><div class="v" style="font-size:14px">backend unreachable</div><div class="sub">' + escHTML(e.message) + '</div></div>';
+    });
+  }
+  function cpuAvgCard(label, hs, cores) {
+    var avg = hs.cpu_avg != null ? (hs.cpu_avg * cores / 100).toFixed(2) + ' <span style="font-size:0.6em;color:var(--muted)">core</span>' : '—';
+    return '<div class="card"><div class="h"><span>' + label + '</span></div>' +
+      '<div class="v" style="font-weight:500">' + avg + '</div>' +
+      '<div class="sub">' + (hs.cpu_avg != null ? hs.cpu_avg + '%' : '—') + ' of ' + cores + ' cores · <span style="color:var(--warning)">peak ' + (hs.cpu_max != null ? hs.cpu_max + '%' : '—') + '</span> · ' + (hs.samples || 0) + ' samples</div></div>';
+  }
+  function memAvgCard(label, hs, totalBytes, totalGB) {
+    var avg = hs.mem_avg != null ? (hs.mem_avg * totalBytes / 100 / 1073741824).toFixed(1) + ' <span style="font-size:0.6em;color:var(--muted)">GB</span>' : '—';
+    return '<div class="card"><div class="h"><span>' + label + '</span></div>' +
+      '<div class="v" style="font-weight:500">' + avg + '</div>' +
+      '<div class="sub">' + (hs.mem_avg != null ? hs.mem_avg + '%' : '—') + ' of ' + totalGB + ' GB · <span style="color:var(--warning)">peak ' + (hs.mem_max != null ? hs.mem_max + '%' : '—') + '</span> · ' + (hs.samples || 0) + ' samples</div></div>';
+  }
+
+  function renderProcs(elId, procs) {
+    if (!procs || procs.length === 0) {
+      document.getElementById(elId).innerHTML = '<div class="empty">waiting for 5s sample…</div>';
+      return;
+    }
+    var html = '<table><thead><tr><th>command</th><th>user</th><th class="num">CPU</th><th class="num">MEM</th></tr></thead><tbody>';
+    procs.forEach(function (p) {
+      var commLabel = '<code>' + escHTML(p.comm) + '</code>';
+      if (p.count > 1) commLabel += ' <span class="xn">×' + p.count + '</span>';
+      var memDisplay = p.mem_bytes >= 1024*1024*1024
+        ? (p.mem_bytes/1024/1024/1024).toFixed(1) + ' GB'
+        : (p.mem_bytes/1024/1024).toFixed(0) + ' MB';
+      html += '<tr>' +
+        '<td>' + commLabel + '</td>' +
+        '<td class="u">' + escHTML(p.user) + '</td>' +
+        '<td class="num"><strong>' + p.cpu_cores.toFixed(2) + '</strong><span class="dim"> core (' + p.cpu_pct.toFixed(1) + '%)</span></td>' +
+        '<td class="num"><strong>' + memDisplay + '</strong><span class="dim"> (' + p.mem_pct.toFixed(1) + '%)</span></td>' +
+        '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById(elId).innerHTML = html;
+  }
+
+  function loadTop() {
+    return Promise.all([
+      j(API + '/top?sort=cpu&n=5'),
+      j(API + '/top?sort=mem&n=5'),
+    ]).then(function (vals) {
+      renderProcs('cpu-top', vals[0].processes || []);
+      renderProcs('mem-top', vals[1].processes || []);
+    }).catch(function (e) {
+      document.getElementById('cpu-top').innerHTML = '<div class="empty err">' + escHTML(e.message) + '</div>';
+    });
+  }
+
+  var logUnitInit = false;
+  function populateLogUnits(services) {
+    if (logUnitInit) return;
+    var userSvcs = services.filter(function (s) { return s.scope === 'user'; });
+    if (!userSvcs.length) return;
+    var sel = document.getElementById('log-unit');
+    sel.innerHTML = '';
+    userSvcs.forEach(function (s) {
+      var o = document.createElement('option'); o.value = s.name; o.textContent = s.name; sel.appendChild(o);
+    });
+    var def = userSvcs.filter(function (s) { return s.name.indexOf('dev-monitor') >= 0; })[0];
+    sel.value = def ? def.name : userSvcs[0].name;
+    logUnitInit = true;
+    loadLogs(sel.value);
+  }
+
+  function loadServices() {
+    return j(API + '/services').then(function (d) {
+      var svcs = d.services || [];
+      var html = '';
+      svcs.forEach(function (s) {
+        var stateClass = s.state === 'active' ? '' : (s.state === 'failed' ? 'failed' : 'inactive');
+        html += '<div class="svc-row ' + stateClass + '">' +
+          '<div class="dot" title="' + escHTML(s.state) + '"></div>' +
+          '<div><div class="name">' + escHTML(s.name) + '</div><div class="scope">' + escHTML(s.scope) + ' · ' + escHTML(s.state) + '</div></div>' +
+          '<div class="uptime">' + escHTML(s.uptime || '') + '</div>' +
+          '<div></div>' +
+          '</div>';
+      });
+      document.getElementById('svc-list').innerHTML = html || '<div class="empty">no services found</div>';
+      populateLogUnits(svcs);
+    }).catch(function (e) {
+      document.getElementById('svc-list').innerHTML = '<div class="empty err">' + escHTML(e.message) + '</div>';
+    });
+  }
+
+  function loadNetwork() {
+    return j(API + '/network').then(function (d) {
+      var ts = d.tailscale, ports = d.listen_ports;
+      var tsHtml = '<h3>Tailscale (self)</h3>' +
+        '<div class="row"><span class="label">ip</span><code>' + escHTML(ts.ip || '?') + '</code></div>' +
+        '<div class="row"><span class="label">magicDNS</span><code>' + escHTML(ts.dns || '?') + '</code></div>' +
+        '<h3>Peers (' + ts.peer_count + ')</h3>';
+      ts.peers.forEach(function (p) {
+        tsHtml += '<div class="peer ' + (p.online ? '' : 'off') + '"><span class="dot"></span><span>' + escHTML(p.name) + '</span><span class="ip">' + escHTML(p.ip) + '</span></div>';
+      });
+      var portHtml = '<h3>Listen ports</h3>';
+      ports.forEach(function (pt) {
+        portHtml += '<div class="row"><span class="label">' + pt.port + '/tcp</span><code>' + escHTML(pt.ip) + ':' + pt.port + '</code></div>';
+      });
+      document.getElementById('net-grid').innerHTML =
+        '<div class="net-block">' + tsHtml + '</div>' +
+        '<div class="net-block">' + portHtml + '</div>';
+    }).catch(function (e) {
+      document.getElementById('net-grid').innerHTML = '<div class="net-block"><div class="empty err">' + escHTML(e.message) + '</div></div>';
+    });
+  }
+
+  function loadStorage() {
+    return j(API + '/storage').then(function (d) {
+      var html = '';
+      d.items.forEach(function (it) {
+        var pct = it.total_bytes ? Math.min(100, (it.used_bytes / it.total_bytes) * 100).toFixed(0) : null;
+        var bar = pct != null ? '<div class="bar"><span style="width:' + pct + '%"></span></div>' : '<div class="bar"></div>';
+        var size = it.human || (it.used_bytes != null ? humanSize(it.used_bytes) + ' / ' + humanSize(it.total_bytes) : '?');
+        html += '<div class="stg-row"><div class="path">' + escHTML(it.path) + '</div>' + bar + '<div class="size">' + escHTML(size) + '</div></div>';
+      });
+      document.getElementById('stg-list').innerHTML = html || '<div class="empty">no data</div>';
+    }).catch(function (e) {
+      document.getElementById('stg-list').innerHTML = '<div class="empty err">' + escHTML(e.message) + '</div>';
+    });
+  }
+
+  function loadLogs(unit) {
+    return j(API + '/logs?unit=' + encodeURIComponent(unit) + '&n=15').then(function (d) {
+      var html = '';
+      d.lines.forEach(function (line) {
+        var lv = /err|fail|trace/i.test(line) ? 'err' : (/warn/i.test(line) ? 'warn' : 'info');
+        var m = line.match(/^([0-9T:+\-]+) /);
+        var ts = m ? m[1] : '';
+        var rest = m ? line.slice(m[0].length) : line;
+        html += '<div class="log-row"><span class="ts">' + escHTML(ts) + '</span><span class="lv ' + lv + '">' + lv + '</span><span>' + escHTML(rest) + '</span></div>';
+      });
+      document.getElementById('log-block').innerHTML = html || '<div class="empty">(no recent logs)</div>';
+    }).catch(function (e) {
+      document.getElementById('log-block').innerHTML = '<div class="empty err">' + escHTML(e.message) + '</div>';
+    });
+  }
+
+  document.getElementById('log-unit').addEventListener('change', function (ev) { loadLogs(ev.target.value); });
+
+  // ---- initial load + auto-refresh ----
+  loadOverview();
+  loadTop();
+  loadServices();
+  loadNetwork();
+  loadStorage();
+  // storage/network are heavier (du, tailscale) — refresh the live panels only.
+  setInterval(function () { loadOverview(); loadTop(); loadServices(); }, 5000);
+  setInterval(loadNetwork, 30000);
+</script>
+</body>
+</html>
