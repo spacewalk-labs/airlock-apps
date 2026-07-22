@@ -121,7 +121,7 @@
     // toggle button
     var toggle = document.createElement('button');
     toggle.className = 'toc-toggle';
-    toggle.title = '목차 접기/펴기';
+    toggle.title = 'Toggle table of contents';
     toggle.setAttribute('aria-label', 'Toggle table of contents');
     toggle.textContent = collapsed ? '☰' : '×';
     toggle.addEventListener('click', function () {
