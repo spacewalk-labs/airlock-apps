@@ -185,7 +185,7 @@ location /markwand/ {
     proxy_set_header Host $host;
     proxy_set_header Accept-Encoding "";
     sub_filter '</head>' '<link rel="stylesheet" href="/__mw/markwand-tokens.css"></head>';
-    sub_filter '</body>' '<script src="/__mw/markwand-enhance.js"></script><script src="/__mw/edit-button.js"></script></body>';
+    sub_filter '</body>' '<script src="/__mw/markwand-enhance.js"></script><script src="/__mw/edit-button.js"></script><script src="/airlock-return.js" data-mode="corner" defer></script></body>';
     sub_filter 'href="/'  'href="/markwand/';
     sub_filter_once off;
     # sub_filter_types defaults to text/html — leaving it implicit avoids a

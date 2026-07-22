@@ -86,6 +86,11 @@ UNIT_PATH="${UNIT_PATH}/usr/local/bin:/usr/bin:/bin"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="$UNIT_DIR/airlock-paseo.service"
 
+# Tracks whether anything requiring a restart changed this run. Kept 0 on an
+# idempotent re-run so re-running the installer does NOT restart paseo and drop the
+# owner's live agent sessions.
+need_restart=0
+
 # --- 1. provision paseo (version-pinned; idempotent) ---
 if [ "$("$PASEO_BIN" --version 2>/dev/null || true)" = "$PASEO_VER" ]; then
   log "paseo ${PASEO_PKG}@${PASEO_VER} present (prefix=$PASEO_PREFIX)"
@@ -100,6 +105,7 @@ else
   [ -x "$PASEO_BIN" ] || die "paseo binary missing after install: $PASEO_BIN"
   [ "$("$PASEO_BIN" --version 2>/dev/null || true)" = "$PASEO_VER" ] \
     || die "paseo version mismatch (want ${PASEO_VER}, got $("$PASEO_BIN" --version 2>/dev/null))"
+  need_restart=1   # freshly (re)installed the daemon -> restart to run it
 fi
 
 # --- 2. depth4 search patch (idempotent) ---
@@ -125,6 +131,7 @@ elif grep -qF "$PATCH_ANCHOR" "$SESSION_JS"; then
   grep -qF 'maxDepth: searchesWorkspace ? undefined : 4' "$SESSION_JS" \
     || die "depth4 patch verify failed (not inserted after anchor)"
   node --check "$SESSION_JS" || die "depth4 patch produced invalid JS"
+  need_restart=1   # bundle changed -> restart so the daemon loads the patched code
   log "depth4 search patch applied (add-project name search maxDepth 4)"
 else
   log "warning: depth4 anchor not found (paseo version drift?) — search may be slow; see patches/depth4-search.patch"
@@ -144,7 +151,7 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] write $UNIT (paseo daemon 127.0.0.1:${BACKEND_PORT}, PASEO_TRUSTED_PROXIES=127.0.0.1)"
 else
   install -d "$UNIT_DIR"
-  cat >"$UNIT" <<UNITEOF
+  if write_if_changed "$UNIT" <<UNITEOF
 [Unit]
 Description=airlock-paseo — Paseo daemon (coding-agent orchestration + web UI) behind the owner gate
 Documentation=https://github.com/getpaseo/paseo
@@ -181,10 +188,19 @@ NoNewPrivileges=yes
 [Install]
 WantedBy=default.target
 UNITEOF
+  then need_restart=1; fi
 fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-paseo.service
-airlock_run systemctl --user restart airlock-paseo.service
+# Restart only when something changed (or the service is down / dry-run). An
+# idempotent re-run with no changes must NOT restart — that would drop the owner's
+# live paseo agent sessions.
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] || [ "$need_restart" = 1 ] \
+   || ! systemctl --user is-active --quiet airlock-paseo.service; then
+  airlock_run systemctl --user restart airlock-paseo.service
+else
+  log "paseo unchanged and active — not restarting (preserves live sessions)"
+fi
 
 # Give the backend a bounded window to bind before the orchestrator renders nginx
 # and smokes, so smoke doesn't race a still-booting daemon. Non-fatal: the
@@ -215,10 +231,15 @@ install -d "$CONFD/servers.d"
   echo "# WITH the https port. See install.sh header + apps/paseo/README.md."
   sed -e "s/@@LISTEN@@/${GATE_PORT}/g" \
       -e "s|@@UPSTREAM@@|127.0.0.1:${BACKEND_PORT}|g" \
-      -e "s|@@HOSTPORT@@|${FQDN}:${HTTPS_PORT}|g" <<'NGINX'
+      -e "s|@@HOSTPORT@@|${FQDN}:${HTTPS_PORT}|g" \
+      -e "s|@@WIDGET@@|${AIRLOCK_WEBROOT:-/opt/airlock/hub}/assets/airlock-return.js|g" <<'NGINX'
 server {
     listen 127.0.0.1:@@LISTEN@@;
     server_name _;
+
+    # paseo serves an upstream web UI we cannot edit, so the gate serves + injects
+    # the shared "return to Airlock" widget (floating, bottom-right).
+    location = /airlock-return.js { alias @@WIDGET@@; default_type application/javascript; add_header Cache-Control "no-cache" always; access_log off; }
 
     location / {
         if ($owner_ok = 0) { return 403; }
@@ -232,6 +253,11 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_read_timeout 86400s;
+        # return-to-Airlock widget: uncompressed HTML so sub_filter applies (WS/JS
+        # bundles are untouched — sub_filter only rewrites text/html).
+        proxy_set_header Accept-Encoding "";
+        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right" defer></script></body>';
+        sub_filter_once on;
     }
 }
 NGINX
