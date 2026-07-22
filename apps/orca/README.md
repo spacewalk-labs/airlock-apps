@@ -22,13 +22,32 @@ browser ──https/WireGuard──▶ tailscale serve :8446
 Ports come from `airlock.toml` (`[apps.orca]`: `https_port` / `gate_port` /
 `backend_port`); the values above are the defaults.
 
-## v1 uses the upstream web client
+## Serves the patched web client
 
-This installs the vendor `orca serve` and serves the **web client that ships inside
-it**. A patched web-bundle — local browser render instead of JPEG streaming, a fix
-for terminals dying on reload, element-comment (Grab) — exists but lives in its own
-repo that must be opened separately. Wiring it in is a **documented follow-up**, not
-part of v1. Nothing here deploys a web overlay or redirect.
+This installs the vendor `orca serve` (the runtime) but serves a **patched web client**
+vendored at `apps/orca/web-bundle/dist/` — not the raw client `orca serve` ships. The
+patch fixes an upstream bug where terminals die permanently after a page reload
+(*"Local PTYs are unavailable in the web client"*) and adds an automatic reconnect
+overlay when the runtime restarts. `install.sh` copies the dist to a world-readable
+path, serves it at `/orca-web/`, and 302-redirects the vendor client URL (`/web-index.html`)
+to it, so bookmarks and the launcher both land on the patched client. Provenance,
+patch summary, and how to refresh the bundle: `web-bundle/README.md`.
+
+**Zero-paste entry.** The launcher opens the gate root (`https://<box>:<https_port>/`).
+For the owner, a document navigation there is 302-redirected to the patched client
+carrying the runtime pairing (captured from `serve.log`), so opening Orca lands directly
+in the workbench with no pairing paste. A WebSocket upgrade to `/` (the runtime RPC) is
+proxied to the backend instead of redirected. If the pairing is not yet in `serve.log`
+at install time (first cold start), `/orca-web/` still loads but asks to pair once;
+re-running the installer wires zero-paste (the pairing URL is stable across restarts).
+
+**Not deployed here (client code is inert without them):** the bundle also carries
+local browser render (needs a slot-manager sidecar) and element-comment "grab" (needs a
+page-injected bridge). Airlock does not install those services in v1, so the client
+falls back to upstream behavior for them. Documented follow-up.
+
+If the bundle is ever absent, `install.sh` falls back to serving the raw upstream client
+(no `/orca-web/`, no zero-paste) and says so.
 
 ## Why the nft loopback rule
 
@@ -66,8 +85,9 @@ re-add the project; the runtime's worktrees are still there.
 
 | File | Role |
 |---|---|
-| `install.sh` | provision + verify AppImage · Xvfb & `orca serve` systemd (`--user`) units · nft loopback rule · nginx owner-gate fragment · `tailscale serve` |
-| `smoke.sh` | gate health: backend reachable, owner 200/302, deny 403, no-header 403 |
+| `install.sh` | provision + verify AppImage · Xvfb & `orca serve` systemd (`--user`) units · nft loopback rule · install vendored web client to serve path · nginx owner-gate fragment (patched client at `/orca-web/` + vendor redirect + zero-paste map) · `tailscale serve` |
+| `smoke.sh` | gate health: backend reachable, owner 200/302, deny 403, no-header 403; patched client served + gated + widget-injected, vendor path redirected |
+| `web-bundle/dist/` | the vendored **patched web client** (built dist) served at `/orca-web/` — see `web-bundle/README.md` |
 
 The loopback firewall reuses the shared template `gate/loopback-only.nft.tpl` (via
 `render_loopback_nft`); there is no per-app `.nft` file.

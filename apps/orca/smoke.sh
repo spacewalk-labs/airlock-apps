@@ -25,4 +25,22 @@ fail=0
 { [ "$c_own" = 200 ] || [ "$c_own" = 302 ]; } || { echo "FAIL owner"; fail=1; }
 [ "$c_deny" = 403 ] || { echo "FAIL deny (gate hole)"; fail=1; }
 [ "$c_no"   = 403 ] || { echo "FAIL no-header (gate hole)"; fail=1; }
+
+# Patched web client (vendored dist served at /orca-web/). If absent (upstream-only
+# mode), owner gets 404 -> warn, don't fail. If present, it must be gated + widget-injected.
+p_own=$(code  -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${GATE}/orca-web/web-index.html")
+if [ "$p_own" = 404 ]; then
+  echo "[orca smoke] /orca-web/=404 — upstream client only (web-bundle not vendored)"
+else
+  p_deny=$(code -H "${HDR}: nobody@example.com" "http://127.0.0.1:${GATE}/orca-web/web-index.html")
+  p_no=$(code                                    "http://127.0.0.1:${GATE}/orca-web/web-index.html")
+  v_own=$(code  -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${GATE}/web-index.html")   # vendor -> 302 patched
+  body=$(curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${GATE}/orca-web/web-index.html")
+  echo "[orca smoke] patched: owner=${p_own}/200 deny=${p_deny}/403 no-header=${p_no}/403 vendor-redirect=${v_own}/301|302"
+  [ "$p_own" = 200 ]  || { echo "FAIL patched client not served (200) at /orca-web/web-index.html"; fail=1; }
+  [ "$p_deny" = 403 ] || { echo "FAIL /orca-web/ deny (gate hole in added location)"; fail=1; }
+  [ "$p_no"   = 403 ] || { echo "FAIL /orca-web/ no-header (gate hole in added location)"; fail=1; }
+  { [ "$v_own" = 301 ] || [ "$v_own" = 302 ]; } || { echo "FAIL vendor /web-index.html not redirected to patched client"; fail=1; }
+  grep -q 'airlock-return.js' <<<"$body" || { echo "FAIL return-widget not injected into patched client"; fail=1; }
+fi
 [ "$fail" = 0 ]
