@@ -2,9 +2,14 @@
 # code-server — browser IDE (coder/code-server, MIT) behind the Airlock owner gate.
 #
 #   browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
-#           --(owner only / else 403)--> code-server 127.0.0.1:backend_port
+#           --(owner only / else 403)--> tab-bar shell + slot manager
+#                                        --> code-server 127.0.0.1:<backend + N - 1>
 #
-# v1 runs a single instance. Config from airlock.toml ([apps.code-server]).
+# Multi-instance: a small asyncio slot manager (systemd --user) spawns/stops up to
+# `slots` code-server instances, each a templated unit (airlock-code-server@N) on
+# its own loopback port. A static tab-bar shell (spawn/kill/rename/color/reorder +
+# iframe readiness-retry) drives it over the gate's /api/ route. All counts/ports
+# come from airlock.toml ([apps.code-server]). Greenfield: no legacy migration.
 # Honors AIRLOCK_DRY_RUN=1.
 set -euo pipefail
 
@@ -17,15 +22,32 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 
 airlock_load code-server
 GATE_PORT="${AIRLOCK_CODE_SERVER_GATE_PORT:?}"
-BACKEND_PORT="${AIRLOCK_CODE_SERVER_BACKEND_PORT:?}"
+BACKEND_PORT="${AIRLOCK_CODE_SERVER_BACKEND_PORT:?}"   # slot 1's port; slot N = +N-1
 HTTPS_PORT="${AIRLOCK_CODE_SERVER_HTTPS_PORT:?}"
+MANAGER_PORT="${AIRLOCK_CODE_SERVER_MANAGER_PORT:?}"
+SLOTS="${AIRLOCK_CODE_SERVER_SLOTS:?}"
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
+WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
+
+case "$SLOTS" in ''|*[!0-9]*) die "code-server: slots must be a positive integer (got '$SLOTS')";; esac
+[ "$SLOTS" -ge 1 ] || die "code-server: slots must be >= 1 (got $SLOTS)"
+BACKEND_BASE=$(( BACKEND_PORT - 1 ))    # slot N binds BACKEND_BASE + N
+
+# ExecCondition allow-list "1|2|...|slots" — a rogue instance (@99) is a clean skip.
+SLOT_CASE=""
+for (( i = 1; i <= SLOTS; i++ )); do SLOT_CASE="${SLOT_CASE:+$SLOT_CASE|}$i"; done
 
 VER=4.128.0
 SHA256=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188
 ASSET="code-server-${VER}-linux-amd64"
 BIN="$HOME/.local/bin/code-server"
 LIB="$HOME/.local/lib/${ASSET}"
+SHARE="$HOME/.local/share/airlock-code-server"
+UNIT_DIR="$HOME/.config/systemd/user"
+SLOT_LAUNCHER="$HOME/.local/bin/airlock-code-server-slot"
+MANAGER_BIN="$HOME/.local/bin/airlock-code-server-manager"
+MANAGER_SRC="$HERE/manager/manager.py"
+SHELL_DIR="$CONFD/code-server"
 
 # --- 1. provision code-server (sha256-pinned; no piped installer) ---
 provision_code_server() {
@@ -46,50 +68,118 @@ provision_code_server() {
 }
 provision_code_server
 
-# --- 2. config + systemd unit (single instance, loopback, auth none) ---
-# auth none is safe ONLY because the sole external path is the identity gate and
-# the backend binds loopback (see SECURITY.md).
+[ -f "$MANAGER_SRC" ] || die "code-server: manager not found: $MANAGER_SRC"
+
+# --- 2. config + slot launcher + manager binary ---
+# `changed` gates service restarts so re-running the installer (e.g. after editing
+# an unrelated app) does not needlessly restart a live IDE session.
+changed=0
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
-  log "[dry] write ~/.config/code-server/config.yaml + airlock-code-server.service (127.0.0.1:$BACKEND_PORT)"
+  log "[dry] write config.yaml + install slot launcher + manager (slots=$SLOTS base=$BACKEND_BASE mgr=$MANAGER_PORT)"
 else
-  install -d "$HOME/.config/code-server" "$HOME/.config/systemd/user" "$HOME/.local/share/airlock-code-server"
-  cat >"$HOME/.config/code-server/config.yaml" <<YAML
+  install -d "$HOME/.config/code-server" "$UNIT_DIR" "$HOME/.local/bin" "$SHARE/extensions"
+  # auth none is safe ONLY because the sole external path is the identity gate and
+  # each slot binds loopback (see SECURITY.md).
+  if write_if_changed "$HOME/.config/code-server/config.yaml" <<'YAML'
 auth: none
 cert: false
 disable-telemetry: true
 disable-update-check: true
 YAML
-  cat >"$HOME/.config/systemd/user/airlock-code-server.service" <<UNIT
+  then changed=1; fi
+
+  cmp -s "$HERE/bin/airlock-code-server-slot" "$SLOT_LAUNCHER" 2>/dev/null || changed=1
+  install -m755 "$HERE/bin/airlock-code-server-slot" "$SLOT_LAUNCHER"
+  cmp -s "$MANAGER_SRC" "$MANAGER_BIN" 2>/dev/null || changed=1
+  install -m755 "$MANAGER_SRC" "$MANAGER_BIN"
+fi
+
+# --- 3. systemd units (templated slot unit + manager), idempotent ---
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] write airlock-code-server@.service (ExecCondition case $SLOT_CASE) + airlock-code-server-manager.service"
+else
+  # Slot template: the port math lives in the launcher (see bin/airlock-code-server-slot)
+  # to avoid systemd/shell arithmetic on %i.
+  if write_if_changed "$UNIT_DIR/airlock-code-server@.service" <<UNIT
 [Unit]
-Description=airlock code-server — browser IDE (127.0.0.1:${BACKEND_PORT})
+Description=airlock code-server slot %i — browser IDE engine
 After=network.target
 
 [Service]
-ExecStart=%h/.local/bin/code-server --bind-addr 127.0.0.1:${BACKEND_PORT} --user-data-dir %h/.local/share/airlock-code-server --auth none --disable-telemetry --disable-update-check
+Environment=AIRLOCK_CS_BACKEND_BASE=${BACKEND_BASE}
+# Only slots 1..${SLOTS} are allowed — a rogue instance (out of range) is a clean skip.
+ExecCondition=/bin/sh -c 'case %i in ${SLOT_CASE}) exit 0;; *) exit 1;; esac'
+ExecStart=%h/.local/bin/airlock-code-server-slot %i
 MemoryHigh=2G
 MemoryMax=3G
+TasksMax=2048
+LimitNOFILE=1048576
 Restart=on-failure
 RestartSec=2
 
 [Install]
 WantedBy=default.target
 UNIT
-fi
-airlock_run systemctl --user daemon-reload
-airlock_run systemctl --user enable airlock-code-server.service
-airlock_run systemctl --user restart airlock-code-server.service
+  then changed=1; fi
 
-# --- 3. nginx owner-gate fragment ---
+  if write_if_changed "$UNIT_DIR/airlock-code-server-manager.service" <<UNIT
+[Unit]
+Description=airlock code-server slot manager API (127.0.0.1:${MANAGER_PORT})
+After=default.target
+
+[Service]
+Type=simple
+Environment=AIRLOCK_CODE_SERVER_MANAGER_HOST=127.0.0.1
+Environment=AIRLOCK_CODE_SERVER_MANAGER_PORT=${MANAGER_PORT}
+Environment=AIRLOCK_CODE_SERVER_SLOTS=${SLOTS}
+Environment=AIRLOCK_CODE_SERVER_BACKEND_PORT=${BACKEND_PORT}
+Environment=AIRLOCK_CODE_SERVER_ALLOW=${AIRLOCK_OWNER}
+Environment=AIRLOCK_IDENTITY_HEADER=${AIRLOCK_IDENTITY_HEADER}
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+ExecStart=%h/.local/bin/airlock-code-server-manager
+Restart=on-failure
+RestartSec=2
+MemoryHigh=128M
+MemoryMax=256M
+TasksMax=128
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
+UNIT
+  then changed=1; fi
+fi
+
+airlock_run systemctl --user daemon-reload
+airlock_run systemctl --user enable airlock-code-server@1.service
+airlock_run systemctl --user enable airlock-code-server-manager.service
+if [ "$changed" = 1 ]; then
+  airlock_run systemctl --user restart airlock-code-server-manager.service
+  airlock_run systemctl --user restart airlock-code-server@1.service
+else
+  # nothing changed — just ensure slot 1 + manager are up (first run / after stop).
+  airlock_run systemctl --user start airlock-code-server-manager.service
+  airlock_run systemctl --user start airlock-code-server@1.service
+fi
+
+# --- 4. tab-bar shell (served static by the gate; MAX_SLOTS templated from config) ---
+# Config (not a system mutation) — written unconditionally so the gate's root is real.
+install -d "$SHELL_DIR"
+sed "s/@@MAX_SLOTS@@/${SLOTS}/g" "$HERE/web/shell.html" > "$SHELL_DIR/shell.html"
+log "wrote shell: $SHELL_DIR/shell.html (maxSlots=$SLOTS)"
+
+# --- 5. nginx slot gate fragment (owner-only shell + /s/N/ per slot + /api/) ---
 frag="$CONFD/servers.d/code-server.conf"
 install -d "$CONFD/servers.d"
 {
-  echo "# code-server owner gate — generated by apps/code-server/install.sh"
-  emit_owner_gate "$GATE_PORT" "127.0.0.1:${BACKEND_PORT}" owner_ok
+  echo "# code-server slot gate — generated by apps/code-server/install.sh"
+  emit_slot_gate "$GATE_PORT" "$BACKEND_PORT" "$SLOTS" "$MANAGER_PORT" owner_ok \
+    "$SHELL_DIR" shell.html "$WEBROOT/assets/airlock-return.js"
 } > "$frag"
 log "wrote nginx fragment: $frag"
 
-# --- 4. tailscale serve (https only — code-server wants a secure context) ---
+# --- 6. tailscale serve (https only — code-server wants a secure context) ---
 airlock_run sudo tailscale serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:${GATE_PORT}"
 
 # NOTE: smoke runs from the orchestrator AFTER nginx reload (gate not live before).
-log "code-server installed (owner: ${AIRLOCK_OWNER})"
+log "code-server installed (owner: ${AIRLOCK_OWNER}, slots: ${SLOTS})"
