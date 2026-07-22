@@ -7,6 +7,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
+# lib.sh turns on `set -e`. This smoke aggregates failures itself (via `fail`
+# below) and deliberately issues a WebSocket-upgrade curl that curl reports as a
+# timeout (exit 28) — it holds the 101 connection open until --max-time. Restore
+# `-e` off (matching the header's `set -uo pipefail`) so that expected-non-zero
+# curl does not abort the smoke before it evaluates and prints its results.
+set +e
 
 airlock_load code-server
 GATE="$AIRLOCK_CODE_SERVER_GATE_PORT"
@@ -37,9 +43,11 @@ c_ws=$(code --http1.1 \
   "http://127.0.0.1:${GATE}/s/1/")
 
 # The gate must serve the shell (embedding the return widget) at "/" and serve the
-# widget itself at /airlock-return.js.
+# widget itself at /airlock-return.js. Both sit behind the server-level owner guard
+# (the shell embeds <script src="/airlock-return.js">, which the authenticated
+# browser fetches with the injected identity header) — so send the owner header.
 shell_html=$(body -H "${HDR}: ${OWNER}" "http://127.0.0.1:${GATE}/")
-c_widget=$(code "http://127.0.0.1:${GATE}/airlock-return.js")
+c_widget=$(code -H "${HDR}: ${OWNER}" "http://127.0.0.1:${GATE}/airlock-return.js")
 
 echo "[code-server smoke] backend=${c_be}/200|302 owner=${c_own}/200|302 deny=${c_deny}/403 no-header=${c_no}/403"
 echo "[code-server smoke] slot1=${c_slot1}/200|302 ws=${c_ws}/101 api:owner=${c_api_own}/200 api:no-header=${c_api_no}/403 api:mgr-loopback=${c_api_mgr}/403 widget=${c_widget}/200"
@@ -54,5 +62,5 @@ fail=0
 [ "$c_api_no"  = 403 ] || { echo "FAIL /api/list no-header (gate hole)"; fail=1; }
 [ "$c_api_mgr" = 403 ] || { echo "FAIL manager loopback not owner-checked (gate hole)"; fail=1; }
 [ "$c_widget"  = 200 ] || { echo "FAIL /airlock-return.js not served"; fail=1; }
-grep -q '/airlock-return.js' <<<"$shell_html" || { echo "FAIL shell does not load return widget"; fail=1; }
+[[ "$shell_html" == *"/airlock-return.js"* ]] || { echo "FAIL shell does not load return widget"; fail=1; }
 [ "$fail" = 0 ]

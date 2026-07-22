@@ -32,8 +32,12 @@ c_no=$(code                                    "http://127.0.0.1:${HUB}/markwand
 # must NOT receive markwand markup — it gets the wrong-owner page.
 own_body=$(curl -s --max-time 6 -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${HUB}/markwand/")
 deny_body=$(curl -s --max-time 6 -H "${HDR}: nobody@example.com" "http://127.0.0.1:${HUB}/markwand/")
-split=no; printf '%s' "$own_body" | grep -q '/__mw/highlight.min.js' && split=yes
-denied=no; printf '%s' "$deny_body" | grep -q "isn't your Airlock" && denied=yes
+# Match with bash glob (no pipe): `printf | grep -q` on a ~64 KB body races the
+# pipe buffer — grep -q closes the pipe on match, printf gets SIGPIPE, and under
+# `set -o pipefail` (+ lib.sh's `set -e`) the pipeline reports failure so the
+# `&& split=yes` never runs even though the marker is present (flaky by body size).
+split=no;  [[ "$own_body"  == *"/__mw/highlight.min.js"* ]] && split=yes
+denied=no; [[ "$deny_body" == *"isn't your Airlock"* ]]     && denied=yes
 
 echo "[markwand smoke] markserv=${c_ms}/200 filebrowser=${c_fb}/200 owner=${c_own}/200 edit=${c_edit}/200 css=${c_css}/200 hljs=${c_hljs}/200 deny=${c_deny}/403 no-header=${c_no}/403 split-viewer=${split}/yes denied-page=${denied}/yes"
 fail=0

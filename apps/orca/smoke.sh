@@ -41,6 +41,6 @@ else
   [ "$p_deny" = 403 ] || { echo "FAIL /orca-web/ deny (gate hole in added location)"; fail=1; }
   [ "$p_no"   = 403 ] || { echo "FAIL /orca-web/ no-header (gate hole in added location)"; fail=1; }
   { [ "$v_own" = 301 ] || [ "$v_own" = 302 ]; } || { echo "FAIL vendor /web-index.html not redirected to patched client"; fail=1; }
-  grep -q 'airlock-return.js' <<<"$body" || { echo "FAIL return-widget not injected into patched client"; fail=1; }
+  [[ "$body" == *"airlock-return.js"* ]] || { echo "FAIL return-widget not injected into patched client"; fail=1; }
 fi
 [ "$fail" = 0 ]
