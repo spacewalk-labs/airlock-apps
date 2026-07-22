@@ -65,6 +65,7 @@ def list_items():
             continue
         is_link = os.path.islink(full)
         is_dir = os.path.isdir(full)
+        is_broken = is_link and not os.path.exists(full)   # dangling symlink (target gone)
         target = None
         if is_link:
             try:
@@ -92,6 +93,7 @@ def list_items():
             'target_dir': target_dir,
             'isLink': is_link,
             'isDir': is_dir,
+            'isBroken': is_broken,
             'size': format_size(lstat.st_size, is_dir),
             'mtime': datetime.fromtimestamp(lstat.st_mtime).strftime('%Y-%m-%d %H:%M'),
             'mtime_epoch': int(lstat.st_mtime),
