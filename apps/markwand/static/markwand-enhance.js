@@ -110,10 +110,10 @@
   // ====== 5. ToC SIDEBAR ======
   function buildToc() {
     var hs = document.querySelectorAll('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]');
-    if (hs.length < 3) return;  // 너무 짧은 페이지엔 ToC 안 보임
+    if (hs.length < 3) return;  // ToC not shown on pages that are too short
     var aside = document.createElement('aside');
     aside.id = 'markwand-toc';
-    // 초기 collapsed 상태 = localStorage. default = expanded (사용자 의도 변경 — 펴진 상태 기본)
+    // initial collapsed state = localStorage. default = expanded (per user's changed intent — expanded by default)
     var TOC_KEY = 'markwand-toc-collapsed';
     var saved = localStorage.getItem(TOC_KEY);
     var collapsed = saved === '1';   // null/missing → false (expanded default)
@@ -152,14 +152,14 @@
   }
 
   // ====== bootstrap ======
-  // viewer iframe 안에서는 topbar 가 split-pane parent 와 중복 + 문서 가림 → skip
+  // inside the viewer iframe the topbar duplicates the split-pane parent + obscures the document → skip
   var inIframe = (function () { try { return window.self !== window.top; } catch (_) { return true; } })();
   function init() {
-    // R7: markserv body 에 .markdown-viewer class 추가 (Markwand 본가 scope)
+    // R7: add .markdown-viewer class to the markserv body (Markwand upstream scope)
     document.body.classList.add('markdown-viewer');
     applyAlerts();
     applyAnchors();
-    if (!inIframe) buildTopbar();   // single-pane viewer 모드만 topbar (iframe 안에서는 parent 가 처리)
+    if (!inIframe) buildTopbar();   // topbar only in single-pane viewer mode (inside an iframe the parent handles it)
     buildToc();
   }
   if (document.readyState === 'loading') {

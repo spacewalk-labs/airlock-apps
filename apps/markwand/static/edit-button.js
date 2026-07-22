@@ -2,12 +2,12 @@
  * Injected into every markserv-rendered .md page by nginx sub_filter.
  * Floats top-right "✏️ Edit" → opens same file in filebrowser editor.
  *
- * iframe 안 (split-pane viewer) 에서는 parent 의 topbar ✏️ Edit 가 있으니
- * 중복/문서 가림 회피를 위해 X. single-pane viewer (직접 진입) 만 표시.
+ * In an iframe (split-pane viewer) the parent already has a topbar ✏️ Edit button, so
+ * it is not shown here to avoid duplication / obscuring the document. Only shown in the single-pane viewer (direct entry).
  */
 (function () {
   if (!location.pathname.endsWith('.md')) return;
-  // iframe 안에서는 절대 띄우지 않음
+  // never render inside an iframe
   try { if (window.self !== window.top) return; } catch (_) { return; }
 
   var p = location.pathname;

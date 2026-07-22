@@ -8,10 +8,10 @@
  * License: MIT (Copyright (c) 2026 Markwand contributors)
  *
  * Modifications:
- *   - tokens.css + themes.css 결합
- *   - body baseline + GFM Alert callout + heading anchor + ToC sidebar 스타일 추가
- *   - 미사용 토큰 prune (2026-07-19, var() 참조 0 실측): --sp-0 / --lh-tight / --fw-normal / --shadow-lg / --z-dropdown / --color-success / --color-success-bg
- *   - markserv 의 .markdown-body / .container 클래스 매핑
+ *   - Combined tokens.css + themes.css
+ *   - Added body baseline + GFM Alert callout + heading anchor + ToC sidebar styles
+ *   - Pruned unused tokens (2026-07-19, measured 0 var() references): --sp-0 / --lh-tight / --fw-normal / --shadow-lg / --z-dropdown / --color-success / --color-success-bg
+ *   - Map markserv's .markdown-body / .container classes
  */
 
 :root {
@@ -22,18 +22,18 @@
   /* === radius === */
   --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px; --r-pill: 999px;
 
-  /* === typography === (Claude.ai 매칭: Söhne ≈ Inter, system-ui 우선, Apple SD Gothic Neo / Pretendard 한글 fallback) */
+  /* === typography === (matches Claude.ai: Söhne ≈ Inter, prefer system-ui, Apple SD Gothic Neo / Pretendard as Korean fallback) */
   --font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Söhne', 'Segoe UI', 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Söhne Mono', 'SFMono-Regular', 'Cascadia Code', Consolas, 'D2Coding', monospace;
   --fs-xs: 11px; --fs-sm: 12px; --fs-md: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 24px;
-  --lh-normal: 1.5; --lh-loose: 1.7;   /* R4: 1.75 → 1.7 (Markwand 본가) */
+  --lh-normal: 1.5; --lh-loose: 1.7;   /* R4: 1.75 → 1.7 (Markwand upstream) */
   --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
 
-  /* === shadow scale (R5: --shadow → --shadow-sm/md 분리) === */
+  /* === shadow scale (R5: split --shadow → --shadow-sm/md) === */
   --shadow-sm: 0 1px 2px rgba(33, 36, 31, 0.06), 0 8px 24px rgba(33, 36, 31, 0.04);
   --shadow-md: 0 8px 24px rgba(33, 36, 31, 0.10);
 
-  /* === surface wash (R6: Markwand 본가 grad — topbar/hub) === */
+  /* === surface wash (R6: Markwand upstream grad — topbar/hub) === */
   --surface-wash: linear-gradient(135deg, rgba(15, 118, 110, 0.10), rgba(217, 119, 6, 0.08));
 
   /* === motion === */
@@ -71,7 +71,7 @@
   --shadow:        0 10px 30px rgba(33, 36, 31, 0.10);
 }
 
-/* ========== DARK theme — Markwand 본가 정통 (R1+R2) ========== */
+/* ========== DARK theme — Markwand upstream canonical (R1+R2) ========== */
 [data-theme="dark"] {
   --bg:            #101411;
   --bg-elev:       #171d19;
@@ -80,9 +80,9 @@
   --text-muted:    #99a79d;
   --border:        #334038;
   --border-muted:  #253129;
-  --accent:        #5eead4;    /* R1: 밝은 teal (옛 #0f766e dark 에서 가시성 X) */
-  --accent-hover:  #99f6e4;    /* R1: 밝은 teal hover */
-  --accent-contrast: #042f2e;  /* R2: 어두운 teal contrast (옛 #ffffff) */
+  --accent:        #5eead4;    /* R1: bright teal (old #0f766e had no visibility in dark) */
+  --accent-hover:  #99f6e4;    /* R1: bright teal hover */
+  --accent-contrast: #042f2e;  /* R2: dark teal contrast (old #ffffff) */
   --code-bg:       #151b17;
   --badge-bg:      #123b36;
   --badge-text:    #99f6e4;
@@ -97,7 +97,7 @@
   --color-tip-bg:     #033a16;
 }
 
-/* ========== SYSTEM theme (default) — prefers-color-scheme 추적, Markwand 본가 정통 ========== */
+/* ========== SYSTEM theme (default) — tracks prefers-color-scheme, Markwand upstream canonical ========== */
 @media (prefers-color-scheme: dark) {
   [data-theme="system"] {
     --bg: #101411; --bg-elev: #171d19; --bg-hover: #233029;
@@ -115,8 +115,8 @@
   }
 }
 
-/* ========== DARK + SYSTEM(dark) overrides — markserv.css specificity 강화 ========== */
-/* markserv 자체 CSS 가 body > * 에 light 색상 강제. !important + selector specificity 로 override. */
+/* ========== DARK + SYSTEM(dark) overrides — reinforce markserv.css specificity ========== */
+/* markserv's own CSS forces light colors on body > *. Override with !important + selector specificity. */
 [data-theme="dark"],
 [data-theme="dark"] body,
 @media (prefers-color-scheme: dark) { [data-theme="system"], [data-theme="system"] body { } }
@@ -159,7 +159,7 @@
 [data-theme="dark"] .hljs-attr, [data-theme="dark"] .hljs-attribute { color: #79c0ff !important; }
 [data-theme="dark"] .hljs-variable, [data-theme="dark"] .hljs-template-variable { color: #ffa657 !important; }
 
-/* system(dark) 동일 override (selector duplicate but explicit) */
+/* system(dark) same override (selector duplicate but explicit) */
 @media (prefers-color-scheme: dark) {
   [data-theme="system"] body, [data-theme="system"] body * { color: var(--text) !important; }
   [data-theme="system"] body { background: var(--bg) !important; }
@@ -176,7 +176,7 @@
   }
 }
 
-/* ========== body baseline (R7: .markdown-viewer scope, v3.1 typography 정통) ========== */
+/* ========== body baseline (R7: .markdown-viewer scope, v3.1 typography canonical) ========== */
 html, body {
   background: var(--bg);
   color: var(--text);
@@ -187,9 +187,9 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* markserv 응답 body 에 enhance.js 가 .markdown-viewer class 추가 — Markwand 본가 scope 정통 */
+/* enhance.js adds the .markdown-viewer class to the markserv response body — Markwand upstream scope canonical */
 /* v3.5: Claude.ai matching — 16px/1.7/letter-spacing -0.003em (Söhne ≈ Inter) */
-/* v3.2: viewer 가 ToC 영역 침범 안 하도록 좌측 치우침 (margin-right 자동 + ToC 폭 확보) */
+/* v3.2: shift the viewer left so it doesn't intrude on the ToC area (auto margin-right + reserve ToC width) */
 .markdown-viewer,
 body > .markdown-body,
 body > .container {
@@ -198,7 +198,7 @@ body > .container {
   line-height: 1.7;
   letter-spacing: -0.003em;
   color: var(--text);
-  max-width: 110ch;        /* Claude 앱 본문 폭 + 사용자 확대 요구 */
+  max-width: 110ch;        /* Claude app body width + user's request to widen */
   margin-left: max(var(--sp-6), calc((100% - 110ch - 260px) / 2));
   margin-right: auto;
   padding: var(--sp-8) var(--sp-6) var(--sp-12);
@@ -217,7 +217,7 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 /* v3.5: Claude.ai heading scale — h1 1.875rem(30px) / h2 1.5rem(24px) / h3 1.25rem(20px) / h4 1.125rem(18px) */
-/* Claude.ai 는 heading 에 letter-spacing 살짝 더 tight (-0.02em ≈ -0.5px @ 24px) */
+/* Claude.ai uses slightly tighter letter-spacing on headings (-0.02em ≈ -0.5px @ 24px) */
 h1, h2, h3, h4, h5, h6 {
   color: var(--text);
   font-weight: var(--fw-semibold);
@@ -234,7 +234,7 @@ h6 { font-size: 0.875rem; color: var(--text-muted); text-transform: uppercase; l
 
 p { margin: 0 0 var(--sp-4); }
 
-/* Claude.ai list spacing — tight (item 간 4px), nested 들여쓰기 (sp-5) */
+/* Claude.ai list spacing — tight (4px between items), nested indent (sp-5) */
 ul, ol { padding-left: var(--sp-5); margin: 0 0 var(--sp-4); }
 li { margin: 0 0 var(--sp-1); }
 li > ul, li > ol { margin-top: var(--sp-1); margin-bottom: 0; }
@@ -261,7 +261,7 @@ pre code {
   font-size: 0.875em;
 }
 
-/* v3.1: blockquote = 좌측 border 중심 (Markwand 본가 절제된 톤, 배경 box 약화) */
+/* v3.1: blockquote = centered on the left border (Markwand upstream restrained tone, weakened background box) */
 blockquote {
   border-left: 3px solid var(--border);
   color: var(--text-muted);
@@ -270,10 +270,10 @@ blockquote {
   background: transparent;
 }
 
-/* ========== TABLE (Claude.ai 매칭: 표 위/아래 굵은 line + body row 진한 hairline, vertical/zebra 없음) ========== */
-/* IMPORTANT: markserv.css 가 `.markdown-body table { display: block; width: 100% }` 박아서
-   table 만 100% 늘어나고 thead/tbody/tr 가 콘텐츠 natural width 로 줄어들어 border 만 떠다님.
-   display: table !important 로 native table layout 강제 — row 가 표 전체 너비 채움. */
+/* ========== TABLE (matches Claude.ai: thick line above/below the table + dark hairline on body rows, no vertical/zebra) ========== */
+/* IMPORTANT: markserv.css hardcodes `.markdown-body table { display: block; width: 100% }` so
+   only the table stretches to 100% while thead/tbody/tr shrink to their content's natural width, leaving the borders floating.
+   force native table layout with display: table !important — rows fill the full table width. */
 .markdown-viewer table,
 body > .markdown-body table {
   display: table !important;
@@ -284,8 +284,8 @@ body > .markdown-body table {
   margin: var(--sp-5) 0;
   font-size: 0.95em;
   background: transparent;
-  border-top: 1.5px solid var(--text-muted) !important;     /* 표 상단 굵은 line */
-  border-bottom: 1.5px solid var(--text-muted) !important;  /* 표 하단 굵은 line */
+  border-top: 1.5px solid var(--text-muted) !important;     /* thick line at the table top */
+  border-bottom: 1.5px solid var(--text-muted) !important;  /* thick line at the table bottom */
   border-left: none !important;
   border-right: none !important;
 }
@@ -294,10 +294,10 @@ body > .markdown-body table {
 body > .markdown-body th,
 body > .markdown-body td {
   padding: 10px 14px;
-  border-top: none !important;       /* markserv 기본 border-top #ddd 제거 (이중선 방지) */
+  border-top: none !important;       /* remove markserv's default border-top #ddd (prevent double line) */
   border-left: none !important;
   border-right: none !important;
-  border-bottom: 1px solid var(--text-muted) !important;  /* body row hairline 진하게 (이전 --border #ded6c8 너무 옅음) */
+  border-bottom: 1px solid var(--text-muted) !important;  /* darker body row hairline (previous --border #ded6c8 was too faint) */
   background: transparent !important;
   vertical-align: top;
   text-align: left;
@@ -306,12 +306,12 @@ body > .markdown-body td {
   background: transparent !important;
   color: var(--text);
   font-weight: var(--fw-semibold);
-  border-bottom: 1.5px solid var(--text-muted) !important;  /* header 아래 굵은 line */
+  border-bottom: 1.5px solid var(--text-muted) !important;  /* thick line below the header */
 }
 .markdown-viewer tr:last-child td,
-body > .markdown-body tr:last-child td { border-bottom: none !important; }  /* table border-bottom 가 담당 — 이중선 방지 */
-/* zebra/even row 색 — Claude.ai 와 동일하게 OFF (override).
-   markserv 가 <tr> 자체에 bg 박음 (rgb(248,248,248) vs rgb(255,255,255)) → tr/td 둘 다 target */
+body > .markdown-body tr:last-child td { border-bottom: none !important; }  /* table border-bottom handles it — prevent double line */
+/* zebra/even row color — OFF, same as Claude.ai (override).
+   markserv hardcodes bg on the <tr> itself (rgb(248,248,248) vs rgb(255,255,255)) → target both tr and td */
 .markdown-viewer table tr,
 .markdown-viewer table tr:nth-child(even),
 .markdown-viewer table tr:nth-child(odd),
@@ -410,7 +410,7 @@ h4:hover .markwand-anchor, h5:hover .markwand-anchor, h6:hover .markwand-anchor 
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-muted);
-  padding-right: 24px;   /* toggle 자리 */
+  padding-right: 24px;   /* room for the toggle */
 }
 #markwand-toc ul { list-style: none; padding: 0; margin: 0; }
 #markwand-toc li { margin: var(--sp-1) 0; }
@@ -420,13 +420,13 @@ h4:hover .markwand-anchor, h5:hover .markwand-anchor, h6:hover .markwand-anchor 
 #markwand-toc li.toc-h4 { padding-left: var(--sp-5); }
 #markwand-toc li.toc-h5 { padding-left: var(--sp-6); }
 #markwand-toc li.toc-h6 { padding-left: var(--sp-8); }
-/* v3.2: 1줄 ellipsis (외부 review R11) */
+/* v3.2: single-line ellipsis (external review R11) */
 #markwand-toc li a {
   display: block;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
-/* v3.4: 600px 이하 = ToC 숨김 (사용자: "살짝 겹치는것까지 허용 + default 켜진 상태" — viewer iframe width 기준이라 매우 좁은 mobile 만 hide) */
+/* v3.4: 600px or below = hide ToC (user: "allow even slight overlap + default on" — based on viewer iframe width, so only very narrow mobile is hidden) */
 @media (max-width: 600px) {
   #markwand-toc { display: none; }
 }
@@ -491,5 +491,5 @@ h4:hover .markwand-anchor, h5:hover .markwand-anchor, h6:hover .markwand-anchor 
   body { padding-right: 260px; padding-top: var(--sp-12); }
 }
 
-/* markserv default css 의 'outline: 1300px solid #fff' override — dark mode 에서 흰 여백 거슬림 fix */
+/* override markserv default css 'outline: 1300px solid #fff' — fixes the distracting white margin in dark mode */
 body { outline: none !important; }

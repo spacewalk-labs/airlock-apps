@@ -1,25 +1,25 @@
 /*
- * fb-branding/custom.css — Markwand 톤을 filebrowser SPA 에 적용
- * 한계: fb SPA 의 hashed class name → 모든 영역 100% override 불가
- *       핵심 selector (action button, link, focus, scrollbar) 만 잡음
- *       review High 4 의 "공식 branding hook 우선" 정신 — 가능한 범위만
+ * fb-branding/custom.css — applies the Markwand tone to the filebrowser SPA
+ * Limitation: fb SPA's hashed class names → can't 100% override every area
+ *       only targets the core selectors (action button, link, focus, scrollbar)
+ *       in the spirit of review High 4's "prefer the official branding hook" — only what's feasible
  */
 
 :root, html, body, #app {
-  /* fb 의 brand color 를 Markwand teal 로 */
+  /* set fb's brand color to Markwand teal */
   --primary-color: #0f766e;
   --accent: #0f766e;
   --md-primary-fg-color: #0f766e;
 }
 
-/* fb 의 #FFFFFF body → Markwand warm */
+/* fb's #FFFFFF body → Markwand warm */
 body, #app, .shell {
   background: #fbf7ef !important;
   color: #20231f !important;
   font-family: -apple-system, BlinkMacSystemFont, 'Avenir Next', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Segoe UI', Roboto, sans-serif !important;
 }
 
-/* dark — prefers-color-scheme 또는 fb 의 .dark-theme */
+/* dark — prefers-color-scheme or fb's .dark-theme */
 @media (prefers-color-scheme: dark) {
   body, #app, .shell {
     background: #101411 !important;
@@ -31,7 +31,7 @@ body.dark, body.dark-theme, .dark body, .dark #app {
   color: #edf4ec !important;
 }
 
-/* top bar / header — fb 의 파란 #2979ff → teal */
+/* top bar / header — fb's blue #2979ff → teal */
 header, nav, .nav, #navbar, .top, .toolbar,
 header.header, header.uploader,
 .action.copy-clipboard {
@@ -47,7 +47,7 @@ button.button--flat, button.button, .button,
 }
 button.button--flat:hover, button.button:hover { background: rgba(15, 118, 110, 0.10) !important; }
 
-/* 선택 / 강조 */
+/* selection / emphasis */
 .selected, .item.selected, .item.active, .row.active {
   background: rgba(15, 118, 110, 0.15) !important;
   color: #0f766e !important;

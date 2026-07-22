@@ -1,20 +1,20 @@
-/* markwand-editor.js — filebrowser editor 에서 저장하면 markserv 뷰어로 자동 복귀
+/* markwand-editor.js — saving in the filebrowser editor auto-returns to the markserv viewer
  *
- * nginx sub_filter 로 /markwand/edit/ (filebrowser SPA) 의 HTML 응답에 주입.
- * filebrowser v2.63.4 는 branding 으로 custom.css 만 자동 주입(custom.js 미지원)
- * → markserv 뷰어의 __markwand.js 와 동일하게 nginx sub_filter 로 주입.
+ * Injected via nginx sub_filter into the HTML response of /markwand/edit/ (filebrowser SPA).
+ * filebrowser v2.63.4 only auto-injects custom.css via branding (custom.js unsupported)
+ * → injected via nginx sub_filter, same as the markserv viewer's __markwand.js.
  *
- * 동작: 에디터에서 저장(Ctrl+S / 상단 저장 버튼) → filebrowser 가
- *   PUT /markwand/edit/api/resources/<path> 호출 → 2xx 성공 시
- *   그 파일의 markserv 뷰어(/markwand/<path>)로 navigate.
- *   filebrowser 는 저장에 fetch·XHR 를 혼용하므로 둘 다 가로챈다.
- *   .md 만 대상(markserv 렌더 대상) — 그 외 확장자는 그대로 둔다.
+ * Behavior: on save in the editor (Ctrl+S / top save button) → filebrowser
+ *   calls PUT /markwand/edit/api/resources/<path> → on 2xx success,
+ *   navigate to that file's markserv viewer (/markwand/<path>).
+ *   filebrowser mixes fetch and XHR for saving, so intercept both.
+ *   Only .md files (markserv render targets) — leave other extensions unchanged.
  */
 (function () {
-  var EDIT_PREFIX = '/markwand/edit/files';   // 에디터 파일 라우트
-  var VIEW_PREFIX = '/markwand';               // markserv 뷰어 prefix
+  var EDIT_PREFIX = '/markwand/edit/files';   // editor file route
+  var VIEW_PREFIX = '/markwand';               // markserv viewer prefix
 
-  // /markwand/edit/files/foo/bar.md → /markwand/foo/bar.md (md 만, 아니면 null)
+  // /markwand/edit/files/foo/bar.md → /markwand/foo/bar.md (md only, else null)
   function viewerUrlFor(editorPath) {
     if (editorPath.indexOf(EDIT_PREFIX) !== 0) return null;
     var rel = editorPath.substring(EDIT_PREFIX.length);   // /foo/bar.md
@@ -32,7 +32,7 @@
         && /\/api\/resources\//.test(url || '');
   }
 
-  // 1) fetch 경로
+  // 1) fetch path
   var origFetch = window.fetch;
   if (origFetch) {
     window.fetch = function (input, init) {
@@ -46,7 +46,7 @@
     };
   }
 
-  // 2) XHR 경로
+  // 2) XHR path
   var XHR = window.XMLHttpRequest;
   if (XHR && XHR.prototype) {
     var open = XHR.prototype.open;
