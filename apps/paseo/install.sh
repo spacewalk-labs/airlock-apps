@@ -28,9 +28,12 @@
 # mutation (npm, patch, systemctl, tailscale, sudo) prints "[dry] ..." instead of
 # running. The nginx fragment is config, not a mutation — always written.
 #
-# browse-host (server-side browser panels for agents) ships as labeled source in
-# ./browse-host but is a documented follow-up — it is NOT wired in by v1 (needs
-# Playwright + a SHA-pinned web-ui patch). See browse-host/README.md.
+# browse-host (server-side browser panels for agents — Playwright headless Chromium
+# behind the daemon) is CONFIG-GATED: set `browse = true` under [apps.paseo] to wire
+# it in. When on, this installer adds the owner-gated /browse-view/ stream route to
+# the gate below and runs browse-host/install.sh (warn-only — a chromium/patch
+# failure never breaks the hub or the paseo daemon). Default off keeps the install
+# lean (chromium is a ~150MB download). See browse-host/README.md.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -43,6 +46,10 @@ GATE_PORT="${AIRLOCK_PASEO_GATE_PORT:?}"
 BACKEND_PORT="${AIRLOCK_PASEO_BACKEND_PORT:?}"
 HTTPS_PORT="${AIRLOCK_PASEO_HTTPS_PORT:?}"
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
+# browse-host (config-gated). When BROWSE=true we add the /browse-view/ stream
+# route to the gate and run browse-host/install.sh at the end (warn-only).
+BROWSE="${AIRLOCK_PASEO_BROWSE:-false}"
+BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
 
 PASEO_PKG="@getpaseo/cli"
 # Version PIN — do NOT track latest. paseo is pre-1.0; a floating install would
@@ -240,7 +247,7 @@ server {
     # paseo serves an upstream web UI we cannot edit, so the gate serves + injects
     # the shared "return to Airlock" widget (floating, bottom-right).
     location = /airlock-return.js { alias @@WIDGET@@; default_type application/javascript; add_header Cache-Control "no-cache" always; access_log off; }
-
+@@BROWSE_LOC@@
     location / {
         if ($owner_ok = 0) { return 403; }
         proxy_pass http://@@UPSTREAM@@;
@@ -262,11 +269,67 @@ server {
 }
 NGINX
 } > "$frag"
-log "wrote nginx fragment: $frag"
+
+# When browse-host is on, splice the owner-gated Level 2 live-view stream route in
+# at the @@BROWSE_LOC@@ marker; otherwise the marker line is just removed. The route
+# proxies the loopback stream server (browse-host sidecar). This gate guards
+# per-location (not server-level), so the guard MUST be repeated here — without it
+# the stream WS would be an unauthenticated hole. The static /browse-view-client.js
+# (no trailing slash) is served by the daemon and does not collide with this prefix.
+if [ "$BROWSE" = true ]; then
+  bloc="$(mktemp)"
+  sed -e "s|@@STREAM@@|127.0.0.1:${BROWSE_WS_PORT}|g" <<'BLOC' > "$bloc"
+
+    location /browse-view/ {
+        if ($owner_ok = 0) { return 403; }
+        proxy_pass http://@@STREAM@@;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
+    }
+BLOC
+  sed -i -e "/@@BROWSE_LOC@@/r $bloc" -e "/@@BROWSE_LOC@@/d" "$frag"
+  rm -f "$bloc"
+else
+  sed -i "/@@BROWSE_LOC@@/d" "$frag"
+fi
+log "wrote nginx fragment: $frag${BROWSE:+ (browse=$BROWSE)}"
 
 # --- 6. tailscale serve (https only — the web UI wants a secure context) ---
 airlock_run sudo tailscale serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:${GATE_PORT}"
 
+# --- 7. browse-host sidecar (config-gated; warn-only) ---
+# Server-side browser panels for agents: a loopback WS client that registers a
+# Playwright automation host with the daemon (Level 1 = agent browser_* tools) and
+# a live-view stream + web-ui patch (Level 2 = the New-browser panel routed via the
+# /browse-view/ gate location added above). Non-fatal on purpose: a chromium
+# download or web-ui SHA-drift must never break the hub or the paseo daemon.
+if [ "$BROWSE" = true ]; then
+  BROWSE_INSTALL="$HERE/browse-host/install.sh"
+  WEBUI_DIR="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/web-ui"
+  if [ ! -f "$BROWSE_INSTALL" ]; then
+    log "warning: browse=true but $BROWSE_INSTALL missing — skipped"
+  elif [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+    log "[dry] bash $BROWSE_INSTALL (PASEO_WEBUI_DIR + FQDN + ports)"
+  else
+    log "installing browse-host sidecar (warn-only; downloads chromium on first run)"
+    if PASEO_WEBUI_DIR="$WEBUI_DIR" \
+       PASEO_BROWSE_FQDN="$FQDN" \
+       PASEO_BACKEND_PORT="$BACKEND_PORT" \
+       PASEO_BROWSE_STREAM_PORT="$BROWSE_WS_PORT" \
+       PASEO_HTTPS_PORT="$HTTPS_PORT" \
+       bash "$BROWSE_INSTALL"; then
+      log "browse-host OK (agent browser_* + live-view panel)"
+    else
+      log "warning: browse-host install failed — agent browsing unavailable (hub + paseo daemon unaffected). Retry: bash $BROWSE_INSTALL"
+    fi
+  fi
+fi
+
 # NOTE: smoke runs from the orchestrator AFTER nginx is rendered + reloaded (the
 # gate isn't live until then). See install/airlock-install.sh.
-log "paseo installed (owner: ${AIRLOCK_OWNER})"
+log "paseo installed (owner: ${AIRLOCK_OWNER}${BROWSE:+, browse=$BROWSE})"

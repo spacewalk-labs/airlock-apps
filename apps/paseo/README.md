@@ -85,20 +85,22 @@ See the repo `NOTICE` and `patches/README.md`. Airlock talks to paseo over a
 separate process boundary, so the Airlock core stays MIT (mere aggregation); only
 the modifications **to paseo itself** are AGPL. *This is not legal advice.*
 
-## browse-host live panels are a follow-up
+## browse-host live panels (config-gated)
 
-`browse-host/` ships as labeled source but is **not wired into the v1 installer**.
-It is a loopback-WS sidecar (Playwright-backed) that gives agents native
-`browser_*` tools and can stream live browser panels into the web UI. Wiring it
-in needs Playwright + a **SHA-pinned web-ui bundle patch** and is a documented
-follow-up — see `browse-host/README.md`. Nothing in v1 installs Playwright, the
-web-ui patch, or the browse WebSocket port.
+`browse-host/` is a loopback-WS sidecar (Playwright-backed) that gives agents
+native `browser_*` tools (Level 1) and streams live browser panels into the web
+UI (Level 2). It is **off by default** and turned on with `browse = true` under
+`[apps.paseo]`. When on, this installer adds the owner-gated `/browse-view/`
+stream route to the gate and runs `browse-host/install.sh` **warn-only** (a
+chromium download or a web-ui SHA-drift never breaks the hub or the daemon).
+Default off keeps the install lean — chromium is a ~150MB download and the
+Level-2 web-ui patch is SHA-pinned to `@getpaseo/cli`. See `browse-host/README.md`.
 
 ## Files
 
 | File | Role |
 |---|---|
-| `install.sh` | provision + pin `@getpaseo/cli` · depth4 patch · systemd `--user` unit · nginx owner-gate fragment (direct, +3 headers) · `tailscale serve` |
+| `install.sh` | provision + pin `@getpaseo/cli` · depth4 patch · systemd `--user` unit · nginx owner-gate fragment (direct, +3 headers) · `tailscale serve` · browse-host wiring when `browse = true` |
 | `smoke.sh` | gate health: backend reachable, owner 200/302, deny 403, no-header 403 |
 | `patches/` | the AGPL depth4 patch + its licensing note |
-| `browse-host/` | MIT sidecar for agent browser tools + live panels (follow-up, not wired in v1) |
+| `browse-host/` | MIT sidecar for agent browser tools + live panels (wired in when `browse = true`) |

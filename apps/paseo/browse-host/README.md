@@ -1,17 +1,18 @@
-# paseo browse-host — server-side browser panels (FOLLOW-UP, not wired into v1)
+# paseo browse-host — server-side browser panels (config-gated)
 
 This is a **loopback WebSocket sidecar** that gives the paseo daemon a
 server-side browser automation host: a Playwright-backed headless Chromium the
 agents drive through paseo's native `browser_*` tools, plus a live browser panel
 the owner can watch/drive from the web UI.
 
-> **Status: documented follow-up.** The Airlock v1 paseo installer
-> (`../install.sh`) does **not** run this. It ships here as labeled source so the
-> wiring can be reviewed and enabled later. Nothing in v1 installs Playwright,
-> the web-ui patch, or the browse WebSocket port (`browse_ws_port` stays reserved
-> in `airlock.toml`).
+> **Status: wired, off by default.** Set `browse = true` under `[apps.paseo]` in
+> `airlock.toml` and the paseo installer (`../install.sh`) adds the owner-gated
+> `/browse-view/` stream route and runs this `install.sh` **warn-only** (a
+> chromium download or a web-ui SHA-drift never breaks the hub or the daemon).
+> Left `false` (the default), none of the below runs — no Playwright, no chromium,
+> no web-ui patch, and the `/browse-view/` route is omitted.
 
-## What it takes to wire in
+## What turning it on does (and its dependencies)
 
 1. **Playwright + Chromium.** `install.sh` runs `npm install` (adds `playwright` +
    `ws`) and `playwright install chromium`. This is a heavy dependency the v1
