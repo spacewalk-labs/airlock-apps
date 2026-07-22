@@ -79,7 +79,10 @@ install -d "$CONFD/hub-locations.d"
 cors_lines=""
 if fqdn="$(ts_fqdn 2>/dev/null)"; then
   short="${fqdn%%.*}"
-  origin_re="^https?://(${fqdn//./\\.}|${short//./\\.})(:[0-9]+)?\$"
+  # \z (end of subject), not $: PCRE's default $ also matches just before a
+  # trailing newline, so anchor hard even though nginx can't put a bare LF in
+  # $http_origin anyway.
+  origin_re="^https?://(${fqdn//./\\.}|${short//./\\.})(:[0-9]+)?\\z"
   cors_lines="$(cat <<CORS
     # Same-box unread-badge CORS: reflect the Origin only for this box's tailnet
     # host on any port; never "*" (which would let any site the owner happens to
