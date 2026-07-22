@@ -3,9 +3,11 @@
 # served as a same-origin subpath under the hub (owner + collaborators).
 #
 #   browser --> hub (tailscale serve :443) --(identity)--> hub nginx
-#     /markwand/       -> markserv 127.0.0.1:MS   (renders code_root as HTML)
+#     /markwand/       -> split-pane multitype viewer (static, /__mw/markwand-split.html)
+#     /markwand/<file> -> markserv 127.0.0.1:MS   (renders .md / code_root as HTML — fallback)
 #     /markwand/edit/  -> filebrowser 127.0.0.1:FB (baseURL=/markwand/edit)
-#     /__mw/*          -> static assets from the hub webroot (tokens/enhance/editor)
+#     /__mw/*          -> static assets from the hub webroot (viewer, tokens, enhance,
+#                         editor, edit-button, + self-hosted highlight.js/marked/DOMPurify)
 #
 # The hub gate ($hub_ok) is re-asserted in each location, so a non-owner identity
 # gets the hub's wrong-owner page. markserv/filebrowser bind loopback only.
@@ -143,14 +145,22 @@ airlock_run systemctl --user enable airlock-markserv.service airlock-filebrowser
 airlock_run systemctl --user restart airlock-markserv.service airlock-filebrowser.service
 
 # --- 4. static assets into the hub webroot (served by the hub's guarded location /) ---
+# Everything under /__mw/ is served by the hub server's `location /` (try_files from
+# WEBROOT), so it inherits the server-level owner gate — no per-asset location needed.
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
-  log "[dry] install markwand static assets -> $WEBROOT/__mw/"
+  log "[dry] install markwand static assets + split viewer + vendored libs -> $WEBROOT/__mw/"
 else
   install -d "$WEBROOT/__mw"
   install -m644 "$HERE/static/markwand-tokens.css"  "$WEBROOT/__mw/markwand-tokens.css"
   install -m644 "$HERE/static/markwand-enhance.js"  "$WEBROOT/__mw/markwand-enhance.js"
   install -m644 "$HERE/static/markwand-editor.js"   "$WEBROOT/__mw/markwand-editor.js"
   install -m644 "$HERE/static/edit-button.js"       "$WEBROOT/__mw/edit-button.js"
+  # split-pane multitype viewer (default /markwand/ entry) + its self-hosted libs
+  install -m644 "$HERE/static/markwand-split.html"  "$WEBROOT/__mw/markwand-split.html"
+  install -m644 "$HERE/static/hljs-theme.css"       "$WEBROOT/__mw/hljs-theme.css"
+  install -m644 "$HERE/static/vendor/highlight.min.js" "$WEBROOT/__mw/highlight.min.js"
+  install -m644 "$HERE/static/vendor/marked.min.js"    "$WEBROOT/__mw/marked.min.js"
+  install -m644 "$HERE/static/vendor/purify.min.js"    "$WEBROOT/__mw/purify.min.js"
 fi
 
 # --- 5. nginx subpath fragment (included inside the hub server block) ---
@@ -175,6 +185,17 @@ location /markwand/edit/ {
     # save -> jump back to the markserv viewer (filebrowser has no custom.js hook)
     sub_filter '</body>' '<script src="/__mw/markwand-editor.js"></script></body>';
     sub_filter_once off;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+}
+
+# split-pane multitype viewer = the default entry at exactly /markwand/ (static file).
+# Served from the hub webroot's /__mw/ (root is inherited from the hub server block).
+# `alias <file>` on a trailing-slash location makes nginx append index.html, so use
+# try_files. This exact (=) match wins for the bare path; /markwand/<file> falls
+# through to the markserv prefix proxy below (the .md render fallback).
+location = /markwand/ {
+    try_files /__mw/markwand-split.html =404;
+    default_type text/html;
     add_header Cache-Control "no-cache, no-store, must-revalidate" always;
 }
 
