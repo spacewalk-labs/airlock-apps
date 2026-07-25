@@ -144,6 +144,50 @@ else
   log "warning: depth4 anchor not found (paseo version drift?) — search may be slow; see patches/depth4-search.patch"
 fi
 
+# --- 2b. Opus 5 model backport (idempotent) ---
+# paseo's model list is hardcoded in its dist, so the version pinned above simply
+# has no Opus 5 entry — it cannot appear in the web UI, and restarting the daemon
+# changes nothing (a common misread: the UI looks alive because the gate is up).
+# Backport the upstream 0.2.x entries into the pinned bundle. Another AGPL-3.0
+# derivative — see patches/README.md.
+# The model is actually executed by the Claude Code CLI on the daemon's PATH, so
+# gate on the measured CLI version first: too old means skip (model never offered)
+# rather than offer-then-fail at spawn time.
+CLAUDE_MANIFEST_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/claude/model-manifest.js"
+OPUS5_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/claude-model-opus5.mjs"
+OPUS5_MIN_CLI="2.1.219"
+claude_cli_ver="$(PATH="$UNIT_PATH" command -v claude >/dev/null 2>&1 && PATH="$UNIT_PATH" claude --version 2>/dev/null | awk '{print $1}' || true)"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] apply Opus 5 model backport to $CLAUDE_MANIFEST_JS (claude CLI >= ${OPUS5_MIN_CLI} required)"
+elif [ ! -f "$CLAUDE_MANIFEST_JS" ]; then
+  log "warning: model-manifest.js not found ($CLAUDE_MANIFEST_JS) — Opus 5 backport skipped"
+elif [ ! -f "$OPUS5_PATCHER" ]; then
+  log "warning: Opus 5 patcher not found ($OPUS5_PATCHER) — backport skipped"
+elif [ -z "$claude_cli_ver" ]; then
+  log "warning: cannot determine claude CLI version (unit PATH) — Opus 5 backport skipped"
+elif [ "$(printf '%s\n%s\n' "$OPUS5_MIN_CLI" "$claude_cli_ver" | sort -V | head -1)" != "$OPUS5_MIN_CLI" ]; then
+  log "warning: claude CLI ${claude_cli_ver} < ${OPUS5_MIN_CLI} — Opus 5 backport skipped (upgrade the CLI, then re-run)"
+else
+  o5_rc=0
+  o5_out="$(node "$OPUS5_PATCHER" "$CLAUDE_MANIFEST_JS")" || o5_rc=$?
+  case "$o5_rc" in
+    10) log "Opus 5 model backport already applied" ;;
+    20) log "Opus 5 anchor not found (paseo version drift — already ships Opus 5?) — backport skipped" ;;
+    0)
+      O5_TMP="${CLAUDE_MANIFEST_JS}.paseo-new.mjs"
+      if node --check "$O5_TMP"; then
+        mv "$O5_TMP" "$CLAUDE_MANIFEST_JS" || die "Opus 5 backport mv failed"
+        need_restart=1   # bundle changed -> restart so the daemon serves the new list
+        log "Opus 5 model backport applied (claude CLI ${claude_cli_ver}; default model = Opus 5)"
+      else
+        rm -f "$O5_TMP"
+        die "Opus 5 backport produced invalid JS — not applied"
+      fi
+      ;;
+    *) die "Opus 5 patcher error (rc=$o5_rc): $o5_out" ;;
+  esac
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
@@ -185,7 +229,12 @@ Environment=PASEO_VOICE_MODE_ENABLED=false
 # --foreground: Type=simple. --no-relay: no upstream relay outbound. --web-ui: the
 # browser UI. --listen 127.0.0.1: loopback bind (the gate is the only ingress).
 ExecStart=${PASEO_BIN} daemon start --foreground --no-relay --web-ui --listen 127.0.0.1:${BACKEND_PORT}
-Restart=on-failure
+# always, not on-failure: the web UI's "restart daemon" is a websocket shutdown RPC
+# that exits the worker cleanly (status 0) and expects a supervisor to bring it back.
+# Under on-failure systemd reads that as an intended stop and leaves it dead — so the
+# button permanently kills the daemon (the gate stays up, so it just looks hung).
+# An explicit `systemctl --user stop` still stops it: always only covers self-exit.
+Restart=always
 RestartSec=3
 # Backstop only (idle ~440M; runaway multi-session could OOM — watch in prod).
 MemoryMax=8G

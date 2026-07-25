@@ -14,6 +14,16 @@ the MIT license that covers the rest of Airlock.
   reference / re-derivation copy of the edit; `../install.sh` applies it via an
   idempotent `sed` against the installed bundle.
 
+- **`claude-model-opus5.mjs`** (+ `claude-model-opus5.patch`, the reference copy)
+  — backports the Claude Opus 5 entries into `CLAUDE_MODEL_MANIFEST` and moves the
+  default off Opus 4.8. paseo's model list is hardcoded in its dist, so the pinned
+  version cannot offer a model released after it — and no daemon restart helps.
+  The `.mjs` is the applier `../install.sh` runs: idempotent (sentinel),
+  all-or-nothing (both anchors or nothing), fail-closed (`node --check` before it
+  replaces the file). A paseo bump that already ships Opus 5 exits 20 and is
+  skipped. Only applied when the Claude Code CLI on the daemon PATH is new enough
+  to run the model (>= 2.1.219, upstream's stated minimum).
+
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live

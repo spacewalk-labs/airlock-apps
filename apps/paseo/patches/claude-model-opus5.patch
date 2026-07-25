@@ -1,0 +1,35 @@
+--- a/model-manifest.js
++++ b/model-manifest.js
+@@ -11,6 +11,22 @@
+ };
+ export const CLAUDE_ULTRACODE_THINKING_OPTION_ID = "ultracode";
+ export const CLAUDE_MODEL_MANIFEST = [
++    // [airlock-model-opus5] backported from upstream 0.2.x — absent in the pinned build.
++    {
++        id: "claude-opus-5[1m]",
++        label: "Opus 5 1M",
++        description: "Opus 5 with 1M context window",
++        contextWindowMaxTokens: 1000000,
++        effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
++    },
++    {
++        id: "claude-opus-5",
++        label: "Opus 5",
++        description: "Opus 5 · Latest release",
++        isDefault: true,
++        contextWindowMaxTokens: 200000,
++        effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
++    },
+     {
+         id: "claude-fable-5",
+         label: "Fable 5",
+@@ -29,8 +45,7 @@
+     {
+         id: "claude-opus-4-8",
+         label: "Opus 4.8",
+-        description: "Opus 4.8 · Latest release",
+-        isDefault: true,
++        description: "Opus 4.8 · Previous release",
+         contextWindowMaxTokens: 200000,
+         effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
+         supportsFastMode: true,
