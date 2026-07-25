@@ -24,6 +24,15 @@ the MIT license that covers the rest of Airlock.
   skipped. Only applied when the Claude Code CLI on the daemon PATH is new enough
   to run the model (>= 2.1.219, upstream's stated minimum).
 
+- **`claude-model-prune.mjs`** (+ `claude-model-prune.patch`, the reference copy)
+  — removes superseded entries (Opus 4.7/4.6, Sonnet 4.6) from the same manifest
+  so the picker is the handful people actually choose. Picker-only: the manifest
+  is not on the execution path, so an agent already pinned to a removed model
+  keeps running (it just loses the known context-window maximum in the gauge).
+  Decomposes the array into entry blocks and refuses to write unless they
+  reassemble byte-for-byte, so an upstream format change skips instead of
+  mangling the file. Edit `PRUNE_IDS` to change which models are hidden.
+
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live

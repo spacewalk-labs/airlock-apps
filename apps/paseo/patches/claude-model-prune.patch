@@ -1,0 +1,63 @@
+--- a/model-manifest.js
++++ b/model-manifest.js
+@@ -11,6 +11,7 @@
+ };
+ export const CLAUDE_ULTRACODE_THINKING_OPTION_ID = "ultracode";
+ export const CLAUDE_MODEL_MANIFEST = [
++    // [airlock-model-prune] removed 6 superseded models (picker only — execution does not consult the manifest).
+     // [airlock-model-opus5] backported from upstream 0.2.x — absent in the pinned build.
+     {
+         id: "claude-opus-5[1m]",
+@@ -58,52 +59,6 @@
+         effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
+     },
+     {
+-        id: "claude-opus-4-7[1m]",
+-        label: "Opus 4.7 1M",
+-        description: "Opus 4.7 with 1M context window",
+-        contextWindowMaxTokens: 1000000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
+-        supportsFastMode: true,
+-    },
+-    {
+-        id: "claude-opus-4-7",
+-        label: "Opus 4.7",
+-        description: "Opus 4.7 · Previous release",
+-        contextWindowMaxTokens: 200000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
+-        supportsFastMode: true,
+-    },
+-    {
+-        id: "claude-opus-4-6[1m]",
+-        label: "Opus 4.6 1M",
+-        description: "Opus 4.6 with 1M context window",
+-        contextWindowMaxTokens: 1000000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.standard,
+-        supportsFastMode: true,
+-    },
+-    {
+-        id: "claude-opus-4-6",
+-        label: "Opus 4.6",
+-        description: "Opus 4.6 · Most capable for complex work",
+-        contextWindowMaxTokens: 200000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.standard,
+-        supportsFastMode: true,
+-    },
+-    {
+-        id: "claude-sonnet-4-6[1m]",
+-        label: "Sonnet 4.6 1M",
+-        description: "Sonnet 4.6 with 1M context window",
+-        contextWindowMaxTokens: 1000000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.standard,
+-    },
+-    {
+-        id: "claude-sonnet-4-6",
+-        label: "Sonnet 4.6",
+-        description: "Sonnet 4.6 · Best for everyday tasks",
+-        contextWindowMaxTokens: 200000,
+-        effortLevels: CLAUDE_EFFORT_LEVELS.standard,
+-    },
+-    {
+         id: "claude-haiku-4-5",
+         label: "Haiku 4.5",
+         description: "Haiku 4.5 · Fastest for quick answers",

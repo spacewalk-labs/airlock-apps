@@ -188,6 +188,39 @@ else
   esac
 fi
 
+# --- 2c. prune superseded models (idempotent) ---
+# The pinned manifest still lists Opus 4.7/4.6 and Sonnet 4.6; drop them so the
+# picker is the handful people actually choose. Picker-only: the manifest is not
+# on the execution path, so sessions pinned to a removed model keep running.
+# No CLI version gate here — removing an entry cannot break a spawn.
+PRUNE_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/claude-model-prune.mjs"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] prune superseded models from $CLAUDE_MANIFEST_JS"
+elif [ ! -f "$CLAUDE_MANIFEST_JS" ]; then
+  :   # already warned by the Opus 5 step above
+elif [ ! -f "$PRUNE_PATCHER" ]; then
+  log "warning: model prune patcher not found ($PRUNE_PATCHER) — skipped"
+else
+  pr_rc=0
+  pr_out="$(node "$PRUNE_PATCHER" "$CLAUDE_MANIFEST_JS")" || pr_rc=$?
+  case "$pr_rc" in
+    10) log "model prune already applied" ;;
+    20) log "model prune skipped — $pr_out" ;;
+    0)
+      PR_TMP="${CLAUDE_MANIFEST_JS}.paseo-new.mjs"
+      if node --check "$PR_TMP"; then
+        mv "$PR_TMP" "$CLAUDE_MANIFEST_JS" || die "model prune mv failed"
+        need_restart=1   # bundle changed -> restart so the daemon serves the new list
+        log "model prune applied ($pr_out)"
+      else
+        rm -f "$PR_TMP"
+        die "model prune produced invalid JS — not applied"
+      fi
+      ;;
+    *) die "model prune patcher error (rc=$pr_rc): $pr_out" ;;
+  esac
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
