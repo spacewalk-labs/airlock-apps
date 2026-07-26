@@ -15,7 +15,7 @@ function ck(name, cond, detail) {
 (async () => {
   // Allowed: the owner's own localhost / internal / tailnet + public.
   for (const u of [
-    "http://localhost:3000", "http://127.0.0.1:8080", "http://10.203.0.225",
+    "http://localhost:3000", "http://127.0.0.1:8080", "http://10.0.0.5",
     "http://192.168.1.5", "http://172.16.0.9:7700", "https://example.com",
   ]) {
     let ok = true, msg = "";
