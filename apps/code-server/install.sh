@@ -38,8 +38,14 @@ SLOT_CASE=""
 for (( i = 1; i <= SLOTS; i++ )); do SLOT_CASE="${SLOT_CASE:+$SLOT_CASE|}$i"; done
 
 VER=4.128.0
-SHA256=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188
-ASSET="code-server-${VER}-linux-amd64"
+# arch-aware asset + pinned sha256 — code-server ships both amd64 and arm64 builds,
+# so this installs natively on Apple Silicon / arm64 OrbStack machines too.
+case "$(uname -m)" in
+  x86_64)        ARCH_TAG=amd64; SHA256=79ba26bf186e5268a22b7c17b30a5f288a16c37791f0b86c27859e8fef103188 ;;
+  aarch64|arm64) ARCH_TAG=arm64; SHA256=f8f02c2a81d1a433a4d132716a6f0405f690f6d70dd955942e95e87356db8a10 ;;
+  *) die "code-server: unsupported arch $(uname -m)" ;;
+esac
+ASSET="code-server-${VER}-linux-${ARCH_TAG}"
 BIN="$HOME/.local/bin/code-server"
 LIB="$HOME/.local/lib/${ASSET}"
 SHARE="$HOME/.local/share/airlock-code-server"
@@ -54,7 +60,6 @@ provision_code_server() {
   if [ -x "$LIB/bin/code-server" ] && "$LIB/bin/code-server" --version 2>/dev/null | head -1 | grep -q "$VER"; then
     ln -sfn "$LIB/bin/code-server" "$BIN"; log "code-server $VER present"; return
   fi
-  case "$(uname -m)" in x86_64) ;; *) die "code-server: unsupported arch $(uname -m)";; esac
   local url="https://github.com/coder/code-server/releases/download/v${VER}/${ASSET}.tar.gz"
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then log "[dry] download+verify code-server $VER -> $BIN"; return; fi
   local td; td="$(mktemp -d)"
