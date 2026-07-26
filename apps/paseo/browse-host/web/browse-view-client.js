@@ -43,8 +43,9 @@ function applyRosterMessage(map, msg) {
   var mounted = new WeakSet();
 
   function wsBase() {
-    var proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return proto + "//" + location.host + "/browse-view/";
+    // wss only: paseo is reachable over https alone (Airlock's plaintext ports
+    // serve nothing but a 301), so a ws:// fallback would only downgrade.
+    return "wss://" + location.host + "/browse-view/";
   }
 
   function modsOf(e) {

@@ -184,11 +184,9 @@ function lineCells(line) {
 }
 
 function hubBase() {
-  // The hub serves both :443(https) and :hubHttpPort(http) — match the devterm page
-  // scheme to avoid mixed-content. On https the hub is 443 (no port).
-  return location.protocol === 'https:'
-    ? 'https://' + location.hostname
-    : 'http://' + location.hostname + ':' + (DT.hubHttpPort || 9999);
+  // The hub is https on 443 (no port). Airlock serves nothing over plain http —
+  // its plaintext ports only 301 here — so this never needs a scheme fallback.
+  return 'https://' + location.hostname;
 }
 
 function resolveWhy(j, p) {
@@ -1003,8 +1001,9 @@ async function connect() {
   } catch (e) { token = ''; }
   if (mySeq !== connectSeq) return;   // a newer connect() started during await -> this one won't make a WS
   try {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws' + location.search, ['tty']);
+    // wss only — the page is always loaded over TLS (plaintext ports just 301),
+    // so a ws:// fallback could only ever downgrade a terminal session.
+    ws = new WebSocket('wss://' + location.host + '/ws' + location.search, ['tty']);
   } catch (e) { connecting = false; scheduleReconnect(); return; }
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {

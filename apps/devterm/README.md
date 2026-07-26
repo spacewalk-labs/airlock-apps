@@ -28,8 +28,9 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
 
 ## Config (`[apps.devterm]`)
 
-`https_port` (secure-context, clipboard) · `public_port` (convenience http) ·
-`gate_port` (loopback nginx gate) · `backend_port` (loopback devterm-gate) ·
+`https_port` (secure-context, clipboard) · `public_port` (plaintext; 301s to
+`https_port` and serves nothing) · `redirect_port` (loopback server behind that
+301) · `gate_port` (loopback nginx gate) · `backend_port` (loopback devterm-gate) ·
 `ttyd_port` (loopback ttyd) · `font_size` · `lang`.
 
 ### Optional features (default off, degrade cleanly when their deps are absent)

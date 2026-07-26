@@ -3,30 +3,11 @@
 <head>
 <meta charset="utf-8">
 <script>
-// Runtime config, templated in by the installer from airlock.toml (ports + feature
-// flags). Read before anything else so the redirect below can run early.
+// Runtime config, templated in by the installer from airlock.toml (feature flags).
+// No scheme/port hopping lives here any more: the plaintext tailnet port serves
+// nothing but a 301 to the https FQDN (gate/nginx-lib.sh emit_https_redirect), so
+// this page is only ever reached in a secure context — clipboard, OSC52, PWA.
 window.__DEVTERM = %%DEVTERM_CONFIG%%;
-</script>
-<script>
-// If reached over the plain-http convenience port, hop to the https port (a secure
-// context — clipboard auto-copy, OSC52, full PWA). Origin/host derive from location;
-// nothing is hardcoded. Two exceptions:
-//   1) direct IP access has no cert FQDN -> stay on http (the hub does the same).
-//   2) inside a home-screen (standalone) app, the https port is a different origin
-//      and navigating to it bounces out to Safari -> don't redirect.
-(function () {
-  try {
-    var cfg = window.__DEVTERM || {};
-    if (location.protocol !== 'http:') return;
-    if (!cfg.httpsPort || String(location.port) !== String(cfg.publicPort || '')) return;
-    var standalone = (window.navigator && window.navigator.standalone) ||
-                     (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
-    if (standalone) return;
-    var h = location.hostname;
-    if (/^[0-9.]+$/.test(h) || h.indexOf(':') >= 0) return;   // IPv4/IPv6 = no cert -> stay on http
-    location.replace('https://' + h + ':' + cfg.httpsPort + location.pathname + location.search + location.hash);
-  } catch (e) {}
-})();
 </script>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
