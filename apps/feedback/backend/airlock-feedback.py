@@ -53,6 +53,9 @@ def submit_feedback(text, owner):
     req = urllib.request.Request(
         INTAKE_URL + '/submit', data=body, method='POST',
         headers={'Content-Type': 'application/json',
+                 # Explicit UA: some edge WAFs (e.g. Cloudflare Bot Fight Mode)
+                 # 403 the default `Python-urllib` User-Agent.
+                 'User-Agent': 'airlock-feedback/1',
                  'X-Airlock-Feedback-Token': TOKEN})
     try:
         with urllib.request.urlopen(req, timeout=20) as r:
