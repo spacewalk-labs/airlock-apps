@@ -99,6 +99,18 @@ provision_ttyd
 # --- 2. shell wrapper ---
 airlock_run install -D -m755 "$HERE/bin/devterm-shell" "$HOME/.local/bin/devterm-shell"
 
+# --- 2b. Claude account tools (only when accounts=true) ---
+# The bundled claude-switch/claude-status are the default: they make Claude Code login
+# and account switching work out of the box. Setting claude_switch/claude_status in
+# airlock.toml points at your own build instead (the bundled copies are still installed,
+# so the CLI stays available in the terminal).
+if [ "$ACCOUNTS" = true ]; then
+  airlock_run install -D -m755 "$HERE/bin/claude-switch" "$HOME/.local/bin/claude-switch"
+  airlock_run install -D -m755 "$HERE/bin/claude-status" "$HOME/.local/bin/claude-status"
+  [ -n "$CLAUDE_SWITCH" ] || CLAUDE_SWITCH="$HOME/.local/bin/claude-switch"
+  [ -n "$CLAUDE_STATUS" ] || CLAUDE_STATUS="$HOME/.local/bin/claude-status"
+fi
+
 # --- 3. custom web client into WEB_ROOT (index.html templated with runtime config) ---
 CFG_JSON="{\"accounts\":${ACCOUNTS},\"markwand\":${MARKWAND},\"orca\":$([ -n "$ORCA_SHIM" ] && echo true || echo false)}"
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then

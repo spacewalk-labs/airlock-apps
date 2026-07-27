@@ -32,8 +32,25 @@ c_gno=$(code                                    "http://127.0.0.1:${GATE}/")
 c_redir=$(code -H "${HDR}: ${OWNER}"            "http://127.0.0.1:${REDIRECT}/")
 loc_redir=$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 5 "http://127.0.0.1:${REDIRECT}/")
 
-echo "[devterm smoke] ttyd=${c_ttyd}/200 | backend owner=${c_bown}/200 deny=${c_bdeny}/403 no=${c_bno}/403 sessions=${c_sess}/200 | gate owner=${c_gown}/200 deny=${c_gdeny}/403 no=${c_gno}/403 | redirect=${c_redir}/301 -> ${loc_redir}"
+# accounts feature (only when enabled): the account/login API must be live, not a
+# silent "disabled" — that is what a missing claude-switch would look like.
+acct_note=""
+if [ "${AIRLOCK_DEVTERM_ACCOUNTS:-false}" = true ]; then
+  acct_body=$(curl -s --max-time 8 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${BACKEND}/accounts")
+  c_adeny=$(code -H "${HDR}: nobody@example.com" "http://127.0.0.1:${BACKEND}/accounts")
+  case "$acct_body" in
+    *'"enabled": true'*|*'"enabled":true'*) acct_ok=1 ;;
+    *) acct_ok=0 ;;
+  esac
+  acct_note=" | accounts enabled=${acct_ok}/1 deny=${c_adeny}/403"
+fi
+
+echo "[devterm smoke] ttyd=${c_ttyd}/200 | backend owner=${c_bown}/200 deny=${c_bdeny}/403 no=${c_bno}/403 sessions=${c_sess}/200 | gate owner=${c_gown}/200 deny=${c_gdeny}/403 no=${c_gno}/403 | redirect=${c_redir}/301 -> ${loc_redir}${acct_note}"
 fail=0
+if [ "${AIRLOCK_DEVTERM_ACCOUNTS:-false}" = true ]; then
+  [ "${acct_ok:-0}" = 1 ] || { echo "FAIL /accounts reports disabled (claude-switch missing?)"; fail=1; }
+  [ "${c_adeny:-}" = 403 ] || { echo "FAIL /accounts other identity not denied (GATE HOLE)"; fail=1; }
+fi
 [ "$c_ttyd"  = 200 ] || { echo "FAIL ttyd direct"; fail=1; }
 [ "$c_bown"  = 200 ] || { echo "FAIL backend owner not allowed"; fail=1; }
 [ "$c_bdeny" = 403 ] || { echo "FAIL backend other identity not denied (GATE HOLE)"; fail=1; }

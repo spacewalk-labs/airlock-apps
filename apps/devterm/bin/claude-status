@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""claude-status — report this box's Claude (and Codex) login state, read-only.
+
+Runs as the box's user and answers: which account is logged in here, and is it alive?
+
+Secrets never leave: no token values, no hashes — only identity (email/org), expiry
+and health. Identity is not inferred, it is asked of the authoritative source
+(GET /api/oauth/profile, read-only, costs no quota); ~/.claude.json's oauthAccount is
+not refreshed on a swap and is stale.
+
+Output is a single JSON line on stdout (what devterm's gate consumes):
+  claude-status              -> {host, user, ts, live, pool[], codex}
+  claude-status --usage <slot>  -> that one account's state incl. 5h/7d utilization
+                                   (slot = "live" or a pool account name)
+"""
+import base64
+import json
+import os
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+
+HOME = os.path.expanduser("~")
+LIVE = os.path.join(HOME, ".claude", ".credentials.json")
+POOL = os.path.join(HOME, ".claude-accounts")
+CODEX_AUTH = os.path.join(HOME, ".codex", "auth.json")   # Codex (ChatGPT) single account
+PROFILE_ENDPOINT = "https://api.anthropic.com/api/oauth/profile"
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token"
+USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
+
+
+def _get(url, token, timeout=8):
+    """Read-only GET (costs no quota). Returns (json|None, err); err='auth' means the
+    token was rejected — a verdict, not a hiccup."""
+    if not token:
+        return None, "no-token"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token}", "anthropic-version": "2023-06-01",
+        "anthropic-beta": "oauth-2025-04-20", "User-Agent": "claude-cli/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r), None
+    except urllib.error.HTTPError as e:
+        # 401 = token rejected (dead) / 429 = query throttle (transient, NOT exhausted)
+        # / anything else = transient. Collapsing them kills healthy accounts on a blip.
+        return None, "auth" if e.code == 401 else f"http-{e.code}"
+    except Exception as e:
+        return None, type(e).__name__
+
+
+def _usage(token):
+    """5h/7d utilization %. Exhaustion is judged by utilization only — a 429 is a query
+    throttle, not an exhausted account."""
+    j, err = _get(USAGE_ENDPOINT, token)
+    if err:
+        return {"err": err}
+
+    def pct(o):
+        return round(o["utilization"]) if isinstance(o, dict) and o.get("utilization") is not None else None
+    fh, sd = j.get("five_hour") or {}, j.get("seven_day") or {}
+    return {"use5h": pct(fh), "use7d": pct(sd),
+            "reset5h": fh.get("resets_at"), "reset7d": sd.get("resets_at")}
+
+
+def _oauth(d):
+    return d.get("claudeAiOauth") or d
+
+
+def _profile(token):
+    """Who the token really belongs to. Returns (info|None, err); err='auth' = dead."""
+    j, err = _get(PROFILE_ENDPOINT, token)
+    if err:
+        return None, err
+    acct, org = j.get("account") or {}, j.get("organization") or {}
+    ot = org.get("organization_type", "")
+    return {"email": acct.get("email"), "org": ot,
+            "kind": "team" if ot == "claude_team" else "personal",
+            "tier": org.get("rate_limit_tier")}, None
+
+
+def _describe(path, with_usage=False, is_live=True):
+    """One credential file -> identity + health (never the token itself).
+
+    with_usage is off by default on purpose: it costs one extra usage call per account,
+    and querying live + every pool slot on each status call turns several boxes polling
+    at once into a burst that earns a 429. Usage is asked for one account at a time."""
+    try:
+        creds = json.load(open(path))
+    except Exception as e:
+        return {"state": "unreadable", "reason": f"{type(e).__name__}"}
+    o = _oauth(creds)
+    now = time.time()
+    at_ok = o.get("expiresAt", 0) / 1000 > now
+    rt_left = o.get("refreshTokenExpiresAt", 0) / 1000 - now
+    out = {"atValid": at_ok, "rtDaysLeft": round(rt_left / 86400, 1),
+           "sub": o.get("subscriptionType")}
+    if rt_left <= 0:
+        # refreshToken expired: decidable without asking anyone. Only a re-login helps.
+        out.update(state="dead", reason="refreshToken expired — re-login required")
+        return out
+    if not at_ok:
+        if is_live:
+            # live is Claude Code's to refresh. Refreshing it here would hijack and
+            # break that lineage.
+            out.update(state="stale",
+                       reason="accessToken expired (refreshToken alive — Claude Code renews it)")
+            return out
+        # pool slots have no other refresher, so this box is it. Without this the
+        # accessToken dies after 8h and identity/usage can never be queried again.
+        if not _refresh_pool(path, creds):
+            out.update(state="unknown",
+                       reason="accessToken expired and refresh failed — may be transient")
+            return out
+        out["atValid"] = at_ok = True
+        out["rtDaysLeft"] = round((o.get("refreshTokenExpiresAt", 0) / 1000 - now) / 86400, 1)
+    tok = o.get("accessToken", "")
+    ident, err = _profile(tok)
+    if err == "auth":
+        out.update(state="dead", reason="token rejected (401) — session ended or subscription cancelled")
+        return out
+    if err:
+        out.update(state="unknown", reason=f"lookup failed ({err}) — may be transient")
+        return out
+    out.update(state="ok", **ident)
+    if with_usage:
+        # queried with this box's own token: only numbers leave, never the token.
+        out["usage"] = _usage(tok)
+    return out
+
+
+def _refresh_pool(path, creds):
+    """Revive an expired *pool* slot (True on success).
+
+    Why only pool: refreshTokens rotate, so a lineage may have exactly one refresher.
+      - live: Claude Code refreshes it. Touching it here breaks that lineage. Never.
+      - pool: nobody else refreshes it, so this box is the sole refresher.
+    A rotated token must be saved back immediately, or the next refresh kills the
+    lineage."""
+    o = _oauth(creds)
+    rt = o.get("refreshToken")
+    if not rt:
+        return False
+    body = json.dumps({"grant_type": "refresh_token", "refresh_token": rt,
+                       "client_id": CLIENT_ID}).encode()
+    req = urllib.request.Request(TOKEN_ENDPOINT, data=body, method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "Accept": "application/json",
+                                          "User-Agent": "claude-cli/2.1"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            resp = json.loads(r.read())
+    except Exception:
+        return False      # 400/401 = dead, anything else transient; _describe reports state
+    o["accessToken"] = resp["access_token"]
+    if resp.get("refresh_token"):
+        o["refreshToken"] = resp["refresh_token"]
+    if resp.get("expires_in"):
+        o["expiresAt"] = int((time.time() + resp["expires_in"]) * 1000)
+    if resp.get("refresh_token_expires_in"):
+        o["refreshTokenExpiresAt"] = int((time.time() + resp["refresh_token_expires_in"]) * 1000)
+    try:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(creds, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)     # persist the rotation — mandatory
+    except OSError:
+        return False
+    return True
+
+
+def _slot_path(slot):
+    """slot='live' -> the live file, otherwise a pool slot. Blocks path escape."""
+    if slot == "live":
+        return LIVE
+    if not slot or "/" in slot or slot.startswith("."):
+        return None
+    p = os.path.join(POOL, slot + ".json")
+    return p if os.path.isfile(p) else None
+
+
+def _jwt_claims(tok):
+    """Decode only the JWT payload segment (no signature check — we read identity
+    claims, we do not trust them for authz). Returns claims only, never the token."""
+    seg = tok.split(".")[1]
+    seg += "=" * (-len(seg) % 4)
+    return json.loads(base64.urlsafe_b64decode(seg))
+
+
+def _codex_status():
+    """This box's Codex (ChatGPT) login, read from auth.json's id_token — no API call.
+    Emits email/plan/account id/last refresh only; never the token or a hash of it.
+    Codex is single-account (no pool, no swap). Health is present/absent — a silently
+    dropped session is not cheaply detectable; the re-login button is the remedy."""
+    if not os.path.isfile(CODEX_AUTH):
+        return {"state": "none", "reason": "not logged in to codex (no auth.json)"}
+    try:
+        d = json.load(open(CODEX_AUTH))
+    except Exception as e:
+        return {"state": "unreadable", "reason": type(e).__name__}
+    mode = d.get("auth_mode")
+    idt = (d.get("tokens") or {}).get("id_token")
+    if not idt:
+        # No id_token = API-key mode or similar: logged in, but no ChatGPT identity.
+        return {"state": "apikey" if d.get("OPENAI_API_KEY") else "unknown", "mode": mode,
+                "reason": "no id_token (API key mode?)"}
+    try:
+        p = _jwt_claims(idt)
+    except Exception:
+        return {"state": "unknown", "mode": mode, "reason": "could not parse id_token"}
+    auth = p.get("https://api.openai.com/auth") or {}
+    return {"state": "ok", "mode": mode, "email": p.get("email"),
+            "plan": auth.get("chatgpt_plan_type"),
+            "accountId": auth.get("chatgpt_account_id"),
+            "lastRefresh": d.get("last_refresh")}
+
+
+def main():
+    # `--usage <slot>` asks for *one* account's usage, at the moment it is requested.
+    # Without it no usage call is made at all.
+    args = sys.argv[1:]
+    if "--usage" in args:
+        i = args.index("--usage")
+        slot = args[i + 1] if len(args) > i + 1 else "live"
+        p = _slot_path(slot)
+        if not p:
+            json.dump({"error": f"no such account: {slot}"}, sys.stdout, ensure_ascii=False)
+            print(); return
+        json.dump(dict(slot=slot, **_describe(p, with_usage=True, is_live=(slot == "live"))),
+                  sys.stdout, ensure_ascii=False)
+        print(); return
+
+    r = {"host": os.uname().nodename, "user": os.environ.get("USER") or "?",
+         "ts": int(time.time()),
+         "hasClaudeSwitch": bool(shutil.which("claude-switch"))}
+    r["live"] = _describe(LIVE) if os.path.isfile(LIVE) else {
+        "state": "none", "reason": "never logged in (no live credential)"}
+    # The .active slot is the same account as live, but its pool copy is a snapshot from
+    # swap time: once Claude Code refreshed live, that copy's refreshToken is already
+    # rotated away. Refreshing with it would fail and show a healthy account as
+    # "unknown" — so for the active slot we report live as-is.
+    try:
+        active = open(os.path.join(POOL, ".active")).read().strip()
+    except OSError:
+        active = None
+    pool = []
+    if os.path.isdir(POOL):
+        for f in sorted(os.listdir(POOL)):
+            if not f.endswith(".json") or f.startswith("."):
+                continue
+            slot = f[:-5]
+            if slot == active and r["live"].get("state") in ("ok", "stale"):
+                pool.append(dict(r["live"], slot=slot, isActive=True))
+            else:
+                pool.append(dict(slot=slot,
+                                 **_describe(os.path.join(POOL, f), is_live=False)))
+    r["pool"] = pool
+    r["codex"] = _codex_status()
+    json.dump(r, sys.stdout, ensure_ascii=False)
+    print()
+
+
+if __name__ == "__main__":
+    main()

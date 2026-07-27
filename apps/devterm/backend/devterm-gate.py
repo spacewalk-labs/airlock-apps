@@ -35,8 +35,9 @@ Env:
   AIRLOCK_CODE_ROOT        code root for the markwand file-open (optional)
   DEVTERM_MARKWAND         "true" to enable the terminal file-path -> markwand link
   DEVTERM_ACCOUNTS         "true" to enable the Claude account pool UI
-  DEVTERM_CLAUDE_SWITCH    path to the claude-switch CLI (optional, repo-external)
-  DEVTERM_CLAUDE_STATUS    path to the claude-status probe (optional, repo-external)
+  DEVTERM_CLAUDE_SWITCH    path to the claude-switch CLI (the installer points this at
+                           apps/devterm/bin/claude-switch unless overridden)
+  DEVTERM_CLAUDE_STATUS    path to the claude-status probe (likewise)
   DEVTERM_FLEET_STORE      path to a shared usage store file (optional)
   DEVTERM_FLEET_STORE_URL  URL of a shared usage store (optional, no default host)
   DEVTERM_ORCA_SHIM        path to the Orca CLI shim (optional; worktree sidebar)
@@ -1242,7 +1243,8 @@ async def _serve_upload_file(cr, headers, leftover, cw):
 
 # ============================ optional: Claude account pool ============================
 # All of the following degrade to a clean "disabled" response unless DEVTERM_ACCOUNTS
-# is true and the repo-external claude-switch / claude-status tools are present.
+# is true and the claude-switch / claude-status tools are present (installed from
+# apps/devterm/bin by default; DEVTERM_CLAUDE_* can point elsewhere).
 
 def _accounts_enabled():
     return ACCOUNTS and CLAUDE_SWITCH and os.path.isfile(CLAUDE_SWITCH)

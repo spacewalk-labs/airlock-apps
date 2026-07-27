@@ -35,11 +35,24 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
 
 ### Optional features (default off, degrade cleanly when their deps are absent)
 
-- **Claude account pool + Codex login** (`accounts = true`): switch between Claude
-  accounts and manage a Codex login from the account popup. Depends on the
-  repo-external `claude-switch` / `claude-status` tools (paths via `claude_switch` /
-  `claude_status`) and the `codex` CLI. When off or the tools are missing, the UI is
-  hidden and the endpoints return a clean "disabled".
+- **Claude Code login + account pool, and Codex login** (`accounts = true`): log in to
+  a Claude Code account from the browser, keep several accounts in a pool, switch
+  between them, and manage the box's Codex login — all from the account popup.
+
+  The Claude side ships with airlock: `bin/claude-switch` (login + pool + switch) and
+  `bin/claude-status` (read-only identity/health probe) are installed to
+  `~/.local/bin/` when `accounts = true`, and are usable from the terminal too. Set
+  `claude_switch` / `claude_status` only to point at your own build. The Codex half
+  needs the `codex` CLI. When the feature is off or a tool is missing, the UI is hidden
+  and the endpoints return a clean "disabled".
+
+  Login is headless — no callback port, no browser on the box: the popup issues a PKCE
+  login link (`claude-switch login-url`, verifier stays server-side), you approve in any
+  browser, and paste the returned code back (`login-code`). Credentials live in
+  `~/.claude-accounts/<id>.json` (mode 600); the active one is copied into
+  `~/.claude/.credentials.json`, which is what Claude Code reads. Accounts are named
+  after the id you log in as — `email (personal|team)` — so a re-login always revives
+  the same slot. No secret value is ever returned to the browser or logged.
 - **Fleet usage store** (`fleet_store` / `fleet_store_url`): annotates the account
   popup with utilization from a shared store. No host is hardcoded; unset = no usage
   numbers (the list still works).
