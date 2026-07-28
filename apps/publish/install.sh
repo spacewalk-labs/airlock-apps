@@ -31,11 +31,27 @@ UPLOADS_DIR="$HOME/uploads"
 BACKEND_PY="$ROOT/apps/publish/backend/airlock-publish.py"
 UNIT_DIR="$HOME/.config/systemd/user"
 
-# Optional pluggable external-publish target (absent = local-only mode).
+# Optional pluggable external-publish target (absent = share-manager only).
+#   mode=remote (default) -> POST snapshots to an ingest service you host
+#   mode=local            -> write snapshots into PUBLIC_DIR, served by this box
 INGEST_URL="$(airlock_config get apps.publish.public_target.ingest_url 2>/dev/null || true)"
 BASE_URL="$(airlock_config get apps.publish.public_target.base_url 2>/dev/null || true)"
 TOKEN_ENV="$(airlock_config get apps.publish.public_target.token_env 2>/dev/null || true)"
 [ -n "$TOKEN_ENV" ] || TOKEN_ENV=AIRLOCK_PUBLISH_TOKEN
+PUBLIC_MODE="$(airlock_config get apps.publish.public_target.mode 2>/dev/null || true)"
+[ -n "$PUBLIC_MODE" ] || PUBLIC_MODE=remote
+PUBLIC_DIR="$(airlock_config get apps.publish.public_target.public_dir 2>/dev/null || true)"
+STATE_DIR="$HOME/.local/state/airlock"
+if [ "$PUBLIC_MODE" = local ]; then
+  [ -n "$PUBLIC_DIR" ] || PUBLIC_DIR=/opt/airlock/share-public
+  PUBLIC_DIR="${PUBLIC_DIR/#\~/$HOME}"
+  # Hard refusal: the public dir must not be (or contain, or sit inside) the
+  # tailnet-internal share — that is how the internal share leaks to the world.
+  rp="$(readlink -f "$PUBLIC_DIR" 2>/dev/null || echo "$PUBLIC_DIR")"
+  rs="$(readlink -f "$SHARE_DIR" 2>/dev/null || echo "$SHARE_DIR")"
+  case "$rp/" in "$rs"/*) die "public_dir ($rp) is inside share_dir ($rs) — refusing: that would publish the internal share";; esac
+  case "$rs/" in "$rp"/*) die "public_dir ($rp) contains share_dir ($rs) — refusing: that would publish the internal share";; esac
+fi
 
 # --- 1. directories ---
 # share_dir under /opt is world-readable so nginx can serve /publish/files/.
@@ -46,6 +62,19 @@ else
   airlock_run mkdir -p "$SHARE_DIR"        # user-owned path (e.g. ~/public_html)
 fi
 airlock_run mkdir -p "$UPLOADS_DIR"
+# local public target: the backend (systemd --user) writes it, nginx only reads.
+# 0755 so the nginx worker can traverse/read regardless of the service umask.
+if [ "$PUBLIC_MODE" = local ]; then
+  if [ "${PUBLIC_DIR#/opt/}" != "$PUBLIC_DIR" ]; then
+    airlock_run sudo mkdir -p "$PUBLIC_DIR"
+    airlock_run sudo chown "$(id -un):$(id -gn)" "$PUBLIC_DIR"
+  else
+    airlock_run mkdir -p "$PUBLIC_DIR"
+  fi
+  airlock_run chmod 755 "$PUBLIC_DIR"
+  airlock_run mkdir -p "$STATE_DIR"        # owner identities live here — not in a web root
+  airlock_run chmod 700 "$STATE_DIR"
+fi
 
 # --- 2. systemd user unit (loopback backend) + TTL cleanup timer ---
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
@@ -68,6 +97,9 @@ Environment=AIRLOCK_IDENTITY_HEADER=${IDENTITY_HEADER}
 Environment=AIRLOCK_PUBLISH_INGEST_URL=${INGEST_URL}
 Environment=AIRLOCK_PUBLISH_BASE_URL=${BASE_URL}
 Environment=AIRLOCK_PUBLISH_TOKEN_ENV=${TOKEN_ENV}
+Environment=AIRLOCK_PUBLISH_PUBLIC_MODE=${PUBLIC_MODE}
+Environment=AIRLOCK_PUBLISH_PUBLIC_DIR=${PUBLIC_DIR}
+Environment=AIRLOCK_PUBLISH_STATE_DIR=${STATE_DIR}
 ExecStart=$(command -v python3) ${BACKEND_PY}
 Restart=on-failure
 RestartSec=3
@@ -77,11 +109,16 @@ WantedBy=default.target
 UNIT
   cat >"$UNIT_DIR/airlock-publish-cleanup.service" <<UNIT
 [Unit]
-Description=airlock publish — uploads TTL sweep (24h)
+Description=airlock publish — uploads TTL sweep (24h) + public snapshot expiry
 
 [Service]
 Type=oneshot
+# MUST mirror the service's public env — the sweep and the writer have to agree
+# on which directory and state file they are talking about.
 Environment=AIRLOCK_PUBLISH_UPLOADS_DIR=${UPLOADS_DIR}
+Environment=AIRLOCK_PUBLISH_PUBLIC_MODE=${PUBLIC_MODE}
+Environment=AIRLOCK_PUBLISH_PUBLIC_DIR=${PUBLIC_DIR}
+Environment=AIRLOCK_PUBLISH_STATE_DIR=${STATE_DIR}
 ExecStart=$(command -v python3) ${BACKEND_PY} --cleanup
 UNIT
   cat >"$UNIT_DIR/airlock-publish-cleanup.timer" <<'UNIT'
@@ -135,4 +172,8 @@ NGINX
 log "wrote nginx fragment: $frag"
 
 # NOTE: smoke runs from the orchestrator AFTER nginx reload (gate not live before).
-log "publish installed (owner: ${AIRLOCK_OWNER}; external target: ${INGEST_URL:-<none, local-only>})"
+if [ "$PUBLIC_MODE" = local ]; then
+  log "publish installed (owner: ${AIRLOCK_OWNER}; external target: local -> ${PUBLIC_DIR} at ${BASE_URL:-<base_url MISSING>})"
+else
+  log "publish installed (owner: ${AIRLOCK_OWNER}; external target: ${INGEST_URL:-<none, share-manager only>})"
+fi

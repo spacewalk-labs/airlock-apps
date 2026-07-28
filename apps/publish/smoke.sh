@@ -24,7 +24,24 @@ c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/
 # the list endpoint must return valid JSON with ok:true for the owner
 okjson=no; curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list" | grep -q '"ok": *true' && okjson=yes
 
-echo "[publish smoke] backend=${c_be}/200 ui=${c_ui}/200 list=${c_list}/200 files=${c_files}/200 deny=${c_deny}/403 no-header=${c_no}/403 list-json=${okjson}/yes"
+# local public target (if configured): the public dir must exist, be writable by
+# us, and must NOT be the tailnet-internal share — that overlap is the leak.
+PUB_MODE="$(airlock_config get apps.publish.public_target.mode 2>/dev/null || true)"
+localpub=n/a
+if [ "$PUB_MODE" = local ]; then
+  PUB_DIR="$(airlock_config get apps.publish.public_target.public_dir 2>/dev/null || true)"
+  [ -n "$PUB_DIR" ] || PUB_DIR=/opt/airlock/share-public
+  SH="$(readlink -f "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" 2>/dev/null)"
+  PD="$(readlink -f "$PUB_DIR" 2>/dev/null)"
+  localpub=ok
+  [ -d "$PUB_DIR" ] && [ -w "$PUB_DIR" ] || localpub="not-writable:$PUB_DIR"
+  [ "$PD" != "$SH" ] || localpub="OVERLAPS-SHARE:$PD"
+  # the backend must actually report local mode (i.e. it did not refuse at startup)
+  curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health" | grep -q '"public_enabled": *true' \
+    || localpub="backend-disabled (check: journalctl --user -u airlock-publish)"
+fi
+
+echo "[publish smoke] backend=${c_be}/200 ui=${c_ui}/200 list=${c_list}/200 files=${c_files}/200 deny=${c_deny}/403 no-header=${c_no}/403 list-json=${okjson}/yes local-public=${localpub}"
 fail=0
 [ "$c_be"   = 200 ] || { echo "FAIL backend health"; fail=1; }
 [ "$c_ui"   = 200 ] || { echo "FAIL manager UI"; fail=1; }
@@ -33,4 +50,5 @@ fail=0
 [ "$c_deny" = 403 ] || { echo "FAIL other identity not denied (GATE HOLE)"; fail=1; }
 [ "$c_no"   = 403 ] || { echo "FAIL missing header not denied (GATE HOLE)"; fail=1; }
 [ "$okjson" = yes ] || { echo "FAIL list did not return ok:true json"; fail=1; }
+{ [ "$localpub" = n/a ] || [ "$localpub" = ok ]; } || { echo "FAIL local public target: $localpub"; fail=1; }
 [ "$fail" = 0 ]

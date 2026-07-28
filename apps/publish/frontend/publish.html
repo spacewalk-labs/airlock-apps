@@ -292,6 +292,7 @@
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pub-h">
     <h2 id="pub-h">Publish externally</h2>
     <p>A self-contained snapshot of <b id="pub-name"></b> is copied to a public URL. Anyone with the link can view it — publish public-safe content only. Editing the source later requires re-publishing to refresh the snapshot.</p>
+    <p class="exp" id="pub-dest"></p>
     <label class="field">Duration
       <select id="pub-ttl">
         <option value="24">24 hours</option>
@@ -330,7 +331,7 @@
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
 
-var state = { items: [], pubBySrc: {}, publicEnabled: false, root: "",
+var state = { items: [], pubBySrc: {}, publicEnabled: false, publicMode: "", root: "",
               selected: {}, confirming: {}, filtered: [] };
 
 function esc(s) {
@@ -404,6 +405,7 @@ function load() {
   return apiGet("/publish/api/list").then(function (d) {
     state.items = d.items || [];
     state.publicEnabled = !!d.public_enabled;
+    state.publicMode = d.public_mode || "";
     state.root = d.root || "";
     var live = {};
     state.items.forEach(function (x) { live[x.name] = true; });
@@ -808,6 +810,10 @@ function openPubModal(name) {
   mPub.dataset.url = "";
   $("#pub-name").textContent = name;
   $("#pub-result").hidden = true;
+  // Where the snapshot goes, and who enforces the duration.
+  $("#pub-dest").textContent = state.publicMode === "local"
+    ? "Served by this machine. The duration is enforced here — the page is deleted from disk when it expires."
+    : "Sent to your configured ingest service, which enforces the duration.";
   $("#pub-ttl").disabled = false;
   var go = $("#pub-go"); go.disabled = false; go.hidden = false; go.textContent = "Publish";
   mPub.classList.add("show");

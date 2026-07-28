@@ -8,20 +8,31 @@ confirm), batch, repair broken symlinks, and accept clipboard/file uploads into
 ~/uploads (the notepad drop). It never parses airlock.toml itself — the installer
 passes everything via the environment.
 
-Optional external publish is a PLUGGABLE target: if AIRLOCK_PUBLISH_INGEST_URL +
-a token are configured, a published HTML page can be snapshotted (assets inlined
-into one self-contained file) and POSTed to that ingest endpoint, returning a
-public URL. Unconfigured => local-only (the external endpoints report disabled).
+Optional external publish is a PLUGGABLE target with TWO backends, chosen by
+[apps.publish.public_target] mode:
 
-Ingest protocol (what a target must implement) — JSON over HTTPS, the token in
-the `X-Airlock-Publish-Token` header:
+  mode = "remote" (default) — POST the snapshot to YOUR ingest service
+      (AIRLOCK_PUBLISH_INGEST_URL + base_url + token). You host the receiver.
+  mode = "local"            — write the snapshot into a public directory that
+      THIS box's nginx serves (AIRLOCK_PUBLISH_PUBLIC_DIR + base_url). No second
+      service, no token; expiry is enforced by this process (list/ingest sweep +
+      the --cleanup timer).
+
+Unconfigured => local-share manager only (the external endpoints report disabled
+and the UI hides them).
+
+Ingest protocol (what a REMOTE target must implement) — JSON over HTTPS, the
+token in the `X-Airlock-Publish-Token` header:
   POST <ingest>/ingest      {slug, owner, src, title, ttl_hours, html_b64} -> {ok, result:{expiry, ttl_hours}}
   GET  <ingest>/list?owner= -> {ok, items:[{slug, owner, src, title, expiry, expired}]}
   POST <ingest>/revoke      {slug, owner} -> {ok}
   POST <ingest>/set-expiry  {slug, owner, ttl_hours} -> {ok}
 The public URL shown to the user is `<base_url>/<slug>/`.
+
+Design notes for the local target live in docs/design/publish-local-target.md.
 """
 import base64
+import fcntl
 import json
 import os
 import re
@@ -47,7 +58,56 @@ BASE_URL = os.environ.get('AIRLOCK_PUBLISH_BASE_URL', '').rstrip('/')
 # config file); default AIRLOCK_PUBLISH_TOKEN. The installer wires an EnvironmentFile.
 _TOKEN_ENV = os.environ.get('AIRLOCK_PUBLISH_TOKEN_ENV', 'AIRLOCK_PUBLISH_TOKEN')
 TOKEN = os.environ.get(_TOKEN_ENV, '')
-PUBLIC_ENABLED = bool(INGEST_URL and BASE_URL and TOKEN)
+# "local" is opt-in and EXPLICIT. Inferring it from which keys are present would
+# silently turn a half-configured remote install (base_url left behind, token
+# gone) into a live public publisher, so the mode is never guessed.
+PUBLIC_MODE = (os.environ.get('AIRLOCK_PUBLISH_PUBLIC_MODE', '') or 'remote').strip().lower()
+PUBLIC_DIR = os.path.expanduser(os.environ.get('AIRLOCK_PUBLISH_PUBLIC_DIR', ''))
+STATE_DIR = os.path.expanduser(os.environ.get('AIRLOCK_PUBLISH_STATE_DIR', '~/.local/state/airlock'))
+STATE_FILE = os.path.join(STATE_DIR, 'publish-public.json')
+LOCK_FILE = os.path.join(STATE_DIR, 'publish-public.lock')
+LOCAL_MAX_BYTES = 25 * 1024 * 1024      # local disk guard; the remote path stays unlimited
+RECONCILE_GRACE = 24 * 3600             # untracked slug dirs get swept after this
+TTL_MIN_H, TTL_MAX_H, TTL_DEFAULT_H = 1, 24 * 365, 336
+_RE_SLUG = re.compile(r'^[a-z0-9][a-z0-9-]{2,63}$')
+
+
+def _overlaps(a, b):
+    """True if two directories are the same or one contains the other."""
+    ra, rb = os.path.realpath(a), os.path.realpath(b)
+    return ra == rb or ra.startswith(rb + os.sep) or rb.startswith(ra + os.sep)
+
+
+def _public_check():
+    """(enabled, reason). A non-empty reason is logged once at startup so a
+    half-configured target fails loudly instead of silently doing nothing."""
+    if PUBLIC_MODE == 'local':
+        if not BASE_URL:
+            return False, 'local mode: base_url missing'
+        if not PUBLIC_DIR:
+            return False, 'local mode: public_dir missing'
+        # The whole point of a separate dir: share_dir is the TAILNET-INTERNAL
+        # share (symlinks the owner added for private viewing). Serving it
+        # publicly would publish all of them.
+        if _overlaps(PUBLIC_DIR, ROOT):
+            return False, (f'local mode: public_dir ({PUBLIC_DIR}) overlaps share_dir ({ROOT}) — '
+                           'refusing (that would publish the internal share)')
+        try:
+            os.makedirs(PUBLIC_DIR, exist_ok=True)
+        except OSError as e:
+            return False, f'local mode: cannot create public_dir: {e}'
+        if not os.access(PUBLIC_DIR, os.W_OK):
+            return False, f'local mode: public_dir not writable: {PUBLIC_DIR}'
+        return True, ''
+    missing = [n for n, v in (('ingest_url', INGEST_URL), ('base_url', BASE_URL), (_TOKEN_ENV, TOKEN)) if not v]
+    if not missing:
+        return True, ''
+    # Nothing at all configured = the ordinary local-only install, not a mistake.
+    partial = any((INGEST_URL, BASE_URL, TOKEN))
+    return False, (f'remote mode: missing {", ".join(missing)}' if partial else '')
+
+
+PUBLIC_ENABLED, PUBLIC_DISABLED_REASON = _public_check()
 
 
 def list_items():
@@ -336,9 +396,240 @@ def _ingest(method, ep, body=None, timeout=20):
         return json.loads(r.read().decode('utf-8'))
 
 
+# ---- local target: snapshots on disk, served by this box's nginx ----------
+# State (owner identities, source names) lives OUTSIDE the served directory —
+# nginx serves dotfiles, so a metadata file under public_dir would be readable.
+_state_lock = threading.Lock()
+
+
+class _FileLock:
+    """Cross-PROCESS lock. The --cleanup sweep is a separate oneshot process, so
+    an in-process lock alone would lose updates between publish and sweep."""
+
+    def __init__(self, path):
+        self.path, self.fh = path, None
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
+        self.fh = open(self.path, 'a+')
+        fcntl.flock(self.fh, fcntl.LOCK_EX)
+        return self
+
+    def __exit__(self, *_exc):
+        try:
+            fcntl.flock(self.fh, fcntl.LOCK_UN)
+        finally:
+            self.fh.close()
+
+
+def _ttl_hours(v):
+    try:
+        h = int(v)
+    except (TypeError, ValueError):
+        return TTL_DEFAULT_H
+    return max(TTL_MIN_H, min(TTL_MAX_H, h))
+
+
+def _slug_dir(slug):
+    """PUBLIC_DIR/<slug> — only if the slug is well-formed AND resolves to a
+    direct child of PUBLIC_DIR (blocks traversal and symlinked slug dirs)."""
+    if not slug or not _RE_SLUG.match(slug) or not PUBLIC_DIR:
+        return None
+    p = os.path.join(PUBLIC_DIR, slug)
+    if os.path.dirname(os.path.realpath(p)) != os.path.realpath(PUBLIC_DIR):
+        return None
+    return p
+
+
+def _remove_slug_dir(slug):
+    """Delete <slug>/ — files directly inside plus the directory. Never
+    recursive: we only ever write index.html, so anything else is a surprise
+    and should be left for a human to look at."""
+    p = _slug_dir(slug)
+    if not p or os.path.islink(p) or not os.path.isdir(p):
+        return False
+    for name in os.listdir(p):
+        f = os.path.join(p, name)
+        try:
+            if os.path.isfile(f) or os.path.islink(f):
+                os.unlink(f)
+        except OSError:
+            pass
+    try:
+        os.rmdir(p)
+        return True
+    except OSError as e:
+        sys.stderr.write(f'[airlock-publish] rmdir {p}: {e}\n')
+        return False
+
+
+def _state_load():
+    """Never raises. Corrupt state is moved aside rather than deleted — but see
+    _reconcile(): starting from empty would otherwise orphan live public files
+    forever (nginx keeps serving them, revoke/sweep refuse to touch them)."""
+    try:
+        with open(STATE_FILE, 'r', encoding='utf-8') as fh:
+            d = json.load(fh)
+        if isinstance(d, dict) and isinstance(d.get('items'), dict):
+            return d
+        raise ValueError('unexpected shape')
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        bad = f'{STATE_FILE}.corrupt-{int(time.time())}'
+        try:
+            os.replace(STATE_FILE, bad)
+            sys.stderr.write(f'[airlock-publish] state unreadable ({e}) — moved to {bad}\n')
+        except OSError:
+            sys.stderr.write(f'[airlock-publish] state unreadable ({e}) and could not be moved\n')
+    return {'version': 1, 'items': {}}
+
+
+def _state_save(state):
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    tmp = f'{STATE_FILE}.tmp-{secrets.token_hex(4)}'
+    with open(tmp, 'w', encoding='utf-8') as fh:
+        json.dump(state, fh, ensure_ascii=False, indent=1)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, STATE_FILE)
+
+
+def _reconcile(state, now):
+    """Converge disk <-> state, both directions.
+    - a slug dir with no entry is ADOPTED with a short grace expiry (owner None
+      => listed to nobody, but swept) so orphaned public content dies in a day
+      instead of living forever;
+    - an entry whose dir is gone is dropped."""
+    items = state['items']
+    try:
+        on_disk = {n for n in os.listdir(PUBLIC_DIR)
+                   if _RE_SLUG.match(n) and os.path.isdir(os.path.join(PUBLIC_DIR, n))}
+    except OSError:
+        return state
+    for slug in on_disk - set(items):
+        items[slug] = {'owner': None, 'src': None, 'title': slug,
+                       'expiry': now + RECONCILE_GRACE, 'created': now, 'bytes': 0}
+        sys.stderr.write(f'[airlock-publish] adopted untracked public dir {slug} (expires in 24h)\n')
+    for slug in set(items) - on_disk:
+        items.pop(slug, None)
+    return state
+
+
+def _sweep(state, now):
+    gone = [s for s, it in state['items'].items() if (it.get('expiry') or 0) <= now]
+    for slug in gone:
+        _remove_slug_dir(slug)
+        state['items'].pop(slug, None)
+    return gone
+
+
+def _mint_slug(state, base):
+    stem = re.sub(r'-[0-9a-f]{6}$', '', base or '') or 'doc'
+    for _ in range(50):
+        cand = f'{stem}-{secrets.token_hex(3)}'
+        if cand not in state['items'] and not os.path.exists(os.path.join(PUBLIC_DIR, cand)):
+            return cand
+    return f'doc-{secrets.token_hex(6)}'
+
+
+def _local_ingest(slug, owner, src, title, ttl_hours, html_bytes):
+    if len(html_bytes) > LOCAL_MAX_BYTES:
+        return {'ok': False, 'error': f'snapshot too large (>{LOCAL_MAX_BYTES // (1024 * 1024)}MB)'}
+    ttl = _ttl_hours(ttl_hours)
+    now = int(time.time())
+    with _state_lock, _FileLock(LOCK_FILE):
+        state = _reconcile(_state_load(), now)
+        _sweep(state, now)
+        cur = state['items'].get(slug)
+        # Never write over someone else's slug (or an unexpected dir) — mint one.
+        if (cur and cur.get('owner') != owner) or (not cur and os.path.exists(os.path.join(PUBLIC_DIR, slug))):
+            slug = _mint_slug(state, slug)
+            cur = None
+        d = _slug_dir(slug)
+        if not d:
+            return {'ok': False, 'error': f'invalid slug: {slug}'}
+        expiry = now + ttl * 3600
+        state['items'][slug] = {'owner': owner, 'src': src, 'title': title, 'expiry': expiry,
+                                'created': (cur or {}).get('created', now), 'bytes': len(html_bytes)}
+        # STATE FIRST, then content. A crash between the two leaves a tracked
+        # entry with no page (visible, revocable, sweepable). The other order
+        # would leave untracked public content — the unsafe direction.
+        _state_save(state)
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o755)
+        tmp = os.path.join(d, f'.tmp-{secrets.token_hex(4)}')
+        with open(tmp, 'wb') as fh:
+            fh.write(html_bytes)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, os.path.join(d, 'index.html'))
+    return {'ok': True, 'result': {'slug': slug, 'expiry': expiry, 'ttl_hours': ttl}}
+
+
+def _local_sweep_only():
+    """Timer entry — expire public snapshots without a page visit."""
+    if not (PUBLIC_MODE == 'local' and PUBLIC_DIR and os.path.isdir(PUBLIC_DIR)):
+        return []
+    now = int(time.time())
+    with _state_lock, _FileLock(LOCK_FILE):
+        state = _reconcile(_state_load(), now)
+        gone = _sweep(state, now)
+        _state_save(state)
+    return gone
+
+
+def _local_refresh(now):
+    state = _reconcile(_state_load(), now)
+    _sweep(state, now)
+    _state_save(state)
+    return state
+
+
+def _local_list(owner):
+    now = int(time.time())
+    with _state_lock, _FileLock(LOCK_FILE):
+        state = _local_refresh(now)
+        items = [{'slug': s, 'owner': it['owner'], 'src': it['src'], 'title': it['title'],
+                  'expiry': it['expiry'], 'expired': it['expiry'] <= now}
+                 for s, it in sorted(state['items'].items()) if it.get('owner') == owner]
+    return {'ok': True, 'items': items}
+
+
+def _local_mutate(slug, owner, fn):
+    """Owner-scoped read-modify-write. A foreign or unknown slug is 'not found'
+    — the same answer either way, so it cannot be used to probe."""
+    now = int(time.time())
+    with _state_lock, _FileLock(LOCK_FILE):
+        state = _local_refresh(now)
+        it = state['items'].get(slug)
+        if not it or it.get('owner') != owner:
+            return {'ok': False, 'error': 'not found'}
+        res = fn(state, slug, it, now)
+        _state_save(state)
+    return res
+
+
+def _local_revoke(slug, owner):
+    def _do(state, s, _it, _now):
+        _remove_slug_dir(s)
+        state['items'].pop(s, None)
+        return {'ok': True, 'slug': s}
+    return _local_mutate(slug, owner, _do)
+
+
+def _local_set_expiry(slug, owner, ttl_hours):
+    def _do(_state, s, it, now):
+        it['expiry'] = now + _ttl_hours(ttl_hours) * 3600
+        return {'ok': True, 'slug': s, 'expiry': it['expiry']}
+    return _local_mutate(slug, owner, _do)
+
+
 def publish_public(name, ttl_hours, owner):
     if not PUBLIC_ENABLED:
         return False, 'external publish not configured ([apps.publish.public_target])'
+    if PUBLIC_MODE == 'local' and not owner:
+        return False, 'identity header missing — refusing to publish without an owner'
     path = safe_resolve(name)
     if not path or not os.path.lexists(path):
         return False, f'not found: {name}'
@@ -358,35 +649,56 @@ def publish_public(name, ttl_hours, owner):
             slug = next((it['slug'] for it in items if it.get('src') == name), None)
     if not slug:
         slug = _slugify(title, name)
-    try:
-        res = _ingest('POST', '/ingest', {
-            'slug': slug, 'owner': owner or 'unknown', 'src': name, 'title': title,
-            'ttl_hours': ttl_hours, 'html_b64': base64.b64encode(html_bytes).decode('ascii'),
-        })
-    except Exception as e:
-        return False, f'ingest failed: {e}'
+    if PUBLIC_MODE == 'local':
+        res = _local_ingest(slug, owner, name, title, ttl_hours, html_bytes)
+    else:
+        try:
+            res = _ingest('POST', '/ingest', {
+                'slug': slug, 'owner': owner or 'unknown', 'src': name, 'title': title,
+                'ttl_hours': ttl_hours, 'html_b64': base64.b64encode(html_bytes).decode('ascii'),
+            })
+        except Exception as e:
+            return False, f'ingest failed: {e}'
     if not res.get('ok'):
         return False, res.get('error', 'ingest error')
     r = res.get('result', {})
+    slug = r.get('slug', slug)      # the local target may mint a fresh slug
     return True, {'url': f'{BASE_URL}/{slug}/', 'slug': slug, 'expiry': r.get('expiry'), 'ttl_hours': r.get('ttl_hours')}
 
 
-def public_list(owner):
+def _local_guard(owner):
+    """Local mode has no second service to scope by token, so the hub identity
+    IS the boundary. An empty owner means the request did not pass the gate."""
     if not PUBLIC_ENABLED:
         return {'ok': False, 'error': 'external publish not configured'}
-    ep = '/list' + (('?owner=' + urllib.parse.quote(owner)) if owner else '')
-    try:
-        d = _ingest('GET', ep, timeout=12)
-    except Exception as e:
-        return {'ok': False, 'error': str(e)}
+    if PUBLIC_MODE == 'local' and not owner:
+        return {'ok': False, 'error': 'identity header missing'}
+    return None
+
+
+def public_list(owner):
+    bad = _local_guard(owner)
+    if bad:
+        return bad
+    if PUBLIC_MODE == 'local':
+        d = _local_list(owner)
+    else:
+        ep = '/list' + (('?owner=' + urllib.parse.quote(owner)) if owner else '')
+        try:
+            d = _ingest('GET', ep, timeout=12)
+        except Exception as e:
+            return {'ok': False, 'error': str(e)}
     for it in d.get('items', []):
         it['url'] = f'{BASE_URL}/{it["slug"]}/'
     return d
 
 
 def public_revoke(slug, owner):
-    if not PUBLIC_ENABLED:
-        return {'ok': False, 'error': 'external publish not configured'}
+    bad = _local_guard(owner)
+    if bad:
+        return bad
+    if PUBLIC_MODE == 'local':
+        return _local_revoke(slug, owner)
     try:
         return _ingest('POST', '/revoke', {'slug': slug, 'owner': owner}, timeout=12)
     except Exception as e:
@@ -394,8 +706,11 @@ def public_revoke(slug, owner):
 
 
 def public_set_expiry(slug, owner, ttl_hours):
-    if not PUBLIC_ENABLED:
-        return {'ok': False, 'error': 'external publish not configured'}
+    bad = _local_guard(owner)
+    if bad:
+        return bad
+    if PUBLIC_MODE == 'local':
+        return _local_set_expiry(slug, owner, ttl_hours)
     try:
         return _ingest('POST', '/set-expiry', {'slug': slug, 'owner': owner, 'ttl_hours': ttl_hours}, timeout=12)
     except Exception as e:
@@ -547,10 +862,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = self._strip(urllib.parse.urlparse(self.path).path)
         if path in ('/api/list', '/list'):
-            self._json(200, {'ok': True, 'items': list_items(), 'root': ROOT, 'public_enabled': PUBLIC_ENABLED})
+            self._json(200, {'ok': True, 'items': list_items(), 'root': ROOT, 'public_enabled': PUBLIC_ENABLED, 'public_mode': PUBLIC_MODE})
             return
         if path in ('/api/health', '/health', '/'):
-            self._json(200, {'ok': True, 'service': 'airlock-publish', 'port': PORT, 'public_enabled': PUBLIC_ENABLED})
+            self._json(200, {'ok': True, 'service': 'airlock-publish', 'port': PORT, 'public_enabled': PUBLIC_ENABLED, 'public_mode': PUBLIC_MODE})
             return
         if path in ('/api/public-list', '/public-list'):
             self._json(200, public_list(self._owner()))
@@ -606,9 +921,15 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     if '--cleanup' in sys.argv:                    # systemd timer entry — TTL sweep without a page visit
-        print(f'[airlock-publish] cleanup removed {cleanup_old_uploads()}', flush=True)
+        expired = _local_sweep_only()
+        print(f'[airlock-publish] cleanup removed {cleanup_old_uploads()} upload(s), '
+              f'{len(expired)} expired public snapshot(s)', flush=True)
         return
-    print(f'[airlock-publish] root={ROOT} uploads={UPLOADS} listen=127.0.0.1:{PORT} public={PUBLIC_ENABLED}', flush=True)
+    if PUBLIC_DISABLED_REASON:
+        sys.stderr.write(f'[airlock-publish] external publish DISABLED — {PUBLIC_DISABLED_REASON}\n')
+    where = PUBLIC_DIR if PUBLIC_MODE == 'local' else INGEST_URL
+    print(f'[airlock-publish] root={ROOT} uploads={UPLOADS} listen=127.0.0.1:{PORT} '
+          f'public={PUBLIC_ENABLED}({PUBLIC_MODE}{" " + where if PUBLIC_ENABLED and where else ""})', flush=True)
     with ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as server:
         try:
             server.serve_forever()
