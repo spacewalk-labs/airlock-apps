@@ -390,6 +390,24 @@ if [ -n "${AIRLOCK_ICON_RING:-}" ] && [ -f "$ROOT/hub/assets/paseo.png" ]; then
   install -d "$CONFD/paseo"
   ring_icon_svg "$AIRLOCK_ICON_RING" "$ROOT/hub/assets/paseo.png" > "$CONFD/paseo/favicon-ring.svg"
   chmod 644 "$CONFD/paseo/favicon-ring.svg"
+  # /favicon.ico alone is invisible once the app boots: the web UI SWAPS the tab
+  # icon at runtime (light|dark x idle|running|attention, each a hashed asset), so
+  # the <link rel=icon> the browser ends up with is never the one above. Ring each
+  # upstream variant under its own hashed name and serve those too — the state
+  # signal (running/attention) survives, it just wears the ring. Regenerated every
+  # install, so a paseo bump that rehashes the assets self-heals.
+  WEBUI_IMG="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/web-ui/assets/assets/images"
+  ring_n=0
+  if [ -d "$WEBUI_IMG" ]; then
+    install -d "$CONFD/paseo/icons"
+    for f in "$WEBUI_IMG"/favicon-*.png; do
+      [ -e "$f" ] || continue
+      b="$(basename "$f" .png)"
+      ring_icon_svg "$AIRLOCK_ICON_RING" "$f" > "$CONFD/paseo/icons/${b}.svg"
+      chmod 644 "$CONFD/paseo/icons/${b}.svg"
+      ring_n=$((ring_n + 1))
+    done
+  fi
   iloc="$(mktemp)"
   cat > "$iloc" <<ILOC
 
@@ -405,9 +423,24 @@ if [ -n "${AIRLOCK_ICON_RING:-}" ] && [ -f "$ROOT/hub/assets/paseo.png" ]; then
         access_log off;
     }
 ILOC
+  if [ "$ring_n" -gt 0 ]; then
+    cat >> "$iloc" <<ILOC2
+
+    location ~ ^/assets/assets/images/(favicon-[^/]+)\.png\$ {
+        if (\$owner_ok = 0) { return 403; }
+        # The upstream name says .png; the ringed copy is an SVG, so the same
+        # types{}-clearing trick as /favicon.ico applies.
+        alias $CONFD/paseo/icons/\$1.svg;
+        types { }
+        default_type image/svg+xml;
+        add_header Cache-Control "no-cache" always;
+        access_log off;
+    }
+ILOC2
+  fi
   sed -i -e "/@@ICON_LOC@@/r $iloc" -e "/@@ICON_LOC@@/d" "$frag"
   rm -f "$iloc"
-  log "gate favicon ringed (${AIRLOCK_ICON_RING})"
+  log "gate favicon ringed (${AIRLOCK_ICON_RING}; ${ring_n} runtime variant(s))"
 else
   sed -i "/@@ICON_LOC@@/d" "$frag"
 fi
