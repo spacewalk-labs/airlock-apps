@@ -266,7 +266,9 @@ ExecStart=${PASEO_BIN} daemon start --foreground --no-relay --web-ui --listen 12
 # that exits the worker cleanly (status 0) and expects a supervisor to bring it back.
 # Under on-failure systemd reads that as an intended stop and leaves it dead — so the
 # button permanently kills the daemon (the gate stays up, so it just looks hung).
-# An explicit `systemctl --user stop` still stops it: always only covers self-exit.
+# An explicit 'systemctl --user stop' still stops it: always only covers self-exit.
+# (Single quotes, not backticks: this heredoc is unquoted, so backticks here would
+# be command substitution — the comment would RUN at install time and vanish.)
 Restart=always
 RestartSec=3
 # Backstop only (idle ~440M; runaway multi-session could OOM — watch in prod).
