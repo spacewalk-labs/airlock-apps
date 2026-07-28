@@ -171,6 +171,26 @@ fi
 # Config (not a system mutation) — written unconditionally so the gate's root is real.
 install -d "$SHELL_DIR"
 sed "s/@@MAX_SLOTS@@/${SLOTS}/g" "$HERE/web/shell.html" > "$SHELL_DIR/shell.html"
+# [branding] icon_ring: the shell's favicon is an inline data URI (the gate serves
+# shell.html as a single static file and 204s /favicon.ico), so ring it in place:
+# decode the mark, wrap it, put it back as one base64 data URI.
+if [ -n "${AIRLOCK_ICON_RING:-}" ]; then
+  mark="$(grep -o 'href="data:image/svg+xml,[^"]*"' "$SHELL_DIR/shell.html" \
+          | head -1 | sed -e 's/^href="//' -e 's/"$//')"
+  if [ -n "$mark" ]; then
+    tmp_mark="$(mktemp --suffix=.svg)"
+    python3 -c 'import sys,urllib.parse; sys.stdout.write(urllib.parse.unquote(sys.argv[1].split(",",1)[1]))' \
+      "$mark" > "$tmp_mark"
+    ringed="$(ring_icon_svg "$AIRLOCK_ICON_RING" "$tmp_mark" | base64 -w0)"
+    rm -f "$tmp_mark"
+    # | delimiter: base64's alphabet has / but no |
+    sed -i "s|href=\"data:image/svg+xml,[^\"]*\"|href=\"data:image/svg+xml;base64,${ringed}\"|" \
+      "$SHELL_DIR/shell.html"
+    log "shell favicon ringed (${AIRLOCK_ICON_RING})"
+  else
+    log "warning: shell.html has no inline favicon to ring — icon_ring skipped"
+  fi
+fi
 log "wrote shell: $SHELL_DIR/shell.html (maxSlots=$SLOTS)"
 
 # --- 5. nginx slot gate fragment (owner-only shell + /s/N/ per slot + /api/) ---

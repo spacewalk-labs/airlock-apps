@@ -331,6 +331,7 @@ server {
     # paseo serves an upstream web UI we cannot edit, so the gate serves + injects
     # the shared "return to Airlock" widget (floating, bottom-right).
     location = /airlock-return.js { alias @@WIDGET@@; default_type application/javascript; add_header Cache-Control "no-cache" always; access_log off; }
+@@ICON_LOC@@
 @@BROWSE_LOC@@
     location / {
         if ($owner_ok = 0) { return 403; }
@@ -380,6 +381,35 @@ BLOC
   rm -f "$bloc"
 else
   sed -i "/@@BROWSE_LOC@@/d" "$frag"
+fi
+
+# [branding] icon_ring: paseo's web UI is upstream (we cannot edit its <link rel=icon>),
+# so the gate answers /favicon.ico itself with a ringed copy of the paseo mark. Same
+# per-location guard as every other route here — the server has no server-level `if`.
+if [ -n "${AIRLOCK_ICON_RING:-}" ] && [ -f "$ROOT/hub/assets/paseo.png" ]; then
+  install -d "$CONFD/paseo"
+  ring_icon_svg "$AIRLOCK_ICON_RING" "$ROOT/hub/assets/paseo.png" > "$CONFD/paseo/favicon-ring.svg"
+  chmod 644 "$CONFD/paseo/favicon-ring.svg"
+  iloc="$(mktemp)"
+  cat > "$iloc" <<ILOC
+
+    location = /favicon.ico {
+        if (\$owner_ok = 0) { return 403; }
+        alias $CONFD/paseo/favicon-ring.svg;
+        # nginx types-maps the REQUEST uri (.ico), not the alias target (.svg), so it
+        # would label this SVG image/x-icon and the browser would fail to parse it.
+        # An empty types{} block drops that mapping so default_type is what ships.
+        types { }
+        default_type image/svg+xml;
+        add_header Cache-Control "no-cache" always;
+        access_log off;
+    }
+ILOC
+  sed -i -e "/@@ICON_LOC@@/r $iloc" -e "/@@ICON_LOC@@/d" "$frag"
+  rm -f "$iloc"
+  log "gate favicon ringed (${AIRLOCK_ICON_RING})"
+else
+  sed -i "/@@ICON_LOC@@/d" "$frag"
 fi
 log "wrote nginx fragment: $frag${BROWSE:+ (browse=$BROWSE)}"
 

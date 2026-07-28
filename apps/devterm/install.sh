@@ -122,6 +122,12 @@ else
   # template the config placeholder (JSON has no sed metachars; use | as delimiter)
   sed "s|%%DEVTERM_CONFIG%%|${CFG_JSON}|" "$HERE/web/index.html" > "$WEB_ROOT/index.html"
   chmod 644 "$WEB_ROOT/index.html"
+  # [branding] icon_ring: same filename, ringed content — index.html needs no edit.
+  if [ -n "${AIRLOCK_ICON_RING:-}" ]; then
+    ring_icon_svg "$AIRLOCK_ICON_RING" "$HERE/web/favicon.svg" > "$WEB_ROOT/favicon.svg"
+    chmod 644 "$WEB_ROOT/favicon.svg"
+    log "favicon ringed (${AIRLOCK_ICON_RING})"
+  fi
 fi
 
 # --- 4. systemd user units (write_if_changed -> restart only when content changes) ---
