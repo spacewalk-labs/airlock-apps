@@ -20,7 +20,16 @@ c_api=$(code  -H "${HDR}: ${OWNER}"            "http://127.0.0.1:${HUB}/feedback
 c_deny=$(code -H "${HDR}: nobody@example.com"  "http://127.0.0.1:${HUB}/feedback/api/health")
 c_no=$(code                                     "http://127.0.0.1:${HUB}/feedback/api/health")
 
+# Which delivery targets are live (config, not a gate — reported, not asserted:
+# an install may legitimately run one target, the other, or neither).
+targets=$(curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health" \
+  | python3 -c 'import json,sys
+try: d = json.load(sys.stdin)
+except Exception: print("unreadable"); raise SystemExit
+print(f"enabled={d.get(\"enabled\")} intake={d.get(\"intake\")} mail={d.get(\"mail\")}")' 2>/dev/null)
+
 echo "[feedback smoke] backend=${c_be}/200 api=${c_api}/200 deny=${c_deny}/403 no-header=${c_no}/403"
+echo "[feedback smoke] targets: ${targets:-unreadable}"
 fail=0
 [ "$c_be"   = 200 ] || { echo "FAIL backend health"; fail=1; }
 [ "$c_api"  = 200 ] || { echo "FAIL hub api health"; fail=1; }

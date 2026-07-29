@@ -28,14 +28,23 @@ IDENTITY_HEADER="${AIRLOCK_IDENTITY_HEADER:?}"
 BACKEND_PY="$ROOT/apps/feedback/backend/airlock-feedback.py"
 UNIT_DIR="$HOME/.config/systemd/user"
 
-# Pluggable external intake target (absent = box degrades to "not configured").
+# Pluggable delivery targets — intake and/or mail. None configured = the box
+# degrades to "not configured" (stays hidden).
 INTAKE_URL="$(airlock_config get apps.feedback.intake_url 2>/dev/null || true)"
 TOKEN_ENV="$(airlock_config get apps.feedback.token_env 2>/dev/null || true)"
 [ -n "$TOKEN_ENV" ] || TOKEN_ENV=AIRLOCK_FEEDBACK_TOKEN
 
+# Mail target. The recipient is deployment config (never a default in this repo);
+# the API key lives in the env var named by mail_key_env, via the EnvironmentFile.
+MAIL_TO="$(airlock_config get apps.feedback.mail_to 2>/dev/null || true)"
+MAIL_FROM="$(airlock_config get apps.feedback.mail_from 2>/dev/null || true)"
+MAIL_API="$(airlock_config get apps.feedback.mail_api 2>/dev/null || true)"
+MAIL_KEY_ENV="$(airlock_config get apps.feedback.mail_key_env 2>/dev/null || true)"
+[ -n "$MAIL_KEY_ENV" ] || MAIL_KEY_ENV=RESEND_API_KEY
+
 # --- 1. systemd user unit (loopback backend) ---
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
-  log "[dry] write $UNIT_DIR/airlock-feedback.service (127.0.0.1:$BACKEND_PORT, intake=${INTAKE_URL:-<none>})"
+  log "[dry] write $UNIT_DIR/airlock-feedback.service (127.0.0.1:$BACKEND_PORT, intake=${INTAKE_URL:-<none>}, mail=${MAIL_TO:+configured})"
 else
   install -d "$UNIT_DIR"
   cat >"$UNIT_DIR/airlock-feedback.service" <<UNIT
@@ -51,6 +60,12 @@ Environment=AIRLOCK_FEEDBACK_BACKEND_PORT=${BACKEND_PORT}
 Environment=AIRLOCK_IDENTITY_HEADER=${IDENTITY_HEADER}
 Environment=AIRLOCK_FEEDBACK_INTAKE_URL=${INTAKE_URL}
 Environment=AIRLOCK_FEEDBACK_TOKEN_ENV=${TOKEN_ENV}
+Environment=AIRLOCK_FEEDBACK_MAIL_TO=${MAIL_TO}
+# Quoted: a display-name from-address ("Name <a@b>") contains spaces, and systemd
+# would otherwise split it into two assignments.
+Environment="AIRLOCK_FEEDBACK_MAIL_FROM=${MAIL_FROM}"
+Environment=AIRLOCK_FEEDBACK_MAIL_API=${MAIL_API}
+Environment=AIRLOCK_FEEDBACK_MAIL_KEY_ENV=${MAIL_KEY_ENV}
 ExecStart=$(command -v python3) ${BACKEND_PY}
 Restart=on-failure
 RestartSec=3
@@ -84,4 +99,4 @@ EOF
 log "wrote nginx fragment: $frag"
 
 # NOTE: smoke runs from the orchestrator AFTER nginx reload (gate not live before).
-log "feedback installed (owner: ${AIRLOCK_OWNER}; intake: ${INTAKE_URL:-<none, disabled>})"
+log "feedback installed (owner: ${AIRLOCK_OWNER}; intake: ${INTAKE_URL:-<none>}; mail: ${MAIL_TO:+configured}${MAIL_TO:-<none>})"
