@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # markwand smoke — against a live install (after orchestrator render + reload).
 # markwand is a same-origin subpath, so the gate under test is the HUB nginx
-# server (not a separate port): the /markwand/ locations re-assert $hub_ok.
+# server (not a separate port): the /markwand/ locations inherit its server-level
+# $hub_ok gate, which admits the owner AND the collaborators.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"

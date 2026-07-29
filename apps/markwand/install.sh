@@ -9,8 +9,18 @@
 #     /__mw/*          -> static assets from the hub webroot (viewer, tokens, enhance,
 #                         editor, edit-button, + self-hosted highlight.js/marked/DOMPurify)
 #
-# The hub gate ($hub_ok) is re-asserted in each location, so a non-owner identity
-# gets the hub's wrong-owner page. markserv/filebrowser bind loopback only.
+# The hub gate ($hub_ok) is asserted ONCE, at the server level, so these locations
+# inherit it and an identity that is neither the owner nor a collaborator gets the
+# wrong-owner page. markserv/filebrowser bind loopback only.
+#
+# $hub_ok = owner + collaborators. Everything UNDER code_root is therefore readable
+# (markserv) and writable (filebrowser) by every collaborator, dotfiles included.
+# There is no exclusion mechanism: neither server has one.
+#
+# Symlinks out of code_root are asymmetric, so both halves are stated in SECURITY.md:
+# filebrowser is pinned to a version that refuses them and we pass the flag
+# explicitly below; markserv has no such notion and renders whatever the link
+# points at. A curated symlink directory therefore still leaks reads.
 #
 # Config from airlock.toml ([apps.markwand] + paths.code_root). Honors AIRLOCK_DRY_RUN=1.
 set -euo pipefail
@@ -23,7 +33,16 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 airlock_load markwand
 MS_PORT="${AIRLOCK_MARKWAND_MARKSERV_PORT:?}"
 FB_PORT="${AIRLOCK_MARKWAND_FILEBROWSER_PORT:?}"
-CODE_ROOT="${AIRLOCK_CODE_ROOT:-$HOME/code}"
+# No fallback: this directory is served read+write to the owner AND every
+# collaborator, so it is stated in airlock.toml or nothing is installed. `validate`
+# rejects it first; this is the second line of defence for a direct run of this
+# script, where nothing has validated the config. Checked, not just non-empty:
+# airlock-config stringifies whatever TOML held, so `false` arrives as "False".
+CODE_ROOT="${AIRLOCK_CODE_ROOT:?not set — put code_root in [paths] of airlock.toml (see SECURITY.md: it is served read+write to owner and collaborators)}"
+case "$CODE_ROOT" in
+  /*) ;;
+  *) die "AIRLOCK_CODE_ROOT must be an absolute path; got '$CODE_ROOT'" ;;
+esac
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
 
@@ -108,7 +127,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/.config/filebrowser
-ExecStart=${FB_BIN} --database ${FB_DB} --root ${CODE_ROOT} --address 127.0.0.1 --port ${FB_PORT}
+ExecStart=${FB_BIN} --database ${FB_DB} --root ${CODE_ROOT} --address 127.0.0.1 --port ${FB_PORT} --followExternalSymlinks=false
 Restart=on-failure
 RestartSec=3
 
@@ -146,7 +165,7 @@ airlock_run systemctl --user restart airlock-markserv.service airlock-filebrowse
 
 # --- 4. static assets into the hub webroot (served by the hub's guarded location /) ---
 # Everything under /__mw/ is served by the hub server's `location /` (try_files from
-# WEBROOT), so it inherits the server-level owner gate — no per-asset location needed.
+# WEBROOT), so it inherits the server-level hub gate — no per-asset location needed.
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] install markwand static assets + split viewer + vendored libs -> $WEBROOT/__mw/"
 else

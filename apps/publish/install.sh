@@ -161,7 +161,7 @@ location /publish/api/ {
     client_max_body_size 60m;
     add_header Cache-Control "no-cache" always;
 }
-# Served static-share directory (owner-gated by the hub server-level guard).
+# Served static-share directory (hub gate = owner + collaborators, server level).
 location /publish/files/ {
     alias @@SHARE@@/;
     autoindex on;
