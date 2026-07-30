@@ -78,7 +78,7 @@ provision_ttyd() {
   local ver=1.7.7 asset sha
   case "$(uname -m)" in
     x86_64)  asset=ttyd.x86_64;  sha=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55 ;;
-    aarch64) asset=ttyd.aarch64; sha='' ;;   # no pin for arm64 yet — downloads unverified
+    aarch64) asset=ttyd.aarch64; sha=b38acadd89d1d396a0f5649aa52c539edbad07f4bc7348b27b4f4b7219dd4165 ;;
     *) die "ttyd: unsupported arch $(uname -m) — install manually (github.com/tsl0922/ttyd)" ;;
   esac
   local url="https://github.com/tsl0922/ttyd/releases/download/${ver}/${asset}"
