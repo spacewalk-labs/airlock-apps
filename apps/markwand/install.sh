@@ -17,6 +17,15 @@
 # (markserv) and writable (filebrowser) by every collaborator, dotfiles included.
 # There is no exclusion mechanism: neither server has one.
 #
+# The two surfaces LIST that tree differently, which reads like an exclusion and is
+# not one. markserv's generated listing omits dot entries; the split-pane tree at
+# /markwand/ is built from filebrowser's /api/resources and includes them. A direct
+# URL serves dot paths in full either way — so ~/.claude/CLAUDE.md is reachable and
+# visible in the tree, just not clickable from the markserv fallback listing.
+# Measured on the pinned versions above. Left as-is deliberately: the complete view
+# already exists, and patching a pinned npm dependency to duplicate it would buy
+# nothing. Stated here because a missing row otherwise looks like a missing file.
+#
 # Symlinks out of code_root are asymmetric, so both halves are stated in SECURITY.md:
 # filebrowser is pinned to a version that refuses them and we pass the flag
 # explicitly below; markserv has no such notion and renders whatever the link

@@ -23,7 +23,7 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
   image paste + annotate, pane zoom / equalize), seamless auto-reconnect, a mobile key
   bar with forced Ctrl+C / touch scroll / CJK-IME handling, clickable URLs, and a
   return-to-Airlock affordance (origin derived from `location`, not hardcoded).
-- **ttyd** is provisioned automatically (sha256-pinned x86_64 release) and is used
+- **ttyd** is provisioned automatically (sha256-pinned x86_64 and aarch64 releases) and is used
   only as the PTY backend; its built-in web UI is never served.
 
 ## Config (`[apps.devterm]`)

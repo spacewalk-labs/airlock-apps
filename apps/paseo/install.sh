@@ -80,13 +80,21 @@ PASEO_BIN="$NPM_GBIN/paseo"
 export PATH="$NPM_GBIN:$PATH"
 
 # Unit PATH — npm global bin + provider CLI locations (claude=~/.local/bin,
-# codex=~/.npm-global/bin) + node bin + system. Only existing dirs are added
-# (box-to-box variation is harmless). The daemon spawns provider CLIs against
-# this PATH — a PATH mismatch here is the #1 pilot gotcha (provider "not found").
+# codex=~/.npm-global/bin) + node bin + system. The daemon spawns provider CLIs
+# against this PATH — a mismatch here is the #1 pilot gotcha (provider "not found").
+#
+# Every entry is added whether or not it exists YET, and that "yet" is the whole
+# point. This used to filter on [ -d "$d" ], but $NPM_GBIN is created by the
+# `npm i -g` further down, and the agent CLIs land in these directories only when
+# the user installs them — which is normally AFTER Airlock. So on a first install
+# the unit's PATH silently dropped the very directory this installer was about to
+# populate, plus wherever claude/codex would arrive, and paseo came up with a UI and
+# no working providers. A directory that does not exist costs a PATH entry nothing;
+# a missing one costs the gotcha the comment above warns about.
 UNIT_PATH=""
 for d in "$NPM_GBIN" "$HOME/.local/bin" "$HOME/.npm-global/bin" "$NODE_BIN"; do
   case ":${UNIT_PATH}:" in *":${d}:"*) continue ;; esac   # de-dupe
-  [ -d "$d" ] && UNIT_PATH="${UNIT_PATH}${d}:"
+  UNIT_PATH="${UNIT_PATH}${d}:"
 done
 UNIT_PATH="${UNIT_PATH}/usr/local/bin:/usr/bin:/bin"
 
@@ -164,7 +172,8 @@ elif [ ! -f "$CLAUDE_MANIFEST_JS" ]; then
 elif [ ! -f "$OPUS5_PATCHER" ]; then
   log "warning: Opus 5 patcher not found ($OPUS5_PATCHER) — backport skipped"
 elif [ -z "$claude_cli_ver" ]; then
-  log "warning: cannot determine claude CLI version (unit PATH) — Opus 5 backport skipped"
+  log "warning: no claude CLI on the unit PATH yet — Opus 5 backport skipped. Expected if you \
+install the agent CLIs after Airlock: install claude, then re-run this installer to apply it."
 elif [ "$(printf '%s\n%s\n' "$OPUS5_MIN_CLI" "$claude_cli_ver" | sort -V | head -1)" != "$OPUS5_MIN_CLI" ]; then
   log "warning: claude CLI ${claude_cli_ver} < ${OPUS5_MIN_CLI} — Opus 5 backport skipped (upgrade the CLI, then re-run)"
 else
@@ -232,7 +241,11 @@ fi
 
 # --- 4. systemd --user unit (loopback daemon; explicit PATH, HOME, XDG env) ---
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  # The PATH is printed because it is the thing that goes wrong: when a provider CLI
+  # is "not found" at spawn time, this line is the answer, and a preview should show
+  # it rather than make someone read the generated unit.
   log "[dry] write $UNIT (paseo daemon 127.0.0.1:${BACKEND_PORT}, PASEO_TRUSTED_PROXIES=127.0.0.1)"
+  log "[dry]   unit PATH=${UNIT_PATH}"
 else
   install -d "$UNIT_DIR"
   if write_if_changed "$UNIT" <<UNITEOF
