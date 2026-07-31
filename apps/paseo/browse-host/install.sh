@@ -11,6 +11,11 @@
 set -euo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SELF_DIR/../../.." && pwd)"
+# shellcheck source=/dev/null
+. "$ROOT/install/lib.sh"
+require_cmd node npm systemctl
+
 INSTALL_DIR="$HOME/.local/share/paseo-browse-host"
 UNIT_DIR="$HOME/.config/systemd/user"
 UNIT="$UNIT_DIR/airlock-paseo-browse-host.service"

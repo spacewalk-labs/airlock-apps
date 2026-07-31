@@ -19,7 +19,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 
-require_cmd python3
+require_cmd python3 systemctl
 
 airlock_load feedback
 BACKEND_PORT="${AIRLOCK_FEEDBACK_BACKEND_PORT:?}"

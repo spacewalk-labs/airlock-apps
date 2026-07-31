@@ -20,6 +20,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$ROOT/gate/nginx-lib.sh"
 
+require_cmd curl sha256sum tar systemctl tailscale python3 sudo
 airlock_load code-server
 GATE_PORT="${AIRLOCK_CODE_SERVER_GATE_PORT:?}"
 BACKEND_PORT="${AIRLOCK_CODE_SERVER_BACKEND_PORT:?}"   # slot 1's port; slot N = +N-1

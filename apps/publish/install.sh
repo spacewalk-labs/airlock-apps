@@ -17,7 +17,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 
-require_cmd python3
+require_cmd python3 systemctl sudo
 
 airlock_load publish
 BACKEND_PORT="${AIRLOCK_PUBLISH_BACKEND_PORT:?}"

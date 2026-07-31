@@ -47,7 +47,7 @@ WEB_BUNDLE="$HERE/web-bundle/dist"
 ORCA_SERVE_ROOT="$(dirname "$WEBROOT")/orca-web"
 ORCA_DIST_SERVE="$ORCA_SERVE_ROOT/dist"
 
-require_cmd curl sha256sum tar systemctl tailscale python3 nft
+require_cmd curl sha256sum tar systemctl tailscale python3 nft ss sudo
 
 # The pinned SHA below is for the amd64 AppImage only.
 case "$(uname -m)" in

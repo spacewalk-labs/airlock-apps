@@ -16,7 +16,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 
-require_cmd python3
+require_cmd python3 systemctl journalctl
 
 airlock_load dev-monitor
 BACKEND_PORT="${AIRLOCK_DEV_MONITOR_BACKEND_PORT:?}"

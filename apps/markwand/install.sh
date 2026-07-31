@@ -55,7 +55,7 @@ esac
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
 
-require_cmd node npm
+require_cmd node npm curl sha256sum tar systemctl
 
 MS_VER=1.17.4
 FB_VER=2.63.18

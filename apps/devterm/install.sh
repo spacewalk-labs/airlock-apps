@@ -41,9 +41,9 @@ CODE_ROOT="${AIRLOCK_CODE_ROOT:-}"
 WEB_ROOT="$HOME/.local/share/airlock-devterm/web"
 GATE_PY="$HERE/backend/devterm-gate.py"
 UNIT_DIR="$HOME/.config/systemd/user"
-PY="$(command -v python3)"
 
-require_cmd tmux python3
+require_cmd tmux python3 curl sha256sum systemctl tailscale sudo
+PY="$(command -v python3)"
 
 # is app <name> enabled in airlock.toml?
 app_enabled() { airlock_config apps | grep -qx "$1"; }

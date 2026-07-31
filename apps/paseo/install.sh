@@ -58,9 +58,8 @@ PASEO_VER="${AIRLOCK_PASEO_VERSION:-0.1.110}"
 
 # nvm (if present) puts node/npm on PATH; the unit PATH is derived from what we
 # resolve here, so per-box node locations never need to be hardcoded.
-# shellcheck source=/dev/null
-[ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1 || true
-require_cmd node npm systemctl tailscale python3
+airlock_load_nvm
+require_cmd node npm systemctl tailscale python3 ss sudo
 
 # The paseo daemon (and its node-pty) require node >= 20; node 18 fails at npm
 # engine + runtime. Block older boxes explicitly (no silent failure).
