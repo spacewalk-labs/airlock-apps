@@ -50,14 +50,21 @@ fragment is **written directly** by `install.sh` — but it replicates
 
 - **node >= 20.** The daemon and its `node-pty` fail on node 18; the installer
   hard-checks and aborts with a clear message on older boxes.
-- **Pinned `@getpaseo/cli@0.1.110`** installed into a fixed, user-writable npm
+- **Pinned `@getpaseo/cli@0.2.5`** installed into a fixed, user-writable npm
   prefix (`~/.npm-global`). The version is pinned deliberately — paseo is pre-1.0
   and a floating install would drift the web-ui bundle and the depth4 anchor.
+  Override with `version` under `[apps.paseo]` in `airlock.toml`; note that this
+  reinstalls a different package against a tree whose anchors still target the pin,
+  so it is not a rollback. To go back, revert the commit that moved the pin and
+  re-run the installer.
 - **A systemd `--user` unit** with an explicit `PATH` (npm global bin + provider
   CLI dirs + node + system). The daemon spawns provider CLIs against this PATH; a
   mismatch ("provider not found") is the #1 pilot gotcha.
 - **The depth4 search patch** (below), applied idempotently.
-- **`sudo`** is needed only for `tailscale serve` (HTTPS ingress).
+- **`sudo`** is needed for `tailscale serve` (HTTPS ingress), and — only when
+  `browse = true` — for installing chromium's OS libraries. The chromium one runs
+  as `sudo -n`: without passwordless `sudo` the browse-host install fails loudly
+  with the command to run by hand, rather than waiting on a prompt.
   `AIRLOCK_DRY_RUN=1` prints every mutation instead of running it (the nginx
   fragment is still written — it is config).
 

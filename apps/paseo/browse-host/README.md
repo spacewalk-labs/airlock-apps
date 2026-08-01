@@ -16,7 +16,12 @@ the owner can watch/drive from the web UI.
 
 1. **Playwright + Chromium.** `install.sh` runs `npm install` (adds `playwright` +
    `ws`) and `playwright install chromium`. This is a heavy dependency the v1
-   daemon deliberately avoids.
+   daemon deliberately avoids. `playwright install` fetches the browser but not the
+   shared libraries it links against, so the installer then *launches* chromium; if
+   that fails it runs `playwright install-deps chromium` under `sudo -n` and probes
+   again. The launch is the check because the download succeeding tells you nothing
+   — a box can hold a complete chromium that dies on every start with
+   `libatk-1.0.so.0: cannot open shared object file`.
 2. **A SHA-pinned web-ui bundle patch.** `bin/patch-web-ui.js` applies three
    minimal, verified-unique edits to paseo's minified web-ui bundle (un-gate the
    "New browser" button on web + mark the pane container) and injects the
@@ -28,6 +33,39 @@ the owner can watch/drive from the web UI.
    (`PASEO_WS_URL` backend `6767`, stream port `6768`, allowed Origin on the
    `https_port`) must match your resolved `[apps.paseo]` config, and the nginx
    owner gate must proxy `/browse-view/` to the loopback stream port.
+
+## Re-deriving the anchors
+
+`bin/patch-web-ui.js` refuses to run when the bundle's SHA-256 does not match its
+`PINNED_SHA`, which is what a `@getpaseo/cli` bump looks like. That refusal is the
+whole design — the alternative is a half-patched bundle — so re-deriving is a
+deliberate step, not an obstacle to route around.
+
+```sh
+npm_config_prefix=/tmp/paseo-probe npm i -g @getpaseo/cli@<new-version>
+W=/tmp/paseo-probe/lib/node_modules/@getpaseo/cli/node_modules/@getpaseo/server/dist/server/web-ui
+grep -o 'index-[0-9a-f]*\.js' "$W/index.html"          # the bundle index.html serves
+sha256sum "$W/_expo/static/js/web/index-*.js"          # the new PINNED_SHA
+```
+
+Then, against that **pristine** bundle, update `PINNED_SHA`, `PINNED_VERSION` and
+each `PATCHES` entry until every `find` occurs **exactly once** and every `repl`
+**zero** times. Two things make this less alarming than it looks:
+
+- The two `new-browser-gate-*` anchors are mostly minifier-local names, which are
+  renamed between versions even when the code is untouched (0.1.110 → 0.2.5 renamed
+  four locals and changed nothing else). Search for
+  `getIsElectron)())return` and read the surrounding callback.
+- `browserpane-marker`'s `find` has survived unchanged, and that is the one to be
+  careful with, not the reassuring one: its **replacement** reads locals
+  (`w`, `f.workspaceId`, `f.serverId`). Confirm in the new bundle that the enclosing
+  function is still `BrowserPane=function(f){…{browserId:w}=f…}` and that its caller
+  still passes `workspaceId` and `serverId` — otherwise the marker lands with
+  `undefined` fields, the patcher exits 0, and the companion mounts against nothing.
+
+Verify against the pristine bundle, not against a box: a bundle carrying
+`PATCHED_MARKER` skips the SHA check entirely, so a patched bundle answers "fine" to
+questions it has not been asked.
 
 ## Licensing
 

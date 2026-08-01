@@ -14,16 +14,6 @@ the MIT license that covers the rest of Airlock.
   reference / re-derivation copy of the edit; `../install.sh` applies it via an
   idempotent `sed` against the installed bundle.
 
-- **`claude-model-opus5.mjs`** (+ `claude-model-opus5.patch`, the reference copy)
-  — backports the Claude Opus 5 entries into `CLAUDE_MODEL_MANIFEST` and moves the
-  default off Opus 4.8. paseo's model list is hardcoded in its dist, so the pinned
-  version cannot offer a model released after it — and no daemon restart helps.
-  The `.mjs` is the applier `../install.sh` runs: idempotent (sentinel),
-  all-or-nothing (both anchors or nothing), fail-closed (`node --check` before it
-  replaces the file). A paseo bump that already ships Opus 5 exits 20 and is
-  skipped. Only applied when the Claude Code CLI on the daemon PATH is new enough
-  to run the model (>= 2.1.219, upstream's stated minimum).
-
 - **`image-attachments-persist.mjs`** (+ `image-attachments-persist.patch`, the
   reference copy) — an image pasted into paseo's web UI reaches the model only as an
   inline base64 vision block: the model sees it, but no file exists, so the agent's
@@ -36,8 +26,8 @@ the MIT license that covers the rest of Airlock.
   upstream drift so the install continues without the feature.
 
 - **`claude-model-prune.mjs`** (+ `claude-model-prune.patch`, the reference copy)
-  — removes superseded entries (Opus 4.7/4.6, Sonnet 4.6) from the same manifest
-  so the picker is the handful people actually choose. Picker-only: the manifest
+  — removes superseded entries (Opus 4.7/4.6, Sonnet 4.6) from paseo's
+  `CLAUDE_MODEL_MANIFEST` so the picker is the handful people actually choose. Picker-only: the manifest
   is not on the execution path, so an agent already pinned to a removed model
   keeps running (it just loses the known context-window maximum in the gauge).
   Decomposes the array into entry blocks and refuses to write unless they

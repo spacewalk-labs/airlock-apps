@@ -64,7 +64,7 @@ BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
 PASEO_PKG="@getpaseo/cli"
 # Version PIN — do NOT track latest. paseo is pre-1.0; a floating install would
 # drift the web-ui bundle and the depth4 anchor out from under us.
-PASEO_VER="${AIRLOCK_PASEO_VERSION:-0.1.110}"
+PASEO_VER="${AIRLOCK_PASEO_VERSION:-0.2.5}"
 
 # nvm (if present) puts node/npm on PATH; the unit PATH is derived from what we
 # resolve here, so per-box node locations never need to be hardcoded.
@@ -161,50 +161,11 @@ else
   log "warning: depth4 anchor not found (paseo version drift?) — search may be slow; see patches/depth4-search.patch"
 fi
 
-# --- 2b. Opus 5 model backport (idempotent) ---
-# paseo's model list is hardcoded in its dist, so the version pinned above simply
-# has no Opus 5 entry — it cannot appear in the web UI, and restarting the daemon
-# changes nothing (a common misread: the UI looks alive because the gate is up).
-# Backport the upstream 0.2.x entries into the pinned bundle. Another AGPL-3.0
-# derivative — see patches/README.md.
-# The model is actually executed by the Claude Code CLI on the daemon's PATH, so
-# gate on the measured CLI version first: too old means skip (model never offered)
-# rather than offer-then-fail at spawn time.
+# The pinned manifest — the file the prune step below edits. Declared here rather
+# than beside its only user because it has already outlived one: an Opus 5 backport
+# step owned this declaration until the pin reached a version whose manifest ships
+# Opus 5, and under `set -u` removing that step would have taken the prune with it.
 CLAUDE_MANIFEST_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/claude/model-manifest.js"
-OPUS5_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/claude-model-opus5.mjs"
-OPUS5_MIN_CLI="2.1.219"
-claude_cli_ver="$(PATH="$UNIT_PATH" command -v claude >/dev/null 2>&1 && PATH="$UNIT_PATH" claude --version 2>/dev/null | awk '{print $1}' || true)"
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
-  log "[dry] apply Opus 5 model backport to $CLAUDE_MANIFEST_JS (claude CLI >= ${OPUS5_MIN_CLI} required)"
-elif [ ! -f "$CLAUDE_MANIFEST_JS" ]; then
-  log "warning: model-manifest.js not found ($CLAUDE_MANIFEST_JS) — Opus 5 backport skipped"
-elif [ ! -f "$OPUS5_PATCHER" ]; then
-  log "warning: Opus 5 patcher not found ($OPUS5_PATCHER) — backport skipped"
-elif [ -z "$claude_cli_ver" ]; then
-  log "warning: no claude CLI on the unit PATH yet — Opus 5 backport skipped. Expected if you \
-install the agent CLIs after Airlock: install claude, then re-run this installer to apply it."
-elif [ "$(printf '%s\n%s\n' "$OPUS5_MIN_CLI" "$claude_cli_ver" | sort -V | head -1)" != "$OPUS5_MIN_CLI" ]; then
-  log "warning: claude CLI ${claude_cli_ver} < ${OPUS5_MIN_CLI} — Opus 5 backport skipped (upgrade the CLI, then re-run)"
-else
-  o5_rc=0
-  o5_out="$(node "$OPUS5_PATCHER" "$CLAUDE_MANIFEST_JS")" || o5_rc=$?
-  case "$o5_rc" in
-    10) log "Opus 5 model backport already applied" ;;
-    20) log "Opus 5 anchor not found (paseo version drift — already ships Opus 5?) — backport skipped" ;;
-    0)
-      O5_TMP="${CLAUDE_MANIFEST_JS}.paseo-new.mjs"
-      if node --check "$O5_TMP"; then
-        mv "$O5_TMP" "$CLAUDE_MANIFEST_JS" || die "Opus 5 backport mv failed"
-        need_restart=1   # bundle changed -> restart so the daemon serves the new list
-        log "Opus 5 model backport applied (claude CLI ${claude_cli_ver}; default model = Opus 5)"
-      else
-        rm -f "$O5_TMP"
-        die "Opus 5 backport produced invalid JS — not applied"
-      fi
-      ;;
-    *) die "Opus 5 patcher error (rc=$o5_rc): $o5_out" ;;
-  esac
-fi
 
 # --- 2c. prune superseded models (idempotent) ---
 # The pinned manifest still lists Opus 4.7/4.6 and Sonnet 4.6; drop them so the
@@ -215,7 +176,10 @@ PRUNE_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd 
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] prune superseded models from $CLAUDE_MANIFEST_JS"
 elif [ ! -f "$CLAUDE_MANIFEST_JS" ]; then
-  :   # already warned by the Opus 5 step above
+  # This used to be a bare `:` because the Opus 5 step above warned for the same
+  # condition. That step is gone, and a missing manifest is the signal that upstream
+  # moved its dist layout — the last thing to swallow.
+  log "warning: model-manifest.js not found ($CLAUDE_MANIFEST_JS) — model prune skipped (paseo dist layout changed?)"
 elif [ ! -f "$PRUNE_PATCHER" ]; then
   log "warning: model prune patcher not found ($PRUNE_PATCHER) — skipped"
 else
@@ -514,6 +478,40 @@ airlock_run sudo tailscale serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:
 # a live-view stream + web-ui patch (Level 2 = the New-browser panel routed via the
 # /browse-view/ gate location added above). Non-fatal on purpose: a chromium
 # download or web-ui SHA-drift must never break the hub or the paseo daemon.
+#
+# Is the live-view patch actually in what the daemon serves? A live panel needs all
+# THREE of the patcher's outputs, and checking only the bundle marker is a false green
+# we measured: patch-web-ui.js repoints index.html before it injects the companion
+# <script> or copies the companion file, so it can die leaving a patched, served
+# bundle and no companion at all — the marker says yes, the panel is dead.
+#
+# Marker string kept in sync with PATCHED_MARKER in browse-host/bin/patch-web-ui.js.
+webui_has_live_panel() {
+  local webui="$1" html dir bundle b
+  html="$webui/index.html"
+  dir="$webui/_expo/static/js/web"
+  [ -f "$html" ] || return 1
+
+  # index.html is allowed to name more than one index-*.js; the served one is the
+  # first that exists on disk (the patcher never removes a bundle it still points at).
+  bundle=""
+  for b in $(grep -o 'index-[0-9a-f]\{1,\}\.js' "$html" 2>/dev/null || true); do
+    if [ -f "$dir/$b" ]; then bundle="$b"; break; fi
+  done
+  [ -n "$bundle" ] || return 1
+
+  # We read plaintext, but the server prefers a .br/.gz sibling whenever the client
+  # sends Accept-Encoding. The patcher deletes those siblings, so a surviving one means
+  # the bytes just measured are not the bytes anyone is served.
+  for b in "$dir/$bundle" "$html"; do
+    if [ -e "$b.br" ] || [ -e "$b.gz" ]; then return 1; fi
+  done
+
+  grep -qF 'dataSet:{paseoBrowserId:' "$dir/$bundle" || return 1   # 1. bundle patched
+  grep -qF 'browse-view-client.js' "$html"           || return 1   # 2. companion referenced
+  [ -f "$webui/browse-view-client.js" ]                            # 3. companion present
+}
+
 if [ "$BROWSE" = true ]; then
   BROWSE_INSTALL="$HERE/browse-host/install.sh"
   WEBUI_DIR="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/web-ui"
@@ -529,7 +527,16 @@ if [ "$BROWSE" = true ]; then
        PASEO_BROWSE_STREAM_PORT="$BROWSE_WS_PORT" \
        PASEO_HTTPS_PORT="$HTTPS_PORT" \
        bash "$BROWSE_INSTALL"; then
-      log "browse-host OK (agent browser_* + live-view panel)"
+      # Ask the served bundle whether the live panel is in it, rather than reading it
+      # off the sidecar's exit code. The sidecar exits 0 after warning that the web-ui
+      # patch failed — deliberately, so a chromium or SHA-drift problem cannot break
+      # the hub — so this one line is the whole install log's only claim that could
+      # otherwise be green while the panel is dead.
+      if webui_has_live_panel "$WEBUI_DIR"; then
+        log "browse-host OK (agent browser_* + live-view panel)"
+      else
+        log "browse-host OK (agent browser_* only) — live-view panel NOT in the served web-ui bundle; see the [browse-host] WARN above"
+      fi
     else
       log "warning: browse-host install failed — agent browsing unavailable (hub + paseo daemon unaffected). Retry: bash $BROWSE_INSTALL"
     fi

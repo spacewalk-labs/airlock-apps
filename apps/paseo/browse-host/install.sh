@@ -57,6 +57,51 @@ log "ensuring playwright chromium (skips if present)"
 ( cd "$INSTALL_DIR" && node node_modules/playwright/cli.js install chromium ) \
   || fatal "playwright chromium install failed"
 
+# --- ensure chromium's OS libraries (idempotent) ---
+# `playwright install` fetches the browser but not the shared libraries it links
+# against. On a minimal box that leaves chromium downloaded and every launch dead
+# with `libatk-1.0.so.0: cannot open shared object file` — measured. Nothing above
+# notices: the download succeeded, this installer exited 0, and the sidecar came up
+# and registered a browser host it could never drive.
+#
+# So probe by LAUNCHING, with the options host.js uses — including
+# PASEO_BROWSE_CHROMIUM_PATH, or the probe answers for a different binary than the
+# sidecar starts. The missing library is what a launch reports and what checking the
+# download does not.
+chromium_launch_error() {
+  ( cd "$INSTALL_DIR" && node -e '
+      const opts = { headless: true, args: ["--no-sandbox"] };
+      if (process.env.PASEO_BROWSE_CHROMIUM_PATH) opts.executablePath = process.env.PASEO_BROWSE_CHROMIUM_PATH;
+      require("playwright").chromium
+        .launch(opts)
+        .then((b) => b.close())
+        .then(() => process.exit(0))
+        .catch((e) => { console.error(String((e && e.message) || e).split("\n")[0]); process.exit(1); });
+    ' >/dev/null ) 2>&1
+}
+if launch_err="$(chromium_launch_error)"; then
+  log "chromium launches (OS libraries present)"
+else
+  log "chromium cannot launch: ${launch_err:-unknown} — installing its OS libraries (needs root)"
+  # install-deps runs the distro package manager, so it needs root. Non-interactive
+  # only: this installer must never sit waiting on a password prompt.
+  if sudo -n true 2>/dev/null; then
+    ( cd "$INSTALL_DIR" && sudo -n "$NODE_BIN_DIR/node" node_modules/playwright/cli.js install-deps chromium ) \
+      || log "WARN: playwright install-deps chromium failed — re-probing to see what actually broke"
+  else
+    fatal "chromium is missing OS libraries and passwordless sudo is unavailable. Run:
+    (cd $INSTALL_DIR && sudo node node_modules/playwright/cli.js install-deps chromium)
+  then re-run this installer."
+  fi
+  if launch_err="$(chromium_launch_error)"; then
+    log "chromium launches (OS libraries installed)"
+  else
+    # Fatal here, not a warning: driving this browser is the sidecar's only job. The
+    # paseo installer runs us warn-only, so the hub and the daemon are unaffected.
+    fatal "chromium still cannot launch after install-deps: ${launch_err:-unknown}"
+  fi
+fi
+
 # --- box FQDN + allowed WS Origin (for the Level 2 live-view stream) ---
 # Prefer the value passed by the caller; else derive from tailscale.
 FQDN="${PASEO_BROWSE_FQDN:-}"

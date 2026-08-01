@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: AGPL-3.0-only
 "use strict";
-// Deterministic, fail-loud web-ui bundle patcher for Level 2 (task doc §14.3).
+// Deterministic, fail-loud web-ui bundle patcher for Level 2.
 //
 // Usage: node bin/patch-web-ui.js <web-ui-dir> <companion-js-path>
 //
@@ -11,31 +11,34 @@
 //   3.   mark the BrowserPane container with data-paseo-* so the companion mounts.
 // Then injects the companion <script> into index.html and installs the companion.
 //
-// Fail-loud (the depth4 patch was warn-only; §14.2 requires the opposite): if the
+// Fail-loud, unlike the warn-only depth4 patch: if the
 // bundle SHA does not match the pin AND the bundle is not already patched, we
 // REFUSE (exit 1) rather than run an unpatched/half-patched build. On a
 // @getpaseo/cli version bump the SHA changes -> this fails -> a human re-derives
-// the anchors using the coordinates in task doc §14.3.
+// the anchors (see "Re-deriving the anchors" in ../README.md).
 
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
 // SHA-256 of the ORIGINAL (unpatched) bundle we derived anchors against.
-const PINNED_SHA = "719b916584eb2258b2454ed97de0fb40c50bf38b542acc49d0fd3ea3ad71a9d0";
-const PINNED_VERSION = "@getpaseo/cli@0.1.110 (index-8cd48fdd)";
+const PINNED_SHA = "435dff4ee752a352ee81ff1eae02338163455b2f7e9b605f1ef30967007ce28c";
+const PINNED_VERSION = "@getpaseo/cli@0.2.5 (index-55db56b9)";
 
 // Each anchor MUST occur exactly once in the pinned bundle (verified).
+// The two gate anchors carry minifier-local names, which are NOT stable across
+// versions even when the code is unchanged: 0.1.110 -> 0.2.5 renamed ze->Ye,
+// Re->Be, qe->at, ie->le and changed nothing else about these two callbacks.
 const PATCHES = [
   {
     name: "new-browser-gate-vo",
-    find: 'if(!ze||!(0,Re.getIsElectron)())return;e?.paneId&&qe(ze,e.paneId);const{browserId:t}=(0,ie.createWorkspaceBrowser)()',
-    repl: 'if(!ze)return;e?.paneId&&qe(ze,e.paneId);const{browserId:t}=(0,ie.createWorkspaceBrowser)()',
+    find: 'if(!Ye||!(0,Be.getIsElectron)())return;e?.paneId&&at(Ye,e.paneId);const{browserId:t}=(0,le.createWorkspaceBrowser)()',
+    repl: 'if(!Ye)return;e?.paneId&&at(Ye,e.paneId);const{browserId:t}=(0,le.createWorkspaceBrowser)()',
   },
   {
     name: "new-browser-gate-Wo",
-    find: 'if(!ze||!(0,Re.getIsElectron)())return;const{browserId:t}=(0,ie.createWorkspaceBrowser)({initialUrl:e})',
-    repl: 'if(!ze)return;const{browserId:t}=(0,ie.createWorkspaceBrowser)({initialUrl:e})',
+    find: 'if(!Ye||!(0,Be.getIsElectron)())return;const{browserId:t}=(0,le.createWorkspaceBrowser)({initialUrl:e})',
+    repl: 'if(!Ye)return;const{browserId:t}=(0,le.createWorkspaceBrowser)({initialUrl:e})',
   },
   {
     name: "browserpane-marker",
@@ -122,8 +125,9 @@ function patchBundle(bundlePath) {
   const sha = crypto.createHash("sha256").update(src).digest("hex");
   if (sha !== PINNED_SHA) {
     die(`bundle SHA mismatch — got ${sha}, pinned ${PINNED_SHA} (${PINNED_VERSION}).\n` +
-        `  The @getpaseo/cli web-ui bundle changed. Re-derive the 3 anchors using task doc §14.3 coordinates, ` +
-        `update PINNED_SHA/PATCHES, then re-run. Refusing to run an unpatched build.`);
+        `  The @getpaseo/cli web-ui bundle changed. Re-derive the 3 anchors against a pristine bundle ` +
+        `(see "Re-deriving the anchors" in browse-host/README.md), update PINNED_SHA/PINNED_VERSION/PATCHES, ` +
+        `then re-run. Refusing to run an unpatched build.`);
   }
   for (const p of PATCHES) {
     const c = occurrences(src, p.find);
