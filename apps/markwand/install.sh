@@ -69,15 +69,43 @@ UNIT_DIR="$HOME/.config/systemd/user"
 airlock_run mkdir -p "$CODE_ROOT"
 
 # --- 1. provision markserv (npm, no sudo — local prefix) ---
+# --ignore-scripts: markserv@1.17.4 declares snyk in runtime dependencies, and
+# snyk's postinstall (download a platform binary, rename it into place) fails
+# reproducibly on clean boxes — ENOENT on the rename/chmod after a verified 200
+# download — killing the whole Airlock install. markserv itself has no lifecycle
+# scripts and never invokes the snyk binary, so skipping scripts removes the
+# failure without changing what runs. The failure reproduced in four runs across
+# two clean boxes (2026-08-01); a scripts-skipped install was separately verified
+# to serve and render. Residual risk, accepted: only markserv's version is
+# pinned, its dependency ranges are not, so a future in-range dependency that
+# *needs* a lifecycle script would be silently skipped — which is why the check
+# below runs the binary instead of testing existence, and why smoke.sh asserts
+# an actual HTTP 200 from markserv after install. Vendoring the resolved tree
+# is the recorded longer-term fix.
+markserv_npm_install() {
+  npm install -g --ignore-scripts --prefix "$HOME/.local" "markserv@${MS_VER}" >/dev/null
+}
 provision_markserv() {
   if [ -x "$MS_BIN" ] && "$MS_BIN" --version 2>/dev/null | grep -q "$MS_VER"; then
     log "markserv $MS_VER present"; return
   fi
-  if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then log "[dry] npm install -g --prefix ~/.local markserv@$MS_VER"; return; fi
+  if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then log "[dry] npm install -g --ignore-scripts --prefix ~/.local markserv@$MS_VER"; return; fi
   # npm's own integrity check pins the tarball; we pin the version.
-  npm install -g --prefix "$HOME/.local" "markserv@${MS_VER}" >/dev/null \
-    || die "markserv npm install failed"
-  [ -x "$MS_BIN" ] || die "markserv installed but $MS_BIN missing"
+  if ! markserv_npm_install; then
+    # A failed npm run strands a half-written node_modules/markserv that makes
+    # every rerun die at the same point — "run it again" does not recover.
+    # Clear the leftovers (npm's dot-prefixed staging dirs included) and retry
+    # once, loudly; a second failure is a real upstream problem and stays fatal.
+    log "markserv npm install failed — clearing partial install and retrying once"
+    rm -rf "$HOME/.local/lib/node_modules/markserv" \
+           "$HOME/.local/lib/node_modules/.markserv"-*
+    markserv_npm_install || die "markserv npm install failed twice (npm output above)"
+    log "markserv install recovered on retry"
+  fi
+  # Run it, don't just stat it: with lifecycle scripts skipped, "the file
+  # exists" no longer implies "the package can boot".
+  "$MS_BIN" --version 2>/dev/null | grep -q "$MS_VER" \
+    || die "markserv installed but does not run at $MS_VER ($MS_BIN)"
   log "markserv $MS_VER installed"
 }
 provision_markserv
