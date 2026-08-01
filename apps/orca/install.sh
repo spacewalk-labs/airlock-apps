@@ -35,6 +35,16 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 . "$ROOT/gate/nginx-lib.sh"
 
 airlock_load orca
+# Return-widget menu attributes. With devterm installed the widget's tap opens a small
+# menu (return to Airlock / subscription accounts) instead of navigating straight away —
+# this app owns the whole screen, so the account panel has no other way in. Without
+# devterm there is nothing to open, so the attributes stay empty and a tap navigates.
+WIDGET_MENU_ATTRS=""
+PANEL_URL="$(airlock_panel_url || true)"
+if [ -n "$PANEL_URL" ]; then
+  WIDGET_MENU_ATTRS=" data-menu=\"1\" data-panel=\"${PANEL_URL}\""
+fi
+
 GATE_PORT="${AIRLOCK_ORCA_GATE_PORT:?}"
 BACKEND_PORT="${AIRLOCK_ORCA_BACKEND_PORT:?}"
 HTTPS_PORT="${AIRLOCK_ORCA_HTTPS_PORT:?}"
@@ -300,6 +310,16 @@ airlock_run sudo tailscale serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:
 # HTML changed (the bundle is ~22M), so an idempotent re-run does no needless work.
 ORCA_WEB_ENABLED=0
 if [ -f "$WEB_BUNDLE/web-index.html" ]; then
+  # Check the bundle against its provenance pin BEFORE serving it. A partial clone or a
+  # truncated copy yields a client that serves 200s and renders a blank page, which is
+  # indistinguishable from "installed fine" — so a mismatch fails the install loudly.
+  # (The entry-HTML comparison below is a cheap staleness check, not an integrity one.)
+  BUNDLE_VERIFY="$HERE/bin/verify-web-bundle.sh"
+  if [ -x "$BUNDLE_VERIFY" ]; then
+    bash "$BUNDLE_VERIFY" --quiet || die "orca web-bundle does not match web-bundle/VERSION — refusing to serve it"
+  else
+    log "warning: $BUNDLE_VERIFY missing — serving the bundle unverified"
+  fi
   ORCA_WEB_ENABLED=1
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
     log "[dry] install patched web client: $WEB_BUNDLE -> $ORCA_DIST_SERVE (sudo, a+rX)"
@@ -390,7 +410,7 @@ if [ "$ORCA_WEB_ENABLED" = 1 ]; then
         alias ${ORCA_DIST_SERVE}/web-index.html;
         default_type text/html;
         add_header Cache-Control "no-store" always;
-        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right" defer></script></body>';
+        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right"${WIDGET_MENU_ATTRS} defer></script></body>';
         sub_filter_once on;
     }
     location /orca-web/assets/ {

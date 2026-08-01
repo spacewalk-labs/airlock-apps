@@ -23,6 +23,22 @@ Orca web client (MIT) plus local patches (also MIT); see repo-root `NOTICE`.
   Airlock does not deploy in v1). With those absent, the client falls back to the
   upstream behavior (streaming render; no grab). See "Not wired in v1" below.
 
+## Integrity: VERSION + verify-web-bundle.sh
+
+`VERSION` pins what this build *is*: the upstream AppImage version it pairs with, the entry
+asset name, the file count and a sha256 over the whole tree. A build carries no version
+string inside it, so without that file neither "is this stale?" nor "did this get corrupted
+in transit?" can be answered.
+
+`../bin/verify-web-bundle.sh` checks `dist/` against the pin, and `../install.sh` runs it
+before serving. This matters because of *how* a broken bundle fails: a partial clone or a
+truncated copy still serves 200s and then renders a blank page, so nothing looks wrong.
+Verifying up front turns that into a failed install.
+
+It does **not** rebuild — re-deriving the client needs the upstream source and toolchain,
+which this repo deliberately does not vendor. When you do re-derive `dist/`, regenerate
+every field in `VERSION` in the same commit; a stale pin is worse than no pin.
+
 ## Provenance / PII
 
 The upstream client is MIT, © 2026 Lovecast Inc. (`github.com/stablyai/orca`). The

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # dev-monitor — per-box system/service/network/storage observability, served as a
-# same-origin subpath under the hub (owner + collaborators). OBSERVABILITY-ONLY:
-# the message/action console is deferred (its modules are not shipped in v1).
+# same-origin subpath under the hub (owner + collaborators), plus an OPTIONAL
+# owner-only message/action console (messages = true; default off).
 #
 #   browser --> hub (tailscale serve) --(identity)--> hub nginx
 #     /monitor/        -> dashboard UI (static, from the hub webroot)
@@ -21,11 +21,133 @@ require_cmd python3 systemctl journalctl
 airlock_load dev-monitor
 BACKEND_PORT="${AIRLOCK_DEV_MONITOR_BACKEND_PORT:?}"
 MESSAGES="${AIRLOCK_DEV_MONITOR_MESSAGES:-false}"
+SLACK_WEBHOOK_ENV="${AIRLOCK_DEV_MONITOR_SLACK_WEBHOOK_ENV:-}"
+EXEC_CWD_ROOT="${AIRLOCK_DEV_MONITOR_EXEC_CWD_ROOT:-}"
+EXEC_SESSION="${AIRLOCK_DEV_MONITOR_EXEC_SESSION:-devmon-exec}"
+SKILL_ALLOW="${AIRLOCK_DEV_MONITOR_SKILL_ALLOW:-}"
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
 IDENTITY_HEADER="${AIRLOCK_IDENTITY_HEADER:?}"
+# This value is interpolated into an nginx variable name below. airlock-config derives it
+# from a fixed provider map so it is always well formed, but this script can be run
+# standalone with the env var set — and a value carrying whitespace or a brace would either
+# break the hub config (reload fails, whole hub down) or inject directives.
+case "$IDENTITY_HEADER" in
+  *[!A-Za-z0-9-]*|'') die "AIRLOCK_IDENTITY_HEADER must be a bare HTTP header name (letters, digits, '-'): got '$IDENTITY_HEADER'" ;;
+esac
+# Same reasoning one level down: these three end up as lines in a systemd EnvironmentFile,
+# where a newline would inject additional environment entries.
+for _v in "$EXEC_CWD_ROOT" "$EXEC_SESSION" "$SKILL_ALLOW" "$SLACK_WEBHOOK_ENV"; do
+  case "$_v" in *[$'\n\r']*) die "config values must not contain newlines" ;; esac
+done
+OWNER="${AIRLOCK_OWNER:?}"
 BACKEND_PY="$ROOT/apps/dev-monitor/backend/airlock-dev-monitor.py"
 UNIT_DIR="$HOME/.config/systemd/user"
+DEVMON_STATE="$HOME/.local/state/airlock/dev-monitor"
+DEVMON_ENV="$HOME/.config/airlock/dev-monitor.env"
+
+# The unread badge (hub/assets/airlock-return.js) polls owner/messages/preview
+# cross-origin from the separate-port tools (devterm/code-server/orca/paseo — same box,
+# different ports). That path matches the OWNER location in the fragment below, not the
+# general one, because nginx picks the longest matching prefix. So the echo has to come
+# from the backend — which is also the only place that knows this particular route is
+# the badge's rather than the owner's data. All we do here is name the hosts that count
+# as this box; everything else the backend serves stays same-origin only.
+#
+# With no measurable FQDN we pass nothing: the backend still recognises its own hostname,
+# so a short-name origin keeps working and the badge degrades instead of breaking.
+FQDN="${AIRLOCK_TS_FQDN:-}"
+# Two statements, not `$(... || true)`: ts_fqdn ends in `die`, and an `exit` inside a
+# command substitution kills the substitution before `|| true` can run. Same trap
+# install/render-nginx.sh documents.
+[ -n "$FQDN" ] || FQDN="$(ts_fqdn 2>/dev/null)" || FQDN=""
+cors_hosts=""
+if [ -n "$FQDN" ]; then
+  cors_hosts="${FQDN},${FQDN%%.*}"
+else
+  log "WARN: tailnet FQDN unresolved — the unread badge is reachable only from a short-name origin"
+fi
+
+# --- 0. message/action console state (only when messages = true) ---
+# Four env vars are all-or-nothing (devmon_owner fails closed on a partial set), so
+# they are written as one file and the file is REMOVED when the feature is off —
+# leaving a stale env behind would quietly re-enable the console on the next restart.
+#
+# The proxy secret is what proves a request came through nginx rather than straight to
+# the loopback port. A real install rotates it: nginx and the unit are rewritten in the
+# same run, so rotation costs nothing and bounds the lifetime of a value that leaked from
+# an old config.
+#
+# A DRY RUN must not rotate it, so it reuses the deployed secret when it can read one.
+# That alone is not enough — an unreadable env file leaves nothing to reuse — which is why
+# the fragment write further down also refuses to overwrite an existing file on a dry run.
+# Between them, a preview can never hand nginx a secret the running backend has not seen.
+#
+# The spool is 0700 and owned by the operator. Anything that can write it can create a
+# card — including an `action` card — so treat spool write access as equivalent to
+# console access. It is not equivalent to execution: an action card still has to be
+# approved by the owner in the console, and the approved plan is hash-pinned, before
+# anything runs. See SECURITY.md.
+DEVMON_SECRET=""
+if [ "$MESSAGES" = true ]; then
+  if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -r "$DEVMON_ENV" ]; then
+    DEVMON_SECRET="$(sed -n 's/^DEV_MONITOR_PROXY_SECRET=//p' "$DEVMON_ENV" | head -1)"
+  fi
+  # Nothing to reuse (no env file yet, or it is unreadable): mint one. Safe on a dry run
+  # only because the fragment write below will not overwrite an existing file.
+  [ -n "$DEVMON_SECRET" ] || DEVMON_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+fi
+if [ "$MESSAGES" = true ] && [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  install -d -m 700 "$DEVMON_STATE" "$DEVMON_STATE/spool" \
+                    "$DEVMON_STATE/spool/tmp" "$DEVMON_STATE/spool/new" \
+                    "$DEVMON_STATE/spool/processing" "$DEVMON_STATE/spool/bad"
+  install -d -m 700 "$(dirname "$DEVMON_ENV")"
+  # The webhook is a secret (it is a bearer capability to post in the channel), so it
+  # lives in the environment named by slack_webhook_env, never in airlock.toml — the
+  # same indirection [apps.publish] and [apps.feedback] use for their tokens.
+  SLACK_WEBHOOK=""
+  if [ -n "$SLACK_WEBHOOK_ENV" ]; then
+    SLACK_WEBHOOK="$(printenv "$SLACK_WEBHOOK_ENV" 2>/dev/null || true)"
+    [ -n "$SLACK_WEBHOOK" ] || log "WARN: slack_webhook_env=$SLACK_WEBHOOK_ENV is unset — Slack delivery stays off (cards and the feed are unaffected)"
+  fi
+  # The console link that Slack messages carry. Without a resolvable tailnet FQDN there
+  # is no address that works from a phone, so the link is omitted rather than guessed.
+  CONSOLE_URL=""
+  if [ -n "$FQDN" ]; then
+    CONSOLE_URL="https://${FQDN}/monitor/#messages"
+  else
+    log "WARN: tailnet FQDN unresolved — Slack notifications will carry no console link"
+  fi
+  # Not a preflight row: preflight is per-app and fails the whole install, and tmux is only
+  # needed by the ACTION half of an optional console. Cards, coalescing, Slack and the feed
+  # all work without it; an approval is refused with a reason instead of appearing to run.
+  command -v tmux >/dev/null 2>&1 || \
+    log "WARN: tmux not found — cards and the feed work, but approved actions cannot run. Install it (sudo apt-get install -y tmux) to use the action half."
+  ( umask 077; cat >"$DEVMON_ENV" <<ENVF
+# generated by apps/dev-monitor/install.sh — rewritten on every install
+DEV_MONITOR_OWNER=${OWNER}
+DEV_MONITOR_PROXY_SECRET=${DEVMON_SECRET}
+DEV_MONITOR_SPOOL=${DEVMON_STATE}/spool
+DEV_MONITOR_DB=${DEVMON_STATE}/messages.db
+DEV_MONITOR_CWD_ROOT=${EXEC_CWD_ROOT:-$HOME}
+DEV_MONITOR_EXEC_SESSION=${EXEC_SESSION}
+DEV_MONITOR_SKILL_ALLOW=${SKILL_ALLOW}
+AIRLOCK_DEVMON_SLACK_WEBHOOK=${SLACK_WEBHOOK}
+AIRLOCK_DEVMON_CONSOLE_URL=${CONSOLE_URL}
+ENVF
+  )
+  chmod 600 "$DEVMON_ENV"
+elif [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  rm -f "$DEVMON_ENV"
+  # Turning the console off does not reach into a run that is already going. Killing
+  # someone's in-flight work to honour a config change would be worse than leaving it —
+  # but leaving it silently would be worse still, because the UI that could stop it is
+  # about to disappear.
+  if tmux has-session -t "$EXEC_SESSION" 2>/dev/null; then
+    log "WARN: messages is now false, but tmux session '$EXEC_SESSION' still has running actions. \
+They keep running and the console can no longer stop them — attach with 'tmux attach -t $EXEC_SESSION'."
+  fi
+fi
 
 # --- 1. systemd user unit (loopback backend) ---
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
@@ -42,6 +164,10 @@ Type=simple
 Environment=AIRLOCK_DEV_MONITOR_BACKEND_PORT=${BACKEND_PORT}
 Environment=AIRLOCK_DEV_MONITOR_MESSAGES=${MESSAGES}
 Environment=AIRLOCK_IDENTITY_HEADER=${IDENTITY_HEADER}
+Environment=AIRLOCK_DEV_MONITOR_CORS_HOSTS=${cors_hosts}
+# '-' = optional: with messages off the file is absent by design, and the backend
+# then serves observability only. Secrets stay in this 0600 file, out of the unit.
+EnvironmentFile=-${DEVMON_ENV}
 ExecStart=$(command -v python3) ${BACKEND_PY}
 Restart=on-failure
 RestartSec=3
@@ -70,46 +196,63 @@ fi
 frag="$CONFD/hub-locations.d/dev-monitor.conf"
 install -d "$CONFD/hub-locations.d"
 
-# The unread badge (hub/assets/airlock-return.js) polls owner/messages/preview
-# cross-origin from the separate-port tools (devterm/code-server/orca/paseo — same
-# box, different ports). Build a regex matching ONLY this box's tailnet origins
-# (host + any port) so the API can reflect the request Origin without ever using
-# "*". If the FQDN can't be resolved, skip the echo (the badge just stays hidden
-# cross-origin, no worse than before) rather than failing the install.
-cors_lines=""
-if fqdn="$(ts_fqdn 2>/dev/null)"; then
-  short="${fqdn%%.*}"
-  # \z (end of subject), not $: PCRE's default $ also matches just before a
-  # trailing newline, so anchor hard even though nginx can't put a bare LF in
-  # $http_origin anyway.
-  origin_re="^https?://(${fqdn//./\\.}|${short//./\\.})(:[0-9]+)?\\z"
-  cors_lines="$(cat <<CORS
-    # Same-box unread-badge CORS: reflect the Origin only for this box's tailnet
-    # host on any port; never "*" (which would let any site the owner happens to
-    # visit read their message previews). Simple GET, no credentials -> no
-    # preflight. When \$mon_acao is empty nginx omits the header (>=1.7.5), so
-    # foreign origins stay blocked.
-    set \$mon_acao "";
-    if (\$http_origin ~* "${origin_re}") { set \$mon_acao \$http_origin; }
-    add_header Access-Control-Allow-Origin \$mon_acao always;
-    add_header Vary Origin always;
-CORS
+# Owner-only routes for the message/action console. This location exists ONLY when the
+# console is enabled: with it absent, an owner request falls through to the general
+# /monitor/api/ location, which blanks the identity headers, so the backend sees an
+# unauthenticated request and 404s the feature. Fail-closed by construction.
+#
+# Both X-Devmon-* headers are set here, which is also what makes a client-supplied copy
+# of them harmless — proxy_set_header REPLACES whatever the browser sent. The owner is
+# taken from the ingress-injected identity header (never from the request body), and the
+# secret proves the request came through nginx rather than straight to the loopback port.
+owner_location=""
+if [ "$MESSAGES" = true ]; then
+  # nginx exposes a request header as $http_<name>, lowercased with '-' turned into '_'.
+  hdr_var="$(printf '%s' "${IDENTITY_HEADER//-/_}" | tr '[:upper:]' '[:lower:]')"
+  owner_location="$(cat <<NGXOWNER
+
+location /monitor/api/owner/ {
+    proxy_pass http://127.0.0.1:${BACKEND_PORT};
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Devmon-Owner \$http_${hdr_var};
+    proxy_set_header X-Devmon-Proxy-Secret "${DEVMON_SECRET}";
+    add_header Cache-Control "no-store" always;
+}
+NGXOWNER
 )"
-else
-  log "WARN: tailnet FQDN unresolved — unread-badge CORS echo skipped (badge hidden on separate-port tools)"
 fi
 
+# A dry run must not touch an EXISTING fragment. Elsewhere in Airlock the nginx fragment
+# is pure config and is written unconditionally, which is safe because it is a pure
+# function of the config. This one is not: it carries a freshly minted secret, and whether
+# it contains the owner location at all depends on `messages`. Previewing `messages = false`
+# on a live box would therefore delete the owner location from the file nginx actually
+# serves, and the console would 404 at the next reload with nothing to explain why.
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -e "$frag" ]; then
+  log "[dry] would rewrite $frag (messages=$MESSAGES) — left as is"
+  frag="$(mktemp)"
+fi
+# Created restricted, THEN written: the fragment carries the proxy secret, and
+# `cat > file` would otherwise create it under the default umask (world-readable) with
+# the secret already in it and only narrow the mode afterwards. nginx reads its config
+# as root, so 0600 owned by the installing user is readable where it needs to be.
+install -m 600 /dev/null "$frag"
 cat >"$frag" <<EOF
 # dev-monitor subpath — generated by apps/dev-monitor/install.sh
 # API backend (the backend strips the /monitor/ prefix itself). The UI at
 # /monitor/ is served by the hub's static webroot (WEBROOT/monitor/index.html).
 location /monitor/api/ {
-${cors_lines}
     proxy_pass http://127.0.0.1:${BACKEND_PORT};
     proxy_http_version 1.1;
     proxy_set_header Host \$host;
+    # An empty value means nginx does not pass the field at all, so a browser cannot
+    # smuggle its own owner/secret in on the observability routes either.
+    proxy_set_header X-Devmon-Owner "";
+    proxy_set_header X-Devmon-Proxy-Secret "";
     add_header Cache-Control "no-cache" always;
 }
+${owner_location}
 EOF
 log "wrote nginx fragment: $frag"
 

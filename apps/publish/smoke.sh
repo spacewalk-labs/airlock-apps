@@ -23,22 +23,48 @@ c_deny=$(code -H "${HDR}: nobody@example.com" "http://127.0.0.1:${HUB}/publish/a
 c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/api/list")
 # the list endpoint must return valid JSON with ok:true for the owner
 okjson=no; curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list" | grep -q '"ok": *true' && okjson=yes
+overlaps() {
+  local left right
+  left="$(readlink -f "$1" 2>/dev/null)"; right="$(readlink -f "$2" 2>/dev/null)"
+  [ -n "$left" ] && [ -n "$right" ] && { [ "$left" = "$right" ] || [[ "$left/" == "$right/"* ]] || [[ "$right/" == "$left/"* ]]; }
+}
 
 # local public target (if configured): the public dir must exist, be writable by
 # us, and must NOT be the tailnet-internal share — that overlap is the leak.
 PUB_MODE="$(airlock_config get apps.publish.public_target.mode 2>/dev/null || true)"
+[ -n "$PUB_MODE" ] || PUB_MODE=remote
+PUB_MODE="$(python3 -c 'import sys; print(sys.argv[1].strip().lower())' "$PUB_MODE")"
 localpub=n/a
 if [ "$PUB_MODE" = local ]; then
   PUB_DIR="$(airlock_config get apps.publish.public_target.public_dir 2>/dev/null || true)"
   [ -n "$PUB_DIR" ] || PUB_DIR=/opt/airlock/share-public
-  SH="$(readlink -f "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" 2>/dev/null)"
+  STATE_DIR="$HOME/.local/state/airlock"
   PD="$(readlink -f "$PUB_DIR" 2>/dev/null)"
   localpub=ok
   [ -d "$PUB_DIR" ] && [ -w "$PUB_DIR" ] || localpub="not-writable:$PUB_DIR"
-  [ "$PD" != "$SH" ] || localpub="OVERLAPS-SHARE:$PD"
+  ! overlaps "$PUB_DIR" "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" || localpub="OVERLAPS-SHARE:$PD"
+  ! overlaps "$PUB_DIR" "$STATE_DIR" || [ "$localpub" != ok ] || localpub="OVERLAPS-STATE:$STATE_DIR"
   # the backend must actually report local mode (i.e. it did not refuse at startup)
   curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health" | grep -q '"public_enabled": *true' \
     || localpub="backend-disabled (check: journalctl --user -u airlock-publish)"
+  GATED_DIR="$(airlock_config get apps.publish.public_target.gated_dir 2>/dev/null || true)"
+  [ -n "$GATED_DIR" ] || GATED_DIR=/opt/airlock/share-gated
+  GD="$(readlink -f "$GATED_DIR" 2>/dev/null)"
+  [ -d "$GATED_DIR" ] && [ -w "$GATED_DIR" ] || [ "$localpub" != ok ] || localpub="gated-not-writable:$GATED_DIR"
+  { ! overlaps "$GATED_DIR" "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" && ! overlaps "$GATED_DIR" "$PUB_DIR" && ! overlaps "$GATED_DIR" "$STATE_DIR"; } \
+    || [ "$localpub" != ok ] || localpub="GATED-OVERLAPS:$GD"
+  AUTH_DIR="$(airlock_config get apps.publish.public_target.htpasswd_dir 2>/dev/null || true)"
+  [ -n "$AUTH_DIR" ] || AUTH_DIR=/opt/airlock/publish-gated-auth
+  [ -d "$AUTH_DIR" ] && [ -w "$AUTH_DIR" ] || [ "$localpub" != ok ] || localpub="auth-not-writable:$AUTH_DIR"
+  { ! overlaps "$AUTH_DIR" "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" && ! overlaps "$AUTH_DIR" "$PUB_DIR" && ! overlaps "$AUTH_DIR" "$GATED_DIR" && ! overlaps "$AUTH_DIR" "$STATE_DIR"; } \
+    || [ "$localpub" != ok ] || localpub="AUTH-OVERLAPS:$AUTH_DIR"
+  if id www-data >/dev/null 2>&1 && command -v sudo >/dev/null 2>&1; then
+    sudo -n -u www-data test -x "$AUTH_DIR" 2>/dev/null || [ "$localpub" != ok ] || localpub="auth-not-readable-by-nginx:$AUTH_DIR"
+    for auth_file in "$AUTH_DIR"/*.htpasswd; do
+      [ -e "$auth_file" ] || continue
+      sudo -n -u www-data test -r "$auth_file" 2>/dev/null || [ "$localpub" != ok ] || localpub="credential-not-readable-by-nginx:$auth_file"
+    done
+  fi
 fi
 
 echo "[publish smoke] backend=${c_be}/200 ui=${c_ui}/200 list=${c_list}/200 files=${c_files}/200 deny=${c_deny}/403 no-header=${c_no}/403 list-json=${okjson}/yes local-public=${localpub}"

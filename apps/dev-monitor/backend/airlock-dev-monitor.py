@@ -5,25 +5,25 @@ Runs on loopback (127.0.0.1:<backend_port>); the hub nginx proxies /monitor/api/
 here. No psutil dependency: uses only the stdlib + /proc + subprocess so it runs
 in a minimal container.
 
-This is the OBSERVABILITY-ONLY build. The message/action console is deferred:
-its modules (devmon_messages / devmon_spool / devmon_owner / devmon_slack) are
-not shipped, so they are imported defensively. When they are absent the owner
-routes cleanly return 404 and the process serves observability regardless.
+The optional message/action console is imported defensively. If its modules are
+absent, or its configuration is not enabled, owner routes return 404 and the
+process continues to serve observability.
 """
 import json
 import os
+import shlex
+import shutil
 import socket
 import subprocess
 import sys
 import threading
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# Message/action console modules (same directory) — NOT part of this build. Import
-# defensively: if any is missing, mark the feature unavailable and keep serving
-# observability. Nothing below references these unless the feature is enabled.
+# Message/action console modules live beside this backend. Import defensively so
+# a deployment without them still provides the observability endpoints.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
     import devmon_messages as MSG
@@ -40,15 +40,28 @@ except ImportError:
 
 PORT = int(os.environ.get('AIRLOCK_DEV_MONITOR_BACKEND_PORT', '18804'))
 IDENTITY_HEADER = os.environ.get('AIRLOCK_IDENTITY_HEADER', 'Tailscale-User-Login')
-# Whether the message/action console was requested in airlock.toml. In this build
-# the console is not shipped, so a request only produces a one-line warning.
+# Whether the optional message/action console was requested in configuration.
 MESSAGES_REQUESTED = os.environ.get(
     'AIRLOCK_DEV_MONITOR_MESSAGES', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
 HOME = os.path.expanduser('~')
+# Origins that count as "this box, another port" for the unread badge. The installer
+# measures the tailnet FQDN and passes it; without it we still know our own hostname,
+# so the badge keeps working from a short-name origin and nothing else is admitted.
+CORS_HOSTS = frozenset(
+    h.strip().lower()
+    for h in ([socket.gethostname(), socket.gethostname().split('.')[0]]
+              + os.environ.get('AIRLOCK_DEV_MONITOR_CORS_HOSTS', '').split(','))
+    if h.strip()
+)
 
-# Message feature config (loaded by _start_messages). None => observability-only,
-# and every owner route returns 404 without touching MSG.
+# Message feature config, loaded by _start_messages. None keeps owner routes
+# unavailable without touching the optional modules.
 OWNER_CONFIG = None
+EXEC_CONFIG = None
+_TMUX_LOCK = threading.Lock()
+# How long a run may sit in 'starting' with no window of its own name before the
+# reaper calls it a failed launch. Only has to outlast one _launch_run under the lock.
+STARTING_GRACE_S = 120
 
 # History sampling — record cpu%/mem% every minute, summarize into 1h/1d/7d
 # averages (ring buffer + a persistent CSV under XDG data home, never /tmp).
@@ -579,14 +592,57 @@ def recent_logs(unit='airlock-dev-monitor', n=10):
 
 # ---- HTTP handler ----
 class Handler(BaseHTTPRequestHandler):
-    def _json(self, status, payload):
+    def _cors_origin(self):
+        """The request Origin if it is *this box on another port*, else None.
+
+        Why this exists: the Airlock return widget is injected into tools that run on
+        their own ports, and it reads the owner message preview from here to draw the
+        unread badge. Without an echoed ACAO that fetch fails silently and the badge
+        simply never appears — which reads as "no unread messages".
+
+        The comparison is against a WHOLE hostname, never a label. An earlier version
+        compared only the first label, which let `<boxname>.attacker.example` pass: the
+        identity here is injected by the ingress, so any origin we echo can read owner
+        data with the owner's own authority — ambient authority, even though the request
+        carries no cookie. CORS_HOSTS is the exact set the installer measured (short name
+        and tailnet FQDN); nothing else is same-box.
+        """
+        origin = self.headers.get('Origin') or ''
+        if not origin:
+            return None
+        try:
+            h = (urllib.parse.urlsplit(origin).hostname or '').lower()
+        except ValueError:
+            return None
+        return origin if h and h in CORS_HOSTS else None
+
+    def _json(self, status, payload, cors=False):
+        """cors=True only where a cross-origin read is a feature. It is off by default
+        because most of what this serves is the owner's, and a route that does not need
+        to be readable from another origin should not be."""
         body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        allowed = self._cors_origin() if cors else None
+        if allowed:
+            self.send_header('Access-Control-Allow-Origin', allowed)
+        # Vary regardless: the body does not change with Origin, but the header set does
+        # for the routes that opt in, and a shared cache must not reuse one origin's
+        # response for another.
+        self.send_header('Vary', 'Origin')
         self.end_headers()
         self.wfile.write(body)
+
+    def _read_body(self):
+        n = int(self.headers.get('Content-Length', '0'))
+        if n <= 0:
+            return {}
+        try:
+            return json.loads(self.rfile.read(n).decode('utf-8'))
+        except Exception:
+            return {}
 
     def _strip_prefix(self, path):
         for prefix in ('/monitor/', '/monitor'):
@@ -642,7 +698,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {'unit': unit, 'lines': recent_logs(unit, n)})
             return
         if path in ('/api/health', '/health', '/'):
-            self._json(200, {'ok': True, 'service': 'airlock-dev-monitor', 'port': PORT})
+            # 'messages' is what actually happened, not what was asked for: requested but
+            # unconfigured reads as 'off' here too. Without this the only evidence of a
+            # half-configured install is one journal line at boot, which nothing can query
+            # afterwards — smoke.sh included.
+            self._json(200, {'ok': True, 'service': 'airlock-dev-monitor', 'port': PORT,
+                             'messages': _messages_state(),
+                             'messages_requested': MESSAGES_REQUESTED})
             return
         self._json(404, {'ok': False, 'error': f'unknown path: {path}'})
 
@@ -654,45 +716,528 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json(404, {'ok': False, 'error': f'unknown path: {path}'})
 
-    # ---- message/action console (deferred) ----
-    # OWNER_CONFIG is None in this observability-only build, so these routes 404
-    # up front without ever touching MSG / devmon_*.
+    # ---- message/action console owner routes ----
+    @staticmethod
+    def _seg(value):
+        """Decode ONE already-split path segment.
+
+        card_id and run_id both contain ':' (event ids carry a timestamp, run ids a
+        window name), which encodeURIComponent turns into %3A. Without this every card
+        the shipped producer creates is inert: read/pin/archive/dismiss 404 and /plan
+        answers card_not_found, so the unread badge never clears.
+
+        Decoding per segment rather than decoding the whole path first is deliberate —
+        a %2F in the path must stay part of one id and must not be able to invent a
+        new path segment.
+        """
+        return urllib.parse.unquote(value)
+
     def _owner_ready(self):
+        """Return 404 when messages are disabled; otherwise require the owner gate."""
         if OWNER_CONFIG is None:
             self._json(404, {'ok': False, 'error': 'messages feature not enabled'})
             return False
         return devmon_owner.require_owner(self, OWNER_CONFIG)
 
     def _handle_owner_get(self, path, qs):
-        self._owner_ready()
+        if not self._owner_ready():
+            return
+        if path == '/api/owner/messages/preview':
+            # The one route a separate-port tool reads cross-origin: the return widget's
+            # unread badge. Everything else stays same-origin only.
+            self._json(200, MSG.preview(), cors=True)
+            return
+        if path == '/api/owner/messages':
+            scope = qs.get('scope', ['active'])[0]
+            if scope not in ('active', 'archived', 'all'):
+                scope = 'active'
+            self._json(200, MSG.feed(scope))
+            return
+        if path == '/api/owner/runs':
+            card_id = qs.get('card_id', [None])[0]
+            self._json(200, MSG.list_runs(card_id))
+            return
+        if path.startswith('/api/owner/runs/'):
+            parts = path.split('/')
+            if len(parts) == 5 and parts[4]:
+                run = MSG.get_run(self._seg(parts[4]))
+                self._json(200 if run else 404, run or {'ok': False, 'error': 'not_found'})
+                return
+        self._json(404, {'ok': False, 'error': f'unknown owner path: {path}'})
+
+    _CARD_ACTIONS = {
+        'read': lambda cid: MSG.mark_read(cid),
+        'pin': lambda cid: MSG.set_pin(cid, True),
+        'unpin': lambda cid: MSG.set_pin(cid, False),
+        'archive': lambda cid: MSG.archive(cid),
+        'dismiss': lambda cid: MSG.dismiss(cid),
+        'undismiss': lambda cid: MSG.undismiss(cid),
+    }
 
     def _handle_owner_post(self, path):
-        self._owner_ready()
+        # Validate origin, content type, and size before reading an untrusted body.
+        if not devmon_owner.check_mutating(self):
+            return
+        if not self._owner_ready():
+            return
+        body = self._read_body()
+        parts = path.split('/')
+        if len(parts) == 6 and parts[:4] == ['', 'api', 'owner', 'messages']:
+            card_id, action = self._seg(parts[4]), parts[5]
+            if action == 'plan':
+                self._owner_plan(card_id)
+                return
+            if action == 'execute':
+                self._owner_execute(card_id, body)
+                return
+            fn = self._CARD_ACTIONS.get(action)
+            if fn is not None:
+                ok = fn(card_id)
+                self._json(200 if ok else 404, {
+                    'ok': ok,
+                    'card_id': card_id,
+                    'action': action,
+                    'unread_count': MSG.unread_count(),
+                })
+                return
+        if len(parts) == 6 and parts[:4] == ['', 'api', 'owner', 'runs']:
+            if parts[5] == 'stop':
+                self._owner_stop(self._seg(parts[4]))
+                return
+            if parts[5] == 'view':
+                self._owner_view(self._seg(parts[4]))
+                return
+        self._json(404, {'ok': False, 'error': f'unknown owner path: {path}'})
+
+    def _owner_plan(self, card_id):
+        res = MSG.issue_approval(card_id, EXEC_CONFIG)
+        if res['ok']:
+            self._json(200, res)
+            return
+        code = res['error']
+        status = 404 if code == 'card_not_found' else 409 if code == 'run_active' else 422
+        self._json(status, res)
+
+    def _owner_execute(self, card_id, body):
+        nonce = body.get('nonce') if isinstance(body, dict) else None
+        res = MSG.redeem_approval(card_id, nonce, EXEC_CONFIG)
+        if not res['ok']:
+            code = res['error']
+            status = 409 if code in ('plan_stale', 'nonce_used', 'expired', 'run_active', 'no_nonce') \
+                else 404 if code in ('no_approval', 'card_not_found') else 400
+            self._json(status, {'ok': False, 'error': code})
+            return
+        run_id = res['run_id']
+        outcome, target = _launch_run(run_id, res['plan'])
+        if outcome == 'nowindow':
+            MSG.run_fail(run_id, 'launch failed before window')
+            self._json(500, {'ok': False, 'error': 'launch_failed'})
+            return
+        if outcome == 'ambiguous':
+            # The window may exist, so retain the card lock to prevent a duplicate run.
+            sys.stderr.write(f'[exec] tmux launch ambiguous run={run_id}; retaining card lock\n')
+            self._json(503, {'ok': False, 'error': 'launch_uncertain', 'run_id': run_id})
+            return
+        if not MSG.run_mark_running(run_id, target):
+            if _tmux('kill-window', '-t', _win_id(target)) is None:
+                sys.stderr.write(f'[exec] orphan window kill failed run={run_id} target={target}\n')
+                self._json(500, {'ok': False, 'error': 'orphan_kill_failed', 'target': target})
+            else:
+                self._json(409, {'ok': False, 'error': 'run_superseded'})
+            return
+        self._json(200, {'ok': True, 'run_id': run_id, 'session': EXEC_CONFIG['session']})
+
+    _VIEW_ERR_STATUS = {
+        'not_found': 404,
+        'not_active': 409,
+        'launching': 409,
+        'stale_target_format': 409,
+        'stale_generation': 409,
+        'tmux_unavailable': 502,
+    }
+
+    def _owner_view(self, run_id):
+        """Create a view session only after generation-aware target validation."""
+        session = EXEC_CONFIG['session']
+        ok, res = MSG.run_view_request(MSG.get_run(run_id), _exec_alive_keys(session), session)
+        if not ok:
+            self._json(self._VIEW_ERR_STATUS.get(res, 409), {'ok': False, 'error': res})
+            return
+        if not _ensure_view_session(res['view'], session, res['window_id']):
+            self._json(502, {'ok': False, 'error': 'view_create_failed'})
+            return
+        # Recheck after session creation so a restarted tmux server cannot redirect a view.
+        ok2, res2 = MSG.run_view_request(MSG.get_run(run_id), _exec_alive_keys(session), session)
+        if not ok2 or res2['target'] != res['target']:
+            if _tmux('kill-session', '-t', res['view']) is None:
+                sys.stderr.write(f"[view] stale view kill failed view={res['view']}\n")
+            self._json(409, {'ok': False, 'error': 'stale_generation'})
+            return
+        self._json(200, {
+            'ok': True,
+            'arg': res['view'],
+            'window_id': res['window_id'],
+            'run_id': run_id,
+        })
+
+    def _owner_stop(self, run_id):
+        run = MSG.get_run(run_id)
+        if not run or run['status'] not in ('starting', 'running'):
+            self._json(404, {'ok': False, 'error': 'not_active'})
+            return
+        target = run.get('tmux_target')
+        if not target:
+            # Do not release the lock while a launch may still create a window.
+            self._json(409, {'ok': False, 'error': 'launching', 'retry_after': 1})
+            return
+        if ':' not in target:
+            self._json(409, {'ok': False, 'error': 'stale_target_format', 'target': target})
+            return
+        keys = _exec_alive_keys(EXEC_CONFIG['session'])
+        if keys is None:
+            self._json(502, {'ok': False, 'error': 'tmux_unavailable'})
+            return
+        if target in keys and _tmux('kill-window', '-t', _win_id(target)) is None:
+            self._json(502, {'ok': False, 'error': 'kill_failed'})
+            return
+        changed, _ = MSG.run_stop(run_id)
+        self._json(200 if changed else 409, {'ok': bool(changed), 'run_id': run_id})
 
     def log_message(self, fmt, *args):
         sys.stderr.write(f'[airlock-dev-monitor] {self.address_string()} - {fmt % args}\n')
 
 
+# ---- action execution orchestration ----
+def _tmux(*args, capture=False, timeout=8):
+    """Run tmux, returning output on capture and None when the result is unknown."""
+    try:
+        if capture:
+            return subprocess.check_output(
+                ['tmux'] + list(args), text=True, timeout=timeout,
+                stderr=subprocess.DEVNULL).strip()
+        subprocess.check_call(
+            ['tmux'] + list(args), timeout=timeout,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return ''
+    except Exception:
+        return None
+
+
+def _win_id(target):
+    """Extract the tmux window id from a generation-aware target."""
+    return target.rsplit(':', 1)[-1] if target else target
+
+
+def _tmux_has_session(name):
+    """1 = definitely absent, 0 = present, None = tmux could not be asked at all.
+
+    Kept separate from _tmux because the distinction between "no such session" (exit 1,
+    a real answer) and "there is no tmux on this box" matters: the first means reap it,
+    the second must not be read as reap-everything. Never raises — an action console on
+    a box without tmux degrades to refusing to run things, not to 500s.
+    """
+    try:
+        return subprocess.call(['tmux', 'has-session', '-t', name],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=8)
+    except Exception:  # noqa: BLE001 — missing binary, timeout, permission: all "unknown"
+        return None
+
+
+def _exec_alive_keys(session):
+    """Return current ``server_pid:window_id`` keys, or None if tmux is indeterminate."""
+    out = _tmux('list-windows', '-t', session, '-F', '#{pid}:#{window_id}', capture=True)
+    if out is None:
+        return set() if _tmux_has_session(session) == 1 else None
+    return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def _ensure_view_session(view, session, window_id, tmux=None):
+    """Ensure that a view session contains only the requested run window."""
+    command = tmux or _tmux
+    if _tmux_has_session(view) == 0:
+        return True
+    if command('new-session', '-d', '-s', view) is None:
+        return False
+    dummy = command('list-windows', '-t', view, '-F', '#{window_id}', capture=True)
+    if command('link-window', '-s', f'{session}:{window_id}', '-t', view + ':') is None:
+        command('kill-session', '-t', view)
+        return False
+    if dummy and command('kill-window', '-t', f'{view}:{dummy}') is None:
+        sys.stderr.write(f'[view] dummy window kill failed view={view} dummy={dummy}\n')
+    return True
+
+
+def _reap_view_sessions():
+    """Remove view sessions whose corresponding run is no longer active."""
+    out = _tmux('list-sessions', '-F', '#{session_name}', capture=True)
+    if out is None:
+        return
+    keep = MSG.active_view_sessions()
+    for name in out.splitlines():
+        name = name.strip()
+        if not name.startswith(MSG.VIEW_SESSION_PREFIX) or name in keep:
+            continue
+        if _tmux('kill-session', '-t', name) is None:
+            sys.stderr.write(f'[view] orphan view kill failed session={name}\n')
+
+
+def _launch_run(run_id, plan):
+    """Persist a plan then launch its runner in a new tmux window."""
+    cfg = EXEC_CONFIG
+    # Checked before anything is written: with no tmux there is no window and nothing
+    # started, which is a DEFINITE answer, not an ambiguous one. Saying so lets the
+    # caller release the card lock instead of holding it for a run that cannot exist.
+    if shutil.which('tmux') is None:
+        sys.stderr.write('[exec] tmux is not installed — approved actions cannot run '
+                         '(install tmux, or set messages = false)\n')
+        return ('nowindow', None)
+    plan_out = dict(plan)
+    plan_out['cwd_root'] = cfg['cwd_root']
+    plan_file = os.path.join(cfg['plan_dir'], run_id + '.json')
+    try:
+        fd = os.open(plan_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, 'w') as f:
+            json.dump(plan_out, f, ensure_ascii=False)
+    except OSError as exc:
+        sys.stderr.write(f'[exec] plan write failed: {exc}\n')
+        return ('nowindow', None)
+    command = ' '.join(shlex.quote(item) for item in [
+        'python3', cfg['runner'], run_id, plan_file, cfg['sentinel_dir'],
+    ])
+    window_name = MSG.run_window_name(run_id)
+    session, cwd = cfg['session'], plan['cwd']
+    with _TMUX_LOCK:
+        has_session = _tmux_has_session(session) == 0
+        if has_session:
+            target = _tmux(
+                'new-window', '-t', session + ':', '-n', window_name, '-c', cwd,
+                '-P', '-F', '#{pid}:#{window_id}', command, capture=True)
+        else:
+            target = _tmux(
+                'new-session', '-d', '-s', session, '-n', window_name, '-c', cwd,
+                '-P', '-F', '#{pid}:#{window_id}', command, capture=True)
+    if not target:
+        return ('ambiguous', None)
+    _tmux('setw', '-t', _win_id(target), 'window-size', 'largest')
+    return ('ok', target)
+
+
+def _sentinel_watcher(stop_event, sentinel_dir):
+    """Apply runner completion sentinels and remove each file after processing."""
+    while not stop_event.is_set():
+        try:
+            for name in os.listdir(sentinel_dir):
+                if not name.endswith('.done'):
+                    continue
+                path = os.path.join(sentinel_dir, name)
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    MSG.run_finish(data['run_id'], int(data.get('exit_code', 1)))
+                except Exception as exc:
+                    sys.stderr.write(f'[sentinel] bad {name}: {exc}\n')
+                finally:
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+        stop_event.wait(2)
+
+
+def _runs_in_flight():
+    """Every run currently in 'starting' or 'running' — all of them, not a page.
+
+    devmon_messages.list_runs() exists for the UI and caps at 50 by design. The reaper
+    needs completeness, not recency, so it asks the store directly. Bounded anyway: a run
+    only stays in these two states while it is alive.
+    """
+    conn = MSG._conn()
+    rows = conn.execute(
+        "SELECT * FROM runs WHERE status IN ('starting','running')").fetchall()
+    return [dict(r) for r in rows]
+
+
+def _reap_stuck_starting(session):
+    """Fail runs that were approved but never produced a window, so the card unlocks.
+
+    devmon_messages.reap_runs deliberately leaves a run with no recorded tmux_target
+    alone: ending it on a guess would orphan a live process. That is right, but it left
+    no way out at all — a launch that failed after the run row was written kept its card
+    showing "running" with a Stop button that answers 409, forever.
+
+    The escape has to be proof, not a timeout. _launch_run names every window
+    deterministically, so the ABSENCE of a window with that name is proof that nothing
+    was started for this run. (A name collision could only make us keep the run, never
+    end a live one.) The grace period exists solely so we do not race a launch that is
+    still inside _TMUX_LOCK.
+    """
+    names = _tmux('list-windows', '-t', session, '-F', '#{window_name}', capture=True)
+    if names is None:
+        # Session absent = definitely no windows. tmux unreachable = we know nothing.
+        if _tmux_has_session(session) != 1:
+            return
+        live = set()
+    else:
+        live = {n.strip() for n in names.splitlines() if n.strip()}
+    cutoff = time.time() - STARTING_GRACE_S
+    # Not list_runs(): it pages at 50, and a stuck run is by definition an OLD one. With
+    # 50 newer runs on the box the escape hatch simply stopped existing.
+    for run in _runs_in_flight():
+        if run.get('status') != 'starting' or run.get('tmux_target'):
+            continue
+        created = run.get('created_at') or ''
+        try:
+            age_ok = datetime.strptime(created[:19], '%Y-%m-%dT%H:%M:%S').replace(
+                tzinfo=timezone.utc).timestamp() < cutoff
+        except ValueError:
+            continue
+        if not age_ok or MSG.run_window_name(run['run_id']) in live:
+            continue
+        MSG.run_fail(run['run_id'], 'launch never produced a window')
+        sys.stderr.write(f"[reaper] released stuck run={run['run_id']} (no window was ever created)\n")
+
+
+def _reap_plan_files():
+    """Delete the plan file of every run that is no longer active.
+
+    The plan is the approved cwd plus the prompt, skill or argv — the same content
+    devmon_messages.sweep() takes care to drop from `approvals` after a day so it is not
+    retained. Leaving a plaintext copy in plans/ forever would make that pointless.
+    """
+    cfg = EXEC_CONFIG
+    if not cfg:
+        return
+    # Must be the COMPLETE set of live runs. Derived from a paged list it would omit an
+    # active run and delete the plan file the runner is about to open — the approved action
+    # would then fail having never run.
+    active = {r['run_id'] for r in _runs_in_flight()}
+    for name in os.listdir(cfg['plan_dir']):
+        if not name.endswith('.json') or name[:-5] in active:
+            continue
+        try:
+            os.remove(os.path.join(cfg['plan_dir'], name))
+        except OSError as exc:
+            sys.stderr.write(f'[reaper] plan cleanup failed {name}: {exc}\n')
+
+
+def _reaper_loop(stop_event, session):
+    """Mark missing run windows only when tmux returns a definite live-key set."""
+    while not stop_event.is_set():
+        try:
+            keys = _exec_alive_keys(session)
+            if keys is None:
+                stop_event.wait(15)
+                continue
+            MSG.reap_runs(keys)
+            _reap_view_sessions()
+            _reap_stuck_starting(session)
+            _reap_plan_files()
+        except Exception as exc:
+            sys.stderr.write(f'[reaper] {exc}\n')
+        stop_event.wait(15)
+
+
+def _sweep_loop(stop_event):
+    """Run message retention and archival maintenance without stopping the monitor."""
+    while not stop_event.is_set():
+        try:
+            MSG.sweep()
+        except Exception as exc:
+            sys.stderr.write(f'[airlock-dev-monitor] sweep error: {exc}\n')
+        stop_event.wait(900)
+
+
+def _build_exec_config():
+    """Build execution paths after a complete owner configuration has been loaded."""
+    state_dir = os.path.dirname(OWNER_CONFIG['db'])
+    plan_dir = os.path.join(state_dir, 'plans')
+    sentinel_dir = os.path.join(state_dir, 'sentinels')
+    for directory in (plan_dir, sentinel_dir):
+        os.makedirs(directory, exist_ok=True)
+        try:
+            os.chmod(directory, 0o700)
+        except OSError:
+            pass
+    allow_env = os.environ.get('DEV_MONITOR_SKILL_ALLOW', '').strip()
+    skill_allow = set(item.strip() for item in allow_env.split(',') if item.strip()) \
+        if allow_env else None
+    return {
+        # `or HOME`, not a default= — a systemd EnvironmentFile writes an empty value for
+        # an unset key, and canonical_plan reads a falsy root as 'no bound at all'.
+        'cwd_root': os.environ.get('DEV_MONITOR_CWD_ROOT') or HOME,
+        'skill_allow': skill_allow,
+        'session': os.environ.get('DEV_MONITOR_EXEC_SESSION', 'devmon-exec'),
+        'runner': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'action_runner.py'),
+        'plan_dir': plan_dir,
+        'sentinel_dir': sentinel_dir,
+    }
+
+
 def _messages_state():
-    if not MESSAGES_REQUESTED:
-        return 'off'
-    return 'on' if _MESSAGES_AVAILABLE else 'unavailable'
+    return 'on' if OWNER_CONFIG is not None else 'off'
 
 
 def _start_messages():
-    """The message/action console is deferred in this build. If it was requested
-    in config but is not available, warn once and continue observability-only;
-    otherwise stay silent. OWNER_CONFIG stays None so owner routes 404 cleanly."""
+    """Start the optional message/action console while preserving observability on failure."""
+    global OWNER_CONFIG, EXEC_CONFIG
     if not MESSAGES_REQUESTED:
         return
     if not _MESSAGES_AVAILABLE:
-        print('[airlock-dev-monitor] messages/action console not available in this '
-              'build — observability only', flush=True)
+        print('[airlock-dev-monitor] message/action modules unavailable; observability only',
+              flush=True)
         return
-    # Modules present + requested: the console runtime is not wired in
-    # observability-only v1. Shipping and wiring the modules re-enables this path.
-    print('[airlock-dev-monitor] messages/action console not wired in this build — '
-          'observability only', flush=True)
+    try:
+        OWNER_CONFIG = devmon_owner.load_config()
+    except devmon_owner.ConfigError as exc:
+        # A partial owner gate must never expose routes, but must not stop monitoring.
+        sys.stderr.write(f'[airlock-dev-monitor] messages disabled: {exc}\n')
+        return
+    if OWNER_CONFIG is None:
+        # Requested in airlock.toml but not configured at all. The installer writes the
+        # env file whenever messages = true, so reaching here means it is missing or
+        # unreadable — say so, or the console silently never appears.
+        print('[airlock-dev-monitor] messages requested but no owner gate is configured '
+              '(DEV_MONITOR_OWNER/PROXY_SECRET/SPOOL/DB all unset) — observability only',
+              flush=True)
+        return
+    # From here on, anything that fails is a failure of the OPTIONAL half: a corrupt or
+    # locked database, an unwritable state directory, a spool that is not there. None of
+    # it is a reason to take observability down, and systemd would restart-loop us if we
+    # let it out. Say what broke, leave OWNER_CONFIG unset so the routes 404, carry on.
+    try:
+        MSG.init_db(OWNER_CONFIG['db'])
+        EXEC_CONFIG = _build_exec_config()
+        stop = threading.Event()
+        threading.Thread(
+            target=devmon_spool.run_watcher, args=(OWNER_CONFIG['spool'], stop),
+            daemon=True, name='spool_watcher').start()
+        threading.Thread(
+            target=_sweep_loop, args=(stop,), daemon=True, name='msg_sweep').start()
+        threading.Thread(
+            target=_sentinel_watcher, args=(stop, EXEC_CONFIG['sentinel_dir']),
+            daemon=True, name='exec_sentinel').start()
+        threading.Thread(
+            target=_reaper_loop, args=(stop, EXEC_CONFIG['session']),
+            daemon=True, name='exec_reaper').start()
+    except Exception as exc:  # noqa: BLE001 — an optional feature must not kill the monitor
+        OWNER_CONFIG = None
+        EXEC_CONFIG = None
+        sys.stderr.write(f'[airlock-dev-monitor] messages failed to start ({exc.__class__.__name__}: '
+                         f'{exc}) — observability only\n')
+        return
+    webhook = os.environ.get('AIRLOCK_DEVMON_SLACK_WEBHOOK', '').strip()
+    console_url = os.environ.get('AIRLOCK_DEVMON_CONSOLE_URL', '').strip()
+    if webhook:
+        threading.Thread(
+            target=devmon_slack.run_worker, args=(webhook, stop, console_url),
+            daemon=True, name='slack_worker').start()
+    print(f"[airlock-dev-monitor] messages feature: on owner={OWNER_CONFIG['owner']} "
+          f"spool={OWNER_CONFIG['spool']} db={OWNER_CONFIG['db']} "
+          f"exec_session={EXEC_CONFIG['session']} "
+          f"slack={'on' if webhook else 'off'}", flush=True)
 
 
 def main():

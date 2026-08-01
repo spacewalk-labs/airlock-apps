@@ -166,6 +166,72 @@
     details.section > summary .hint { font-size: 12px; color: var(--muted); font-weight: 400; font-family: var(--font-mono); }
     details.section[open] > summary { margin-bottom: 12px; }
 
+    /* Message console */
+    .msg-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+    .msg-head h2 { margin: 0; }
+    .msg-unread { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: var(--r-pill); background: var(--hover); color: var(--accent); }
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+    .chip, .mbtn, .micon {
+      background: transparent; border: 1px solid var(--line); color: var(--text); cursor: pointer;
+      font-family: var(--font-sans); font-size: 13px;
+    }
+    .chip { color: var(--muted); padding: 3px 11px; border-radius: var(--r-pill); }
+    .chip:hover, .mbtn:hover, .micon:hover { background: var(--hover); }
+    .chip[aria-pressed="true"], .mbtn.primary { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); }
+    .chip .n { opacity: .7; margin-left: 3px; font-variant-numeric: tabular-nums; }
+    .msg-feed { display: flex; flex-direction: column; gap: 8px; }
+    .mcard { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; display: flex; gap: 12px; align-items: flex-start; box-shadow: var(--shadow); }
+    .mcard.urgent { border-left: 3px solid var(--danger); }
+    .mcard .mdot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); margin-top: 5px; flex: none; }
+    .mcard.unread .mdot { background: var(--accent); }
+    .mcard.urgent .mdot { background: var(--danger); }
+    .mcard .mmain { flex: 1; min-width: 0; }
+    .mcard .mtop { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .mcard .mtop.mtoggle { cursor: pointer; }
+    .mcard .mtitle { font-size: 14px; font-weight: 500; }
+    .mcard.unread .mtitle { font-weight: 600; }
+    .mkind, .murg { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: var(--r-sm); border: 1px solid var(--line); color: var(--muted); }
+    .mkind.action { color: var(--accent); border-color: var(--accent); }
+    .murg { color: var(--danger); border-color: var(--danger); }
+    .mcard .mbody { font-size: 13px; color: var(--muted); margin-top: 3px; overflow-wrap: anywhere; }
+    .mcard .mmeta { font-size: 12px; color: var(--muted); font-family: var(--font-mono); margin-top: 5px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .mcard.unread .mstatus { color: var(--accent); font-weight: 600; }
+    .mcard.urgent .mstatus { color: var(--danger); }
+    .mcard .mactions { display: flex; gap: 6px; align-items: center; flex: none; }
+    .mcard .mchev { margin-left: auto; font-size: 10px; color: var(--muted); flex: none; }
+    .mcard .mdetail[hidden] { display: none; }
+    .mcard .murl { font-family: var(--font-mono); }
+    .mbtn { padding: 4px 12px; border-radius: var(--r-pill); white-space: nowrap; text-decoration: none; display: inline-block; }
+    .mbtn:disabled, .micon:disabled { opacity: .4; cursor: not-allowed; }
+    .micon { padding: 4px 7px; border-radius: var(--r-sm); line-height: 1; }
+    .micon.pinned { color: var(--accent); }
+    .mrun { font-size: 12px; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; font-family: inherit; margin-top: 5px; }
+    .mrun:hover { text-decoration: underline; }
+    .msg-empty { text-align: center; color: var(--muted); padding: 24px; font-size: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+    .msg-empty.err { color: var(--danger); }
+    .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.42); display: none; align-items: flex-end; justify-content: center; z-index: 1100; }
+    .sheet-backdrop.show { display: flex; }
+    .sheet { background: var(--surface); border: 1px solid var(--line); border-radius: 16px 16px 0 0; width: 100%; max-width: 560px; padding: 20px; box-shadow: var(--shadow); max-height: 85vh; overflow-y: auto; }
+    .sheet h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    .sheet .sheet-sub, .sheet-warn { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+    .sheet-preview { background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--r); padding: 8px 16px; }
+    .pv-line { display: flex; gap: 8px; padding: 6px 0; }
+    .pv-line + .pv-line { border-top: 1px solid var(--line); }
+    .pv-label { color: var(--muted); min-width: 92px; font-family: var(--font-mono); font-size: 12px; flex: none; }
+    .pv-value { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 12px; white-space: pre-wrap; }
+    .sheet-err { color: var(--danger); font-size: 13px; margin-top: 12px; }
+    .sheet-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .runview-terminal { height: min(55vh, 560px); margin-top: 12px; position: relative; background: var(--code-bg); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+    .runview-terminal:empty { display: none; }
+    .runview-terminal iframe { display: block; width: 100%; height: 100%; border: 0; }
+    .runview-note { height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; text-align: center; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    #undo-toast, #msg-toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: var(--r-pill); padding: 8px 12px 8px 20px; font-size: 13px; box-shadow: var(--shadow); display: none; align-items: center; gap: 12px; z-index: 1050; }
+    #undo-toast.show, #msg-toast.show { display: inline-flex; }
+    #undo-btn { background: var(--accent); color: var(--accent-contrast); border: 0; border-radius: var(--r-pill); padding: 4px 12px; cursor: pointer; font-size: 13px; }
+    #msg-toast { z-index: 1060; padding: 8px 20px; }
+    @media (min-width: 640px) { .sheet-backdrop { align-items: center; } .sheet { border-radius: var(--r); } }
+    @media (max-width: 560px) { .mcard { flex-wrap: wrap; } .mcard .mactions { flex-basis: 100%; justify-content: flex-end; margin-top: 6px; } }
+
     .empty { color: var(--muted); padding: 12px; }
     .err { color: var(--danger); }
   </style>
@@ -214,6 +280,22 @@
       <button data-theme-btn="dark"   aria-pressed="false" title="Dark">Dark</button>
     </div>
   </div>
+
+  <!-- Messages are independent from the observation feed and may be unavailable on read-only installations. -->
+  <section class="section" id="messages">
+    <div class="msg-head">
+      <h2>Messages <span class="msg-unread" id="msg-unread" aria-live="polite" hidden></span></h2>
+      <div class="chips" id="msg-chips" role="group" aria-label="Message filter">
+        <button class="chip" data-key="active" aria-pressed="true">All <span class="n" data-count="active"></span></button>
+        <button class="chip" data-key="unread" aria-pressed="false">Unread <span class="n" data-count="unread"></span></button>
+        <button class="chip" data-key="action" aria-pressed="false">Actions <span class="n" data-count="action"></span></button>
+        <button class="chip" data-key="link" aria-pressed="false">Links <span class="n" data-count="link"></span></button>
+        <button class="chip" data-key="urgent" aria-pressed="false">Urgent <span class="n" data-count="urgent"></span></button>
+        <button class="chip" data-key="archived" aria-pressed="false">Archived <span class="n" data-count="archived"></span></button>
+      </div>
+    </div>
+    <div class="msg-feed" id="msg-feed"><div class="msg-empty">Loading messages…</div></div>
+  </section>
 
   <!-- Host + Disk (snapshot) -->
   <div class="section">
@@ -274,6 +356,37 @@
   </div>
 
 </div>
+
+<div class="sheet-backdrop" id="exec-backdrop" role="dialog" aria-modal="true" aria-labelledby="exec-title">
+  <div class="sheet">
+    <h3 id="exec-title">Confirm action</h3>
+    <p class="sheet-sub">Approve this plan to start the action. Nothing runs automatically.</p>
+    <div class="sheet-preview" id="exec-body"></div>
+    <p class="sheet-warn">The approved plan is checked again before it starts. If it changed, approval is required again.</p>
+    <div class="sheet-err" id="exec-err"></div>
+    <div class="sheet-actions">
+      <button class="mbtn" id="exec-cancel" type="button">Cancel</button>
+      <button class="mbtn primary" id="exec-confirm" type="button" disabled>Run</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-backdrop" id="runview-backdrop" role="dialog" aria-modal="true" aria-labelledby="runview-title">
+  <div class="sheet">
+    <h3 id="runview-title">Action status</h3>
+    <p class="sheet-sub" id="runview-state">Connecting…</p>
+    <div class="sheet-preview" id="runview-body"></div>
+    <div class="runview-terminal" id="runview-terminal"></div>
+    <div class="sheet-actions">
+      <button class="mbtn" id="runview-pop" type="button" disabled>Open terminal ↗</button>
+      <button class="mbtn" id="runview-stop" type="button">Stop</button>
+      <button class="mbtn" id="runview-close" type="button">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="undo-toast"><span id="undo-msg"></span><button id="undo-btn" type="button">Undo</button></div>
+<div id="msg-toast" role="status" aria-live="polite"></div>
 
 <script>
   // ---- theme ----
@@ -493,6 +606,484 @@
   // storage/network are heavier (du, tailscale) — refresh the live panels only.
   setInterval(function () { loadOverview(); loadTop(); loadServices(); }, 5000);
   setInterval(loadNetwork, 30000);
+
+  // ---- message console ----
+  // Message producers are not trusted dashboard data, so every card is assembled with textContent.
+  // Keeping response status available also lets this optional feature explain access and setup issues.
+  var OWNER_API = API + '/owner';
+  var msgState = { key: 'active', cards: [], counts: {}, enabled: null, expanded: {} };
+  var execNonce = null, execCardId = null;
+  var undoTimer = null, undoCard = null, msgToastTimer = null, msgPoll = null;
+  var runView = { runId: null, poll: null, retry: null, terminalUrl: null, finished: null };
+  var terminalConfigPromise = null;
+
+  function ownerFetch(path, opts) {
+    opts = opts || {};
+    opts.cache = 'no-store';
+    if (opts.method === 'POST') {
+      opts.headers = Object.assign({ 'content-type': 'application/json' }, opts.headers || {});
+      if (opts.body == null) opts.body = '{}';
+    }
+    return fetch(OWNER_API + path, opts);
+  }
+  function ownerResponse(r) {
+    return r.json().catch(function () { return {}; }).then(function (data) {
+      return { status: r.status, ok: r.ok, data: data };
+    });
+  }
+  function getTerminalUrl(session) {
+    // The public hub config is the source for this optional cross-origin app. It avoids
+    // baking a host or port into the dashboard while still using the deployment's TLS name.
+    if (!terminalConfigPromise) {
+      terminalConfigPromise = j('/__airlock.json').then(function (config) {
+        if (!config) throw new Error('Terminal configuration is unavailable.');
+        return config;
+      }).catch(function (error) {
+        // Drop the cache on failure. Caching a REJECTED promise turned one transient
+        // network blip into "the terminal is unavailable" for the rest of the page's life.
+        terminalConfigPromise = null;
+        throw error;
+      });
+    }
+    return terminalConfigPromise.then(function (config) {
+      var port = config && config.apps && config.apps.devterm && config.apps.devterm.port;
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('The terminal is not enabled for this installation.');
+      var host = config.fqdn && config.fqdn.indexOf('.') > 0 ? config.fqdn : location.hostname;
+      var url = new URL(location.href);
+      url.hostname = host;
+      url.port = String(port);
+      url.pathname = '/';
+      url.search = '?arg=' + encodeURIComponent(session);
+      return url.href;
+    });
+  }
+  function isHttpUrl(url) { return typeof url === 'string' && /^https?:\/\//i.test(url); }
+  function timeAgo(value) {
+    var time = Date.parse(value);
+    if (isNaN(time)) return '';
+    var seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    return Math.floor(seconds / 86400) + 'd ago';
+  }
+  function msgEl(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text != null) node.textContent = text;
+    return node;
+  }
+  function msgToast(text) {
+    var node = document.getElementById('msg-toast');
+    node.textContent = text;
+    node.classList.add('show');
+    clearTimeout(msgToastTimer);
+    msgToastTimer = setTimeout(function () { node.classList.remove('show'); }, 3000);
+  }
+  function disableMessages(status) {
+    msgState.enabled = false;
+    if (msgPoll) { clearInterval(msgPoll); msgPoll = null; }
+    var message = status === 403
+      ? 'This message console is available only to the dashboard owner.'
+      : 'Message console is disabled for this installation.';
+    var feed = document.getElementById('msg-feed');
+    feed.textContent = '';
+    feed.appendChild(msgEl('div', 'msg-empty', message));
+    document.getElementById('msg-chips').hidden = true;
+    document.getElementById('msg-unread').hidden = true;
+  }
+  function scopeForMessageKey(key) { return key === 'archived' ? 'archived' : 'active'; }
+  function filteredMessages() {
+    var key = msgState.key, cards = msgState.cards;
+    if (key === 'active' || key === 'archived') return cards;
+    return cards.filter(function (card) {
+      if (key === 'unread') return !card.read_at;
+      if (key === 'urgent') return card.urgency === 'urgent';
+      return card.kind === key;
+    });
+  }
+  function loadMessages() {
+    if (msgState.enabled === false) return Promise.resolve();
+    return ownerFetch('/messages?scope=' + scopeForMessageKey(msgState.key)).then(ownerResponse)
+      .then(function (res) {
+        if (res.status === 403 || res.status === 404) { disableMessages(res.status); return; }
+        if (!res.ok) throw new Error('Message feed returned ' + res.status + '.');
+        msgState.enabled = true;
+        msgState.cards = res.data.messages || [];
+        msgState.counts = res.data.counts || {};
+        renderMessages();
+        if (location.hash === '#messages' && !window._messagesAnchorHandled) {
+          window._messagesAnchorHandled = true;
+          document.getElementById('messages').scrollIntoView({ behavior: 'smooth' });
+        }
+      }).catch(function (error) {
+        if (msgState.enabled === null) {
+          var feed = document.getElementById('msg-feed');
+          feed.textContent = '';
+          feed.appendChild(msgEl('div', 'msg-empty err', 'Message console is unavailable: ' + error.message));
+          return;
+        }
+        // The feed has loaded before, so the cards on screen are real — but they are now
+        // stale and we are still polling. Saying nothing would leave a console that looks
+        // current and is not, which is the failure mode this whole app exists to avoid.
+        msgToast('Message feed did not refresh (' + error.message + '); showing the last known state.');
+      });
+  }
+  function renderMessages() {
+    var counts = msgState.counts;
+    document.querySelectorAll('#msg-chips .n').forEach(function (node) {
+      var count = counts[node.dataset.count];
+      node.textContent = count > 0 ? count : '';
+    });
+    var unread = document.getElementById('msg-unread');
+    if (counts.unread > 0) { unread.textContent = counts.unread + ' unread'; unread.hidden = false; }
+    else unread.hidden = true;
+    var feed = document.getElementById('msg-feed');
+    feed.textContent = '';
+    var cards = filteredMessages();
+    if (!cards.length) {
+      feed.appendChild(msgEl('div', 'msg-empty', msgState.key === 'archived' ? 'No archived messages.' : 'No messages.'));
+      return;
+    }
+    cards.forEach(function (card) { feed.appendChild(buildMessageCard(card)); });
+  }
+  function buildMessageCard(message) {
+    var card = msgEl('div', 'mcard' + (message.read_at ? '' : ' unread') + (message.urgency === 'urgent' ? ' urgent' : ''));
+    card.dataset.cardId = message.card_id;
+    card.appendChild(msgEl('span', 'mdot'));
+    var main = msgEl('div', 'mmain');
+    var top = msgEl('div', 'mtop mtoggle');
+    top.appendChild(msgEl('span', 'mtitle', message.title));
+    var kindLabel = message.kind === 'action' ? 'Action' : (message.kind === 'link' ? 'Link' : 'Info');
+    top.appendChild(msgEl('span', 'mkind ' + message.kind, kindLabel));
+    if (message.urgency === 'urgent') top.appendChild(msgEl('span', 'murg', 'Urgent'));
+    main.appendChild(top);
+    var detailNodes = [];
+    if (message.body) detailNodes.push(msgEl('div', 'mbody', message.body));
+    if (message.kind === 'action' && message.action && message.action.explain) detailNodes.push(msgEl('div', 'mbody', message.action.explain));
+    if (message.kind === 'link' && message.link && isHttpUrl(message.link.url)) detailNodes.push(msgEl('div', 'mbody murl', message.link.url));
+    if (detailNodes.length) {
+      var detail = msgEl('div', 'mdetail');
+      detailNodes.forEach(function (node) { detail.appendChild(node); });
+      if (!msgState.expanded[message.card_id]) detail.hidden = true;
+      main.appendChild(detail);
+      top.appendChild(msgEl('span', 'mchev', msgState.expanded[message.card_id] ? 'v' : '>'));
+    }
+    top.addEventListener('click', function () { toggleMessageCard(message); });
+    var meta = msgEl('div', 'mmeta');
+    meta.appendChild(msgEl('span', null, message.source));
+    meta.appendChild(msgEl('span', null, timeAgo(message.received_at)));
+    if (message.occurrence_count > 1) meta.appendChild(msgEl('span', null, 'x' + message.occurrence_count));
+    meta.appendChild(msgEl('span', 'mstatus', message.read_at ? 'Read' : 'Unread'));
+    main.appendChild(meta);
+    if (message.run_id) {
+      var status = msgEl('button', 'mrun', 'Action running — view status');
+      status.type = 'button';
+      status.addEventListener('click', function () { openRunView(message.run_id, message.title); });
+      main.appendChild(status);
+    }
+    card.appendChild(main);
+    var actions = msgEl('div', 'mactions');
+    if (message.run_id) {
+      var stop = msgEl('button', 'mbtn', 'Stop'); stop.type = 'button';
+      stop.addEventListener('click', function () {
+        stop.disabled = true;
+        stopRun(message.run_id, function (text, ok) { msgToast(text); if (!ok) stop.disabled = false; });
+      });
+      actions.appendChild(stop);
+    } else if (message.kind === 'action') {
+      var run = msgEl('button', 'mbtn primary', 'Run'); run.type = 'button';
+      run.addEventListener('click', function () { openExecSheet(message); });
+      actions.appendChild(run);
+    } else if (message.kind === 'link' && message.link && isHttpUrl(message.link.url)) {
+      var open = msgEl('a', 'mbtn primary', (message.link.label || 'Open') + ' ↗');
+      open.href = message.link.url; open.target = '_blank'; open.rel = 'noopener noreferrer';
+      open.addEventListener('click', function () {
+        if (!message.read_at) cardAction(message.card_id, 'read').then(loadMessages)
+          .catch(function (error) { msgToast('Could not mark message as read: ' + error.message); });
+      });
+      actions.appendChild(open);
+    }
+    var pin = msgEl('button', 'micon' + (message.pinned ? ' pinned' : ''), message.pinned ? 'Unpin' : 'Pin');
+    pin.type = 'button'; pin.title = message.pinned ? 'Unpin' : 'Pin';
+    pin.addEventListener('click', function () {
+      cardAction(message.card_id, message.pinned ? 'unpin' : 'pin').then(loadMessages)
+        .catch(function (error) { msgToast('Could not update pin: ' + error.message); });
+    });
+    actions.appendChild(pin);
+    if (msgState.key !== 'archived') {
+      var archive = msgEl('button', 'micon', 'Archive'); archive.type = 'button'; archive.title = 'Archive';
+      archive.addEventListener('click', function () {
+        cardAction(message.card_id, 'archive').then(loadMessages)
+          .catch(function (error) { msgToast('Could not archive message: ' + error.message); });
+      });
+      actions.appendChild(archive);
+    }
+    var dismiss = msgEl('button', 'micon', 'Dismiss'); dismiss.type = 'button'; dismiss.title = 'Dismiss';
+    dismiss.addEventListener('click', function () { dismissMessageCard(message); });
+    actions.appendChild(dismiss);
+    card.appendChild(actions);
+    return card;
+  }
+  function toggleMessageCard(message) {
+    var hasDetail = !!(message.body || (message.action && message.action.explain) || (message.link && message.link.url));
+    if (hasDetail) msgState.expanded[message.card_id] = !msgState.expanded[message.card_id];
+    if (!message.read_at) {
+      message.read_at = new Date().toISOString();
+      if (msgState.counts.unread > 0) msgState.counts.unread--;
+      cardAction(message.card_id, 'read').then(loadMessages)
+        .catch(function (error) { msgToast('Could not mark message as read: ' + error.message); });
+    }
+    renderMessages();
+  }
+  function cardAction(cardId, action) {
+    return ownerFetch('/messages/' + encodeURIComponent(cardId) + '/' + action, { method: 'POST' }).then(ownerResponse)
+      .then(function (res) {
+        if (res.status === 403) disableMessages(403);
+        else if (!res.ok || !res.data.ok) throw new Error(res.data.error || ('Action returned ' + res.status + '.'));
+        return res.data;
+      });
+  }
+  function dismissMessageCard(message) {
+    cardAction(message.card_id, 'dismiss').then(function () { showUndo(message); return loadMessages(); })
+      .catch(function (error) { msgToast('Could not dismiss message: ' + error.message); });
+  }
+  function showUndo(message) {
+    undoCard = message;
+    document.getElementById('undo-msg').textContent = 'Dismissed: ' + message.title;
+    var toast = document.getElementById('undo-toast'); toast.classList.add('show');
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(function () { toast.classList.remove('show'); undoCard = null; }, 6000);
+  }
+  document.getElementById('undo-btn').addEventListener('click', function () {
+    if (!undoCard) return;
+    var cardId = undoCard.card_id; undoCard = null;
+    document.getElementById('undo-toast').classList.remove('show');
+    cardAction(cardId, 'undismiss').then(loadMessages).catch(function (error) { msgToast('Could not restore message: ' + error.message); });
+  });
+  document.getElementById('msg-chips').addEventListener('click', function (event) {
+    var chip = event.target.closest('.chip'); if (!chip) return;
+    msgState.key = chip.dataset.key;
+    document.querySelectorAll('#msg-chips .chip').forEach(function (button) {
+      button.setAttribute('aria-pressed', button === chip ? 'true' : 'false');
+    });
+    loadMessages();
+  });
+
+  function planLine(label, value) {
+    var line = msgEl('div', 'pv-line');
+    line.appendChild(msgEl('span', 'pv-label', label));
+    line.appendChild(msgEl('span', 'pv-value', value == null ? '' : value));
+    return line;
+  }
+  var execGen = 0;
+  function showArgv(argv) {
+    // One quoted element per argument. join(' ') would render ["sh","-c","a b"] and
+    // ["sh","-c","a","b"] identically, and this dialog exists to be unambiguous about
+    // exactly what is going to run.
+    return (argv || []).map(function (part) { return JSON.stringify(String(part)); }).join(' ');
+  }
+  function openExecSheet(message) {
+    var body = document.getElementById('exec-body');
+    document.getElementById('exec-title').textContent = message.title;
+    document.getElementById('exec-err').textContent = '';
+    var confirmButton = document.getElementById('exec-confirm');
+    confirmButton.disabled = true; confirmButton.textContent = 'Run';
+    execNonce = null; execCardId = null;
+    // Every open gets a generation. A plan request is slow enough that the sheet can be
+    // cancelled and reopened on a different card before it lands; without this, the old
+    // response repopulated the sheet — resurrecting a cancelled approval and leaving a
+    // plan that disagreed with the title above it.
+    var gen = ++execGen;
+    body.textContent = ''; body.appendChild(msgEl('div', 'msg-empty', 'Creating plan…'));
+    document.getElementById('exec-backdrop').classList.add('show');
+    ownerFetch('/messages/' + encodeURIComponent(message.card_id) + '/plan', { method: 'POST' }).then(ownerResponse)
+      .then(function (res) {
+        if (gen !== execGen) return;
+        body.textContent = '';
+        if (res.status === 403) { disableMessages(403); closeExecSheet(); return; }
+        if (!res.ok || !res.data.ok) { document.getElementById('exec-err').textContent = 'Could not create plan: ' + (res.data.error || res.status); return; }
+        var plan = res.data.plan || {};
+        execNonce = res.data.nonce; execCardId = message.card_id;
+        body.appendChild(planLine('Working directory:', plan.cwd));
+        if (plan.exec) body.appendChild(planLine('Command:', showArgv(plan.exec)));
+        else if (plan.skill) body.appendChild(planLine('Skill:', '/' + plan.skill));
+        else body.appendChild(planLine('Prompt:', plan.prompt));
+        if (plan.explain) body.appendChild(planLine('Reason:', plan.explain));
+        confirmButton.disabled = false;
+      }).catch(function (error) {
+        if (gen !== execGen) return;
+        body.textContent = ''; document.getElementById('exec-err').textContent = 'Plan error: ' + error.message;
+      });
+  }
+  function closeExecSheet() {
+    execGen++;
+    document.getElementById('exec-backdrop').classList.remove('show');
+    execNonce = null; execCardId = null;
+  }
+  document.getElementById('exec-cancel').addEventListener('click', closeExecSheet);
+  document.getElementById('exec-backdrop').addEventListener('click', function (event) { if (event.target === this) closeExecSheet(); });
+  document.getElementById('exec-confirm').addEventListener('click', function () {
+    if (!execNonce || !execCardId) return;
+    var button = this, cardId = execCardId;
+    button.disabled = true; button.textContent = 'Starting…';
+    ownerFetch('/messages/' + encodeURIComponent(cardId) + '/execute', { method: 'POST', body: JSON.stringify({ nonce: execNonce }) }).then(ownerResponse)
+      .then(function (res) {
+        button.textContent = 'Run';
+        if (res.status === 403) { disableMessages(403); closeExecSheet(); return; }
+        if (res.status === 409) { document.getElementById('exec-err').textContent = 'The plan changed. Review and approve it again.'; button.disabled = false; return; }
+        if (!res.ok || !res.data.ok) { document.getElementById('exec-err').textContent = 'Could not start action: ' + (res.data.error || res.status); button.disabled = false; return; }
+        var title = document.getElementById('exec-title').textContent;
+        closeExecSheet();
+        cardAction(cardId, 'read').catch(function () {}).then(loadMessages);
+        if (res.data.run_id) openRunView(res.data.run_id, title);
+        else msgToast('Action started.');
+      }).catch(function (error) { document.getElementById('exec-err').textContent = 'Run error: ' + error.message; button.disabled = false; });
+  });
+
+  var RUN_STATE_LABEL = { starting: 'Starting', running: 'Running', done: 'Completed', failed: 'Failed', stopped: 'Stopped', interrupted: 'Interrupted' };
+  function closeRunView() {
+    document.getElementById('runview-backdrop').classList.remove('show');
+    clearInterval(runView.poll);
+    clearTimeout(runView.retry);
+    document.getElementById('runview-terminal').textContent = '';
+    document.getElementById('runview-pop').disabled = true;
+    runView = { runId: null, poll: null, retry: null, terminalUrl: null, finished: null };
+  }
+  function renderRunStatus(run) {
+    document.getElementById('runview-state').textContent = RUN_STATE_LABEL[run.status] || run.status;
+    var body = document.getElementById('runview-body'); body.textContent = '';
+    body.appendChild(planLine('Status:', RUN_STATE_LABEL[run.status] || run.status));
+    if (run.exit_code != null) body.appendChild(planLine('Exit code:', run.exit_code));
+    if (run.error) body.appendChild(planLine('Error:', run.error));
+    if (run.plan) {
+      if (run.plan.cwd) body.appendChild(planLine('Working directory:', run.plan.cwd));
+      if (run.plan.exec) body.appendChild(planLine('Command:', showArgv(run.plan.exec)));
+      else if (run.plan.skill) body.appendChild(planLine('Skill:', '/' + run.plan.skill));
+      else if (run.plan.prompt) body.appendChild(planLine('Prompt:', run.plan.prompt));
+    }
+    var active = run.status === 'starting' || run.status === 'running';
+    document.getElementById('runview-stop').disabled = !active;
+  }
+  function pollRunStatus(runId) {
+    return ownerFetch('/runs/' + encodeURIComponent(runId)).then(ownerResponse).then(function (res) {
+      if (res.status === 403 || res.status === 404) {
+        if (res.status === 403) disableMessages(403);
+        else document.getElementById('runview-state').textContent = 'Run record not found.';
+        return;
+      }
+      if (!res.ok || !res.data.status) throw new Error(res.data.error || ('Run status returned ' + res.status + '.'));
+      renderRunStatus(res.data);
+      if (res.data.status !== 'starting' && res.data.status !== 'running') {
+        clearInterval(runView.poll); runView.poll = null;
+        if (res.data.status === 'done') scheduleRunViewAutoClose(runId);
+        if (res.data.status === 'stopped' || res.data.status === 'interrupted') {
+          document.getElementById('runview-terminal').textContent = '';
+          runView.terminalUrl = null;
+          document.getElementById('runview-pop').disabled = true;
+          showTerminalNote((RUN_STATE_LABEL[res.data.status] || res.data.status) + ': the action terminal has closed.');
+        }
+        loadMessages();
+      }
+    }).catch(function (error) {
+      if (runView.runId === runId) document.getElementById('runview-state').textContent = 'Status unavailable: ' + error.message;
+    });
+  }
+  var VIEW_ERROR_MESSAGE = {
+    launching: 'Preparing the action terminal…',
+    stale_generation: 'This terminal can no longer be identified safely.',
+    stale_target_format: 'This action was recorded in an unsupported terminal format.',
+    not_active: 'This action is no longer active.',
+    not_found: 'Run record not found.',
+    tmux_unavailable: 'Terminal status is temporarily unavailable.',
+    view_create_failed: 'Could not create an action terminal view.',
+    kill_failed: 'Could not stop the action terminal.',
+  };
+  function scheduleRunViewAutoClose(runId) {
+    // Deliberately does not close the modal. The window belongs to the run and the run is
+    // still there to read: the terminal is a cross-origin iframe, so the parent cannot tell
+    // whether someone is reading or typing in it, and closing on a timer took the output
+    // away mid-sentence. Announce the result, refresh the feed behind it, let the owner close.
+    if (runView.runId !== runId || runView.finished === runId) return;
+    runView.finished = runId;
+    msgToast('Action completed. The result is in Messages; this window stays open.');
+    loadMessages();
+  }
+  function showTerminalNote(text) {
+    var terminal = document.getElementById('runview-terminal');
+    terminal.textContent = '';
+    terminal.appendChild(msgEl('div', 'runview-note', text));
+  }
+  function mountRunFrame(runId, session) {
+    getTerminalUrl(session).then(function (url) {
+      if (runView.runId !== runId) return;
+      runView.terminalUrl = url;
+      document.getElementById('runview-pop').disabled = false;
+      var terminal = document.getElementById('runview-terminal');
+      terminal.textContent = '';
+      var frame = document.createElement('iframe');
+      frame.title = 'Action terminal';
+      frame.src = url;
+      terminal.appendChild(frame);
+    }).catch(function (error) {
+      if (runView.runId === runId) showTerminalNote('Terminal view unavailable: ' + error.message);
+    });
+  }
+  function ensureRunView(runId, attempts) {
+    ownerFetch('/runs/' + encodeURIComponent(runId) + '/view', { method: 'POST' }).then(ownerResponse)
+      .then(function (res) {
+        if (runView.runId !== runId) return;
+        if (res.ok && res.data.ok) { mountRunFrame(runId, res.data.arg); return; }
+        var code = res.data.error || ('http_' + res.status);
+        if (code === 'launching' && attempts > 1) {
+          document.getElementById('runview-state').textContent = VIEW_ERROR_MESSAGE.launching;
+          runView.retry = setTimeout(function () { ensureRunView(runId, attempts - 1); }, 1000);
+          return;
+        }
+        showTerminalNote(VIEW_ERROR_MESSAGE[code] || ('Could not open action terminal: ' + code));
+      }).catch(function (error) {
+        if (runView.runId === runId) showTerminalNote('Terminal view error: ' + error.message);
+      });
+  }
+  function openRunView(runId, title) {
+    closeRunView();
+    runView.runId = runId;
+    document.getElementById('runview-title').textContent = title || 'Action status';
+    document.getElementById('runview-body').textContent = '';
+    document.getElementById('runview-terminal').textContent = '';
+    document.getElementById('runview-state').textContent = 'Connecting…';
+    document.getElementById('runview-backdrop').classList.add('show');
+    showTerminalNote('Connecting to the action terminal…');
+    ensureRunView(runId, 5);
+    pollRunStatus(runId);
+    runView.poll = setInterval(function () { pollRunStatus(runId); }, 1500);
+  }
+  function stopRun(runId, report) {
+    return ownerFetch('/runs/' + encodeURIComponent(runId) + '/stop', { method: 'POST' }).then(ownerResponse)
+      .then(function (res) {
+        if (res.status === 403) { disableMessages(403); report('Could not stop the action.', false); return; }
+        if (!res.ok || !res.data.ok) { report('Could not stop the action: ' + (res.data.error || res.status), false); return; }
+        report('Action stopped.', true);
+        pollRunStatus(runId); loadMessages();
+      }).catch(function (error) { report('Stop error: ' + error.message, false); });
+  }
+  document.getElementById('runview-close').addEventListener('click', closeRunView);
+  document.getElementById('runview-pop').addEventListener('click', function () {
+    if (!runView.terminalUrl) return;
+    var opened = window.open(runView.terminalUrl, '_blank');
+    if (!opened) { showTerminalNote('The browser blocked the terminal tab. Open this address directly: ' + runView.terminalUrl); return; }
+    closeRunView();
+  });
+  document.getElementById('runview-backdrop').addEventListener('click', function (event) { if (event.target === this) closeRunView(); });
+  document.getElementById('runview-stop').addEventListener('click', function () {
+    if (!runView.runId) return;
+    var button = this; button.disabled = true;
+    stopRun(runView.runId, function (text, ok) { if (!ok) button.disabled = false; msgToast(text); });
+  });
+  document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && runView.runId) closeRunView(); });
+
+  loadMessages();
+  msgPoll = setInterval(function () { if (msgState.enabled !== false && !document.getElementById('exec-backdrop').classList.contains('show')) loadMessages(); }, 8000);
 </script>
 <script src="/airlock-return.js" data-mode="corner" defer></script>
 </body>

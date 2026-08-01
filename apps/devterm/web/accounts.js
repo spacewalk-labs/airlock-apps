@@ -12,22 +12,33 @@ window.initAccounts = function initAccounts(deps) {
         closeTabPops = deps.closeTabPops, placePop = deps.placePop;
 
 // ---- Claude account switch (claude-switch) — click the top square icon ----
-// usage color rule: 5h and 7d have different thresholds; the row color is the worse of the two (OR).
-//   5h  >=85 amber · >=92 red · **100 = grey (locked feel — not red)**
-//   7d  >=92 amber · >=96 red
+// usage color rule: 5h and 7d have different thresholds; the row color is the worse of
+// the two (OR). 5h at the lock threshold suppresses only its own axis (it is already
+// spent; the 7d grade still stands on its own).
+// The threshold NUMBERS are deliberately not here — the backend's USAGE_TH is the only
+// source and ships them in /accounts and /acct-alert as `thresholds`. devterm's icon,
+// these rows and the Airlock return widget (a different origin) all grade against the
+// same numbers; a frontend copy is how "devterm is red but the widget is calm" happens.
 const C_GRAY = '#8a92a6', C_GREEN = '#7bd88f', C_AMBER = '#e6b34d', C_RED = '#e05a5a';
 
+let TH = null;   // server-provided thresholds. Without them we do not colour at all.
+function setThresholds(t) {
+  if (t && typeof t.warn5 === 'number') TH = t;
+  else if (!TH && window.console) console.warn('[devterm] no thresholds received — usage colouring disabled (older server?)');
+}
+
 function usageLevel(kind, p) {   // 0=ok 1=warn 2=critical
-  if (p == null) return 0;
-  return kind === '5h' ? (p >= 92 ? 2 : p >= 85 ? 1 : 0)
-                       : (p >= 96 ? 2 : p >= 92 ? 1 : 0);
+  if (p == null || !TH) return 0;
+  return kind === '5h' ? (p >= TH.crit5 ? 2 : p >= TH.warn5 ? 1 : 0)
+                       : (p >= TH.crit7 ? 2 : p >= TH.warn7 ? 1 : 0);
 }
 function levelColor(lv) { return lv === 2 ? C_RED : lv === 1 ? C_AMBER : C_GREEN; }
 
-// row color = OR (the worse of the two). 5h full wins as grey (can't use it now anyway).
+// row color = OR (the worse of the two). The lock threshold mutes the 5h axis only.
 function usageColor(u5, u7) {
-  if (u5 != null && u5 >= 100) return C_GRAY;
-  return levelColor(Math.max(usageLevel('5h', u5), usageLevel('7d', u7)));
+  if (!TH) return C_GRAY;                 // thresholds unknown = neutral; green and red would both be a lie
+  const lv5 = u5 != null && u5 >= TH.lock5 ? 0 : usageLevel('5h', u5);
+  return levelColor(Math.max(lv5, usageLevel('7d', u7)));
 }
 
 // reset-time formatting — like a statusline (5h = time only / 7d = date + time). ISO(UTC) -> local.
@@ -43,7 +54,7 @@ function fmtReset(iso, withDate) {
 // hover tip text — two lines like a statusline. Unused (0%) window has resets_at=null -> '—'.
 // A refreshToken expiry does NOT slide — it is fixed at login (~30 days) and does not
 // refresh. So even a daily-use account dies at ~30 days. Warn ahead of time by days left.
-const RT_WARN_DAYS = 5;
+function rtWarnDays() { return TH ? TH.rtWarnDays : 5; }   // server is the source; display-only fallback
 function rtLeft(a) {   // days left (fractional) · null if unknown
   return a && a.rtExpiry ? (a.rtExpiry - Date.now()) / 86400000 : null;
 }
@@ -66,7 +77,7 @@ function acctTipText(u, a) {
   if (h.length) L.push('In use by\n' + h.map(function (x) { return '· ' + x.who; }).join('\n'));
   const d = rtLeft(a);
   if (d != null) {
-    L.push(d <= RT_WARN_DAYS
+    L.push(d <= rtWarnDays()
       ? rtWarnText(d) + '\n(expiry is fixed ~30 days after login —\n it does not extend with use)'
       : 'Login expires in ' + Math.floor(d) + ' days');
   }
@@ -76,25 +87,22 @@ function acctTipText(u, a) {
 // If the active account is warn/critical, the top / key-bar Claude icon itself signals it (amber = mild / red = clear).
 // 5h full (grey = locked) does not warn — it was already red before locking.
 let _acctIconCls = '', _acctIconTimer = null;
+let _acctAlert = null;
 function applyAcctIconCls() {
   document.querySelectorAll('[aria-label*="Switch account"]').forEach(function (b) {
     b.classList.toggle('acct-warn', _acctIconCls === 'acct-warn');
     b.classList.toggle('acct-crit', _acctIconCls === 'acct-crit');
   });
 }
+// The grade is decided by the backend (/acct-alert, USAGE_TH is the source) — here we
+// only paint the class. The Airlock return widget polls the same endpoint, so the icon
+// and the widget turn amber/red at the same instant instead of drifting apart.
 function refreshAcctIcon() {
-  fetch('/accounts').then(function (x) { return x.json(); }).then(function (j) {
-    const a = ((j && j.accounts) || []).filter(function (x) { return x.active; })[0];
-    const u = (a && a.usage) || {};
-    let cls = '';
-    if (u.use5h != null || u.use7d != null) {
-      const c = usageColor(u.use5h, u.use7d);
-      cls = c === C_RED ? 'acct-crit' : c === C_AMBER ? 'acct-warn' : '';
-    }
-    // active account login expiring soon = warn regardless of usage (else it dies out of nowhere).
-    const d = rtLeft(a);
-    if (d != null && d <= RT_WARN_DAYS && cls !== 'acct-crit') cls = 'acct-warn';
-    _acctIconCls = cls; applyAcctIconCls();
+  fetch('/acct-alert', { cache: 'no-store' }).then(function (x) { return x.json(); }).then(function (j) {
+    _acctAlert = j || null;
+    if (j && j.thresholds) setThresholds(j.thresholds);
+    _acctIconCls = j && j.level === 'crit' ? 'acct-crit' : j && j.level === 'warn' ? 'acct-warn' : '';
+    applyAcctIconCls();
   }).catch(function () {});
 }
 function startAcctIconWatch() {
@@ -171,6 +179,50 @@ function startAddAcct(list, addBtn, reflow) {
   });
 }
 // ---- Codex (ChatGPT) — this box's single account. No pool/swap (Codex design) -> status + re-login + logout ----
+// Codex usage is read from /codex-usage, which spawns an app-server behind a cache, so
+// it is asked for separately from the identity (/claude-status) and only while the
+// section is open. The identity string guards against showing a previous account's
+// numbers: a reply that arrives after a logout/login is dropped.
+let _codexIdentity = null, _codexUsage = null;
+function setCodexIdentity(cx) {
+  const state = cx && cx.state ? cx.state : 'unknown';
+  const account = cx && (cx.accountId || cx.email);
+  const identity = state === 'ok' && !account ? null : state + ':' + (account || '');
+  if (_codexIdentity !== identity) {
+    _codexIdentity = identity;
+    _codexUsage = null;                    // do not reuse numbers across a switch
+  }
+  return identity;
+}
+function codexUsageView(u) {
+  return {
+    codexUse7d: u && u.use7d,
+    codexReset7d: u && u.reset7d,
+    codexCredits: u && u.resetCredits,
+    codexStale: !!(u && u.stale),
+    codexErr: u && (u.lastErr || u.err),
+  };
+}
+function fetchCodexUsage(box, cx, identity, reflow) {
+  fetch('/codex-usage', { cache: 'no-store' }).then(function (x) { return x.json(); }).then(function (u) {
+    if (_codexIdentity !== identity) return;   // login state changed mid-request -> drop
+    const hasValue = u && u.use7d != null;
+    if (hasValue && (cx.state !== 'ok' || !cx.accountId || !u.accountId || cx.accountId !== u.accountId)) {
+      // numbers we cannot tie to the account we are showing are not displayed at all
+      _codexUsage = null;
+      renderCodexBody(box, cx, { codexErr: 'account mismatch' });
+    } else {
+      _codexUsage = codexUsageView(u);
+      renderCodexBody(box, cx, _codexUsage);
+    }
+    if (reflow) reflow();
+  }).catch(function () {
+    if (_codexIdentity !== identity) return;
+    renderCodexBody(box, cx, { codexErr: 'query failed' });
+    if (reflow) reflow();
+  });
+}
+
 function renderCodexSection(list, reflow) {
   const sep = document.createElement('div'); sep.className = 'sep'; list.appendChild(sep);
   const hd = document.createElement('div'); hd.className = 'hd'; hd.textContent = 'Codex (ChatGPT) · this box';
@@ -178,11 +230,14 @@ function renderCodexSection(list, reflow) {
   const box = document.createElement('div'); box.className = 'codex-box'; box.textContent = 'Loading…';
   list.appendChild(box);
   fetch('/claude-status').then(function (x) { return x.json(); }).then(function (s) {
-    renderCodexBody(box, (s && s.codex) || { state: 'unknown' });
+    const cx = (s && s.codex) || { state: 'unknown' };
+    const identity = setCodexIdentity(cx);
+    renderCodexBody(box, cx, _codexUsage);       // cached numbers first (stay snappy)
     if (reflow) reflow();          // the Codex section changes the height -> re-place
+    if (cx.state === 'ok') fetchCodexUsage(box, cx, identity, reflow);
   }).catch(function () { box.textContent = 'Codex status query failed'; if (reflow) reflow(); });
 }
-function renderCodexBody(box, cx) {
+function renderCodexBody(box, cx, usage) {
   box.textContent = '';
   const ok = cx.state === 'ok';
   const row = document.createElement('div'); row.className = 'codex-row';
@@ -193,6 +248,7 @@ function renderCodexBody(box, cx) {
   const pl = document.createElement('span'); pl.className = 'pl';
   pl.textContent = ok ? ((cx.plan ? cx.plan + ' · ' : '') + 'ChatGPT') : (cx.state === 'none' ? 'codex login required' : '');
   row.appendChild(nm); row.appendChild(pl); box.appendChild(row);
+  if (ok) box.appendChild(codexUsageRow(usage));
   const btns = document.createElement('div'); btns.className = 'codex-btns';
   const relog = document.createElement('button'); relog.className = 'codex-btn';
   relog.textContent = ok ? 'Re-login' : 'Log in';
@@ -214,6 +270,30 @@ function renderCodexBody(box, cx) {
   }
   box.appendChild(btns);
 }
+// The 7d weekly window is the one Codex actually limits on; there is no 5h window to
+// show. Graded against the same server thresholds as the Claude rows, so "amber" means
+// the same thing in both sections.
+function codexUsageRow(usage) {
+  const row = document.createElement('div'); row.className = 'codex-row';
+  const nm = document.createElement('span'); nm.className = 'nm';
+  const pl = document.createElement('span'); pl.className = 'pl';
+  const u7 = usage && usage.codexUse7d;
+  if (u7 == null) {
+    nm.textContent = '7d usage';
+    nm.style.color = C_GRAY;
+    pl.textContent = usage && usage.codexErr ? String(usage.codexErr) : 'reading…';
+  } else {
+    nm.textContent = '7d ' + u7 + '%' + (usage.codexStale ? ' (last value)' : '');
+    nm.style.color = levelColor(usageLevel('7d', u7));
+    const bits = [];
+    if (usage.codexReset7d) bits.push('resets ' + fmtReset(usage.codexReset7d, true));
+    if (usage.codexCredits != null) bits.push(usage.codexCredits + ' credits');
+    pl.textContent = bits.join(' · ');
+  }
+  row.appendChild(nm); row.appendChild(pl);
+  return row;
+}
+
 // codex login --device-auth = headless device auth: no port-forward/callback. Open the link, enter the code.
 // Starting re-login wipes auth.json immediately (backend backs it up) -> [Cancel] restores it if not completed.
 function startCodexLogin(box, btn) {
@@ -239,7 +319,13 @@ function startCodexLogin(box, btn) {
       chk.disabled = true; chk.textContent = 'Checking…';
       fetch('/claude-status').then(function (x) { return x.json(); }).then(function (st) {
         const cx = (st && st.codex) || {};
-        if (cx.state === 'ok') { flash('✓ Codex login complete: ' + (cx.email || ''), 3000); renderCodexBody(box, cx); }
+        if (cx.state === 'ok') {
+          flash('✓ Codex login complete: ' + (cx.email || ''), 3000);
+          // new identity -> drop any cached numbers and read this account's own
+          const identity = setCodexIdentity(cx);
+          renderCodexBody(box, cx, _codexUsage);
+          fetchCodexUsage(box, cx, identity, null);
+        }
         else { chk.disabled = false; chk.textContent = 'Check'; flash('Not logged in yet — enter the code / approve, then check again', 4000); }
       }).catch(function () { chk.disabled = false; chk.textContent = 'Check'; });
     };
@@ -251,7 +337,12 @@ function startCodexLogin(box, btn) {
         if (rr && rr.ok) {
           flash(rr.restored ? 'Cancelled — previous login restored' : 'Cancelled', 2500);
           fetch('/claude-status').then(function (x) { return x.json(); })
-            .then(function (st) { renderCodexBody(box, (st && st.codex) || { state: 'unknown' }); }).catch(function () {});
+            .then(function (st) {
+              const rcx = (st && st.codex) || { state: 'unknown' };
+              const identity = setCodexIdentity(rcx);
+              renderCodexBody(box, rcx, _codexUsage);
+              if (rcx.state === 'ok') fetchCodexUsage(box, rcx, identity, null);
+            }).catch(function () {});
         } else { cancel.disabled = false; cancel.textContent = 'Cancel (restore)'; flash('Cancel failed' + (rr && rr.error ? ': ' + rr.error : ''), 3000); }
       }).catch(function () { cancel.disabled = false; cancel.textContent = 'Cancel (restore)'; });
     };
@@ -272,16 +363,18 @@ function placeAcctMenu(pop, anchor) {
   pop.style.left = Math.max(6, Math.min(r.right - 320, window.innerWidth - pop.offsetWidth - 8)) + 'px';
   pop.style.top = top + 'px';
 }
-function openAcctMenu(anchor) {
-  closeTabPops();
-  const pop = document.createElement('div'); pop.className = 'tab-pop acct';
-  const list = document.createElement('div');
-  const loading = document.createElement('div'); loading.className = 'sep'; loading.textContent = 'Loading accounts / usage…';
-  list.appendChild(loading); pop.appendChild(list);
-  const r = anchor.getBoundingClientRect();
-  placePop(pop, r.right - 320, r.bottom + 6);   // append to body first so we can measure
-  const reflow = function () { placeAcctMenu(pop, anchor); };
-  reflow();                                     // place from the loading state — flip above if near the bottom bar
+// The account list is built once and shown in two places: the popup anchored to the
+// icon (devterm) and a plain panel that fills its container (panel.html, which the
+// Airlock return widget opens in an iframe from another origin). Only the framing
+// differs, so the list itself lives here and the caller passes the framing in:
+//   reflow()     — re-place after the height changed (no-op for a panel)
+//   reopen()     — redraw from scratch (after a removal)
+//   alive()      — is the container still on the page (drop late replies)
+//   onSwitched() — what to do after a successful switch (popup closes, panel redraws)
+function fillAcctList(list, opts) {
+  const reflow = opts.reflow, reopen = opts.reopen;
+  const alive = opts.alive || function () { return true; };
+  const onSwitched = opts.onSwitched || function () {};
   const render = function (j) {
     list.textContent = '';
     if (j && j.enabled === false) {
@@ -306,7 +399,7 @@ function openAcctMenu(anchor) {
       if (dead) b.title = a.health.reason || '';
       // still alive but expiring soon = re-login now to cross over without interruption.
       const rtd = dead ? null : rtLeft(a);
-      if (rtd != null && rtd <= RT_WARN_DAYS) {
+      if (rtd != null && rtd <= rtWarnDays()) {
         const w = document.createElement('span');
         w.style.color = rtd <= 2 ? C_RED : C_AMBER; w.style.fontWeight = '600';
         w.textContent = ' · ' + rtWarnText(rtd);
@@ -345,7 +438,7 @@ function openAcctMenu(anchor) {
           if (!window.confirm('Remove account: ' + label + '\n\nDeleted from the pool.\nRe-login revives the same slot. Continue?')) return;
           hideAcctTip();
           postJson('/acct-remove', { name: a.name }).then(function (res) {
-            if (res && res.ok) { flash('🗑 ' + label + ' removed', 2500); openAcctMenu(anchor); refreshAcctIcon(); }
+            if (res && res.ok) { flash('🗑 ' + label + ' removed', 2500); reopen(); refreshAcctIcon(); }
             else flash('Remove failed' + (res && res.error ? ': ' + res.error : ''), 3500);
           }).catch(function () { flash('Remove request failed', 2000); });
         });
@@ -355,14 +448,13 @@ function openAcctMenu(anchor) {
       b.onclick = function () {
         // dead account = switching would fail. Send to re-login instead — name = id, same slot revives.
         if (dead) { startAddAcct(list, b, reflow); return; }
-        if (a.active) { closeTabPops(); flash('Already using ' + a.name, 1400); mkFocus(); return; }
-        closeTabPops();
+        if (a.active) { onSwitched(); flash('Already using ' + a.name, 1400); return; }
+        onSwitched();
         postJson('/acct-switch', { name: a.name }).then(function (res) {
           if (res && res.ok) { flash('✓ Switched to ' + (a.email || a.name) + ' (applies within ~1 min; restart the session for immediate effect)', 3000);
-            refreshAcctIcon(); }
+            refreshAcctIcon(); onSwitched(); }
           else flash('Switch failed' + (res && res.error ? ': ' + res.error : ''), 2800);
-          mkFocus();
-        }).catch(function () { flash('Switch request failed', 2000); mkFocus(); });
+        }).catch(function () { flash('Switch request failed', 2000); });
       };
       list.appendChild(b);
     });
@@ -376,11 +468,12 @@ function openAcctMenu(anchor) {
     reflow();                           // re-place at the full rendered height (flip above from a bottom key bar)
   };
   fetch('/accounts').then(function (x) { return x.json(); }).then(function (j) {
-    render(j);                       // draw with cached values first (keep the popup snappy)
+    if (j && j.thresholds) setThresholds(j.thresholds);
+    render(j);                       // draw with cached values first (stay snappy)
     if (j && j.enabled === false) return;
     // the value at the moment it opened — the timer polls active every minute, so it can be up to 1 min stale.
     postJson('/acct-usage-now', {}).then(function (fresh) {
-      if (!document.body.contains(pop)) return;              // already closed -> drop
+      if (!alive()) return;                                  // already closed -> drop
       if (list.querySelector('.addform')) return;            // login in progress -> don't overwrite
       if (!fresh || !fresh.usage || fresh.usage.err) return;
       (j.accounts || []).forEach(function (a) {
@@ -395,6 +488,43 @@ function openAcctMenu(anchor) {
   });
 }
 
-  // expose the 4 the core uses
-  return { openAcctMenu: openAcctMenu, applyAcctIconCls: applyAcctIconCls, startAcctIconWatch: startAcctIconWatch, hideAcctTip: hideAcctTip };
+// devterm: the popup anchored to the account icon.
+function openAcctMenu(anchor) {
+  closeTabPops();
+  const pop = document.createElement('div'); pop.className = 'tab-pop acct';
+  const list = document.createElement('div');
+  const loading = document.createElement('div'); loading.className = 'sep'; loading.textContent = 'Loading accounts / usage…';
+  list.appendChild(loading); pop.appendChild(list);
+  const r = anchor.getBoundingClientRect();
+  placePop(pop, r.right - 320, r.bottom + 6);   // append to body first so we can measure
+  const reflow = function () { placeAcctMenu(pop, anchor); };
+  reflow();                                     // place from the loading state — flip above if near the bottom bar
+  fillAcctList(list, {
+    reflow: reflow,
+    reopen: function () { openAcctMenu(anchor); },
+    alive: function () { return document.body.contains(pop); },
+    onSwitched: function () { closeTabPops(); mkFocus(); },
+  });
+}
+
+// panel.html: the same list filling a container, with no popup framing. The panel does
+// not close on a switch, so it redraws — otherwise the ✓ would stay on the old account.
+function renderAcctPanel(container) {
+  container.className = 'tab-pop acct acct-panel';
+  container.textContent = '';
+  const list = document.createElement('div');
+  const loading = document.createElement('div'); loading.className = 'sep'; loading.textContent = 'Loading accounts / usage…';
+  list.appendChild(loading); container.appendChild(list);
+  fillAcctList(list, {
+    reflow: function () {},
+    reopen: function () { renderAcctPanel(container); },
+    alive: function () { return document.body.contains(container); },
+    onSwitched: function () { renderAcctPanel(container); },
+  });
+}
+
+  // the 4 the terminal core uses + the one panel.html uses
+  return { openAcctMenu: openAcctMenu, applyAcctIconCls: applyAcctIconCls,
+           startAcctIconWatch: startAcctIconWatch, hideAcctTip: hideAcctTip,
+           renderAcctPanel: renderAcctPanel };
 };

@@ -42,6 +42,16 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 . "$ROOT/install/lib.sh"
 
 airlock_load paseo
+# Return-widget menu attributes. With devterm installed the widget's tap opens a small
+# menu (return to Airlock / subscription accounts) instead of navigating straight away —
+# this app owns the whole screen, so the account panel has no other way in. Without
+# devterm there is nothing to open, so the attributes stay empty and a tap navigates.
+WIDGET_MENU_ATTRS=""
+PANEL_URL="$(airlock_panel_url || true)"
+if [ -n "$PANEL_URL" ]; then
+  WIDGET_MENU_ATTRS=" data-menu=\"1\" data-panel=\"${PANEL_URL}\""
+fi
+
 GATE_PORT="${AIRLOCK_PASEO_GATE_PORT:?}"
 BACKEND_PORT="${AIRLOCK_PASEO_BACKEND_PORT:?}"
 HTTPS_PORT="${AIRLOCK_PASEO_HTTPS_PORT:?}"
@@ -229,6 +239,42 @@ else
   esac
 fi
 
+# --- 2d. persist pasted images (idempotent) ---
+# An image pasted into the web UI reaches the model only as an inline base64 vision block:
+# the model can see it, but there is no file, so the agent's Read tool has no path to open
+# and "look at this screenshot, then fix the file" dead-ends. The patch keeps the inline
+# block and additionally writes the bytes under the session cwd, naming the path in a
+# sibling text block. No CLI version gate: this changes what the provider sends, not which
+# model runs.
+IMGPERSIST_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/image-attachments-persist.mjs"
+CLAUDE_AGENT_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/claude/agent.js"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] apply pasted-image persistence to $CLAUDE_AGENT_JS"
+elif [ ! -f "$CLAUDE_AGENT_JS" ]; then
+  log "warning: claude agent.js not found ($CLAUDE_AGENT_JS) — pasted-image persistence skipped"
+elif [ ! -f "$IMGPERSIST_PATCHER" ]; then
+  log "warning: pasted-image patcher not found ($IMGPERSIST_PATCHER) — skipped"
+else
+  ip_rc=0
+  ip_out="$(node "$IMGPERSIST_PATCHER" "$CLAUDE_AGENT_JS")" || ip_rc=$?
+  case "$ip_rc" in
+    10) log "pasted-image persistence already applied" ;;
+    20) log "pasted-image anchors not found (paseo version drift) — skipped" ;;
+    0)
+      IP_TMP="${CLAUDE_AGENT_JS}.paseo-new.mjs"
+      if node --check "$IP_TMP"; then
+        mv "$IP_TMP" "$CLAUDE_AGENT_JS" || die "pasted-image persistence mv failed"
+        need_restart=1   # bundle changed -> restart so the daemon runs the patched provider
+        log "pasted-image persistence applied (saves under <cwd>/.paseo-attachments/)"
+      else
+        rm -f "$IP_TMP"
+        die "pasted-image persistence produced invalid JS — not applied"
+      fi
+      ;;
+    *) die "pasted-image patcher error (rc=$ip_rc): $ip_out" ;;
+  esac
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
@@ -335,7 +381,8 @@ install -d "$CONFD/servers.d"
   sed -e "s/@@LISTEN@@/${GATE_PORT}/g" \
       -e "s|@@UPSTREAM@@|127.0.0.1:${BACKEND_PORT}|g" \
       -e "s|@@HOSTPORT@@|${FQDN}:${HTTPS_PORT}|g" \
-      -e "s|@@WIDGET@@|${AIRLOCK_WEBROOT:-/opt/airlock/hub}/assets/airlock-return.js|g" <<'NGINX'
+      -e "s|@@WIDGET@@|${AIRLOCK_WEBROOT:-/opt/airlock/hub}/assets/airlock-return.js|g" \
+      -e "s|@@WIDGET_MENU@@|${WIDGET_MENU_ATTRS}|g" <<'NGINX'
 server {
     listen 127.0.0.1:@@LISTEN@@;
     server_name _;
@@ -360,7 +407,7 @@ server {
         # return-to-Airlock widget: uncompressed HTML so sub_filter applies (WS/JS
         # bundles are untouched — sub_filter only rewrites text/html).
         proxy_set_header Accept-Encoding "";
-        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right" defer></script></body>';
+        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right"@@WIDGET_MENU@@ defer></script></body>';
         sub_filter_once on;
     }
 }

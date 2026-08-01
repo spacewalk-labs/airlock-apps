@@ -24,6 +24,17 @@ the MIT license that covers the rest of Airlock.
   skipped. Only applied when the Claude Code CLI on the daemon PATH is new enough
   to run the model (>= 2.1.219, upstream's stated minimum).
 
+- **`image-attachments-persist.mjs`** (+ `image-attachments-persist.patch`, the
+  reference copy) — an image pasted into paseo's web UI reaches the model only as an
+  inline base64 vision block: the model sees it, but no file exists, so the agent's
+  `Read` tool has no path and "look at this screenshot, then edit the file" dead-ends.
+  The patch keeps the inline block and *also* writes the bytes under the session cwd
+  (`<cwd>/.paseo-attachments/`, self-ignored via its own `.gitignore`, name
+  content-addressed so a re-paste dedups), then appends a sibling text block naming the
+  absolute path. Same discipline as the others: sentinel (idempotent), all-or-nothing
+  (three anchors or none), `node --check` before it replaces the file, exit 20 on
+  upstream drift so the install continues without the feature.
+
 - **`claude-model-prune.mjs`** (+ `claude-model-prune.patch`, the reference copy)
   — removes superseded entries (Opus 4.7/4.6, Sonnet 4.6) from the same manifest
   so the picker is the handful people actually choose. Picker-only: the manifest

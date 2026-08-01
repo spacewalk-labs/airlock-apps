@@ -32,6 +32,9 @@ FONT_SIZE="${AIRLOCK_DEVTERM_FONT_SIZE:-15}"
 IDENTITY_HEADER="${AIRLOCK_IDENTITY_HEADER:?}"
 ACCOUNTS="${AIRLOCK_DEVTERM_ACCOUNTS:-false}"
 REMOTE_HOSTS="${AIRLOCK_DEVTERM_REMOTE_HOSTS:-}"
+# Secret-drop lifetime. A secret drop is only safe because it expires, so the TTL is a
+# first-class setting rather than a constant buried in the gate.
+SECRET_TTL="${AIRLOCK_DEVTERM_SECRET_TTL_SEC:-1800}"
 CLAUDE_SWITCH="${AIRLOCK_DEVTERM_CLAUDE_SWITCH:-}"
 CLAUDE_STATUS="${AIRLOCK_DEVTERM_CLAUDE_STATUS:-}"
 FLEET_STORE="${AIRLOCK_DEVTERM_FLEET_STORE:-}"
@@ -75,6 +78,11 @@ CANON="https://${FQDN}:${HTTPS_PORT}"
 # --- 1. provision ttyd (sha256-pinned) ---
 provision_ttyd() {
   [ -x "$TTYD_BIN" ] && { log "ttyd present: $TTYD_BIN"; return; }
+  # Both hashes are the ones upstream publishes in the release's own SHA256SUMS
+  # asset, not a hash observed from a single download of our own — trust-on-first-use
+  # cannot tell a tampered download from a genuine one. That manifest carries no
+  # signature, so this pins the bytes against a swapped asset, not against a
+  # compromise of the publishing account.
   local ver=1.7.7 asset sha
   case "$(uname -m)" in
     x86_64)  asset=ttyd.x86_64;  sha=8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55 ;;
@@ -114,10 +122,12 @@ fi
 # --- 3. custom web client into WEB_ROOT (index.html templated with runtime config) ---
 CFG_JSON="{\"accounts\":${ACCOUNTS},\"markwand\":${MARKWAND},\"orca\":$([ -n "$ORCA_SHIM" ] && echo true || echo false)}"
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
-  log "[dry] install web/ -> $WEB_ROOT (index.html config=${CFG_JSON})"
+  log "[dry] install web/ -> $WEB_ROOT (index.html config=${CFG_JSON}, + ui.js/popup.css/panel.html)"
 else
   install -d "$WEB_ROOT/vendor"
-  install -m644 "$HERE/web/app.js" "$HERE/web/accounts.js" "$HERE/web/favicon.svg" "$WEB_ROOT/"
+  install -m644 "$HERE/web/app.js" "$HERE/web/accounts.js" "$HERE/web/ui.js" \
+                "$HERE/web/secretdrop.js" "$HERE/web/popup.css" "$HERE/web/panel.html" \
+                "$HERE/web/favicon.svg" "$WEB_ROOT/"
   install -m644 "$HERE"/web/vendor/* "$WEB_ROOT/vendor/"
   # template the config placeholder (JSON has no sed metachars; use | as delimiter)
   sed "s|%%DEVTERM_CONFIG%%|${CFG_JSON}|" "$HERE/web/index.html" > "$WEB_ROOT/index.html"
@@ -161,7 +171,9 @@ fi
 # gate unit: serves the custom client + API, proxies /ws,/token to ttyd. A content
 # revision (hash of gate + web) is embedded so write_if_changed triggers a restart when
 # the code changes — and NOT on a no-op re-run.
-REV="$(cat "$GATE_PY" "$HERE"/web/app.js "$HERE"/web/accounts.js "$HERE"/web/index.html 2>/dev/null | sha256sum | cut -c1-12)"
+REV="$(cat "$GATE_PY" "$HERE"/web/app.js "$HERE"/web/accounts.js "$HERE"/web/ui.js \
+        "$HERE"/web/secretdrop.js "$HERE"/web/popup.css "$HERE"/web/panel.html \
+        "$HERE"/web/index.html 2>/dev/null | sha256sum | cut -c1-12)"
 gate_env=""
 add_env() { gate_env="${gate_env}Environment=$1=$2
 "; }
@@ -177,6 +189,7 @@ add_env AIRLOCK_CODE_ROOT "$CODE_ROOT"
 add_env DEVTERM_MARKWAND "$MARKWAND"
 add_env DEVTERM_ACCOUNTS "$ACCOUNTS"
 add_env DEVTERM_REMOTE_HOSTS "$REMOTE_HOSTS"
+add_env DEVTERM_SECRET_TTL "$SECRET_TTL"
 add_env DEVTERM_ORCA_SHIM "$ORCA_SHIM"
 # account tools are wired only when accounts=true (else the endpoints stay disabled)
 if [ "$ACCOUNTS" = true ]; then

@@ -47,15 +47,18 @@ Env:
 import asyncio
 import base64
 import json
+import math
 import os
 import re
 import shlex
 import shutil
+import signal
+import socket
 import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
 ALLOW = {s.strip().lower() for s in os.environ.get("AIRLOCK_OWNER", "").split(",") if s.strip()}
 # ssh hosts whose tmux sessions are also surfaced as tabs (comma-separated).
@@ -81,6 +84,31 @@ FLEET_STORE = os.path.expanduser(os.environ["DEVTERM_FLEET_STORE"]) if os.enviro
 FLEET_STORE_URL = os.environ.get("DEVTERM_FLEET_STORE_URL", "")
 ORCA_SHIM = os.path.expanduser(os.environ.get("DEVTERM_ORCA_SHIM", ""))
 
+# ---- subscription warning thresholds (the single source of truth) ----
+# These numbers live here and nowhere else. /accounts ships them to the frontend as
+# `thresholds` and /acct-alert ships the *verdict*; if a frontend kept its own copy,
+# the row colour and the widget ring would disagree the moment one of them changed.
+#   warn5/crit5 = 5h window %, warn7/crit7 = 7d window %, lock5 = 5h treated as spent,
+#   rtWarnDays  = warn when the refresh token expires within this many days.
+USAGE_TH = {"warn5": 78, "crit5": 88, "warn7": 88, "crit7": 93, "lock5": 100, "rtWarnDays": 5}
+ACCT_ALERT_TTL = 30          # /acct-alert response cache (s): N tabs polling every 30s
+                             # still costs one claude-switch call per window.
+LIVE_USAGE_TTL = 60          # cache for the live account's own usage probe (s) — used
+                             # when no shared store is configured (the common case for a
+                             # single box). Long enough that a ring poll never bursts.
+CODEX_USAGE_TTL = 300        # 5 min. The weekly window moves a couple of % per day, so
+                             # this resolution is plenty and one app-server spawn is not.
+CODEX_USAGE_WAIT = 20        # how long a /codex-usage request waits for a fresh reading
+CODEX_USAGE_RETRY = 30       # retry backoff after a failure — a failure must not buy
+                             # itself a full TTL of silence
+# Must be comfortably larger than claude-status's own CODEX_REAP_GRACE (0.5s): that
+# script promotes SIGTERM to SIGKILL itself, and we only step in if it never got there.
+PROBE_KILL_GRACE = 3.0
+_acct_alert_cache = {"at": 0.0, "payload": None}
+_live_usage_cache = {"at": 0.0, "payload": None}
+_codex_usage_cache = {"valueAt": 0.0, "lastTryAt": 0.0,
+                      "payload": None, "authMtime": None, "task": None}
+
 # Claude Code session logs (used to reconstruct conversation text for the copy
 # modal when the pane is running `claude`; degrades to screen capture otherwise).
 CLAUDE_PROJECTS = os.path.expanduser("~/.claude/projects")
@@ -102,6 +130,20 @@ UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024           # image save cap (paste/annotate — canvas-encoded, so far smaller in practice)
 FILE_MAX_BYTES = 200 * 1024 * 1024            # file upload save cap (arbitrary binary). ~/uploads has a 24h TTL so no disk creep
 
+# ---- secret drop — an owner-only, short-lived store kept apart from ~/uploads ----
+# The value is typed into a modal and written to a file here; what leaves is the PATH,
+# never the value. An agent (or a shell) reads it by path when it needs it, which keeps
+# the secret out of chat scrollback, terminal history and any log.
+# Deliberately NOT under code_root: markwand serves that tree read+write, so a secret
+# there would be readable through a viewer. Directory is 0700, files 0600, TTL-swept.
+SECRETS = os.path.expanduser("~/.devterm-secrets")
+SECRET_TTL_SEC = int(os.environ.get("DEVTERM_SECRET_TTL", "1800"))     # 30 min default
+SECRET_SWEEP_SEC = min(60, max(1, SECRET_TTL_SEC // 4))
+SECRET_MAX_BYTES = 64 * 1024                  # UTF-8 cap after normalization
+SECRET_BODY_MAX = 96 * 1024                   # request-body cap for the secret JSON
+SECRET_MAX_FILES = 64                         # stops forgotten secrets accumulating
+_RE_SECRET_NAME = re.compile(r"^(?!\.)[A-Za-z0-9._-]{1,48}$")
+
 # ---- tab prefs (order / hidden / color / theme) stored server-side so any device
 #      or browser sees the same layout. Owner is singular, so one file. ----
 PREFS_DIR = os.path.expanduser("~/.config/airlock-devterm")
@@ -121,12 +163,15 @@ _FORBIDDEN = (
 )
 
 
-def _resp(status, body, ctype=b"text/html; charset=utf-8", cache=b"no-store, must-revalidate"):
+def _resp(status, body, ctype=b"text/html; charset=utf-8", cache=b"no-store, must-revalidate",
+          extra=b""):
     # no-store default: html/js change often, so no stale caching. Only big static
-    # assets (fonts) opt into caching.
+    # assets (fonts) opt into caching. `extra` carries already-formatted header lines
+    # (each CRLF-terminated) — used for the ACAO echo on cross-origin reads.
     return (b"HTTP/1.1 " + status + b"\r\nContent-Type: " + ctype +
             b"\r\nContent-Length: " + str(len(body)).encode() +
-            b"\r\nCache-Control: " + cache + b"\r\nConnection: close\r\n\r\n" + body)
+            b"\r\nCache-Control: " + cache + b"\r\n" + extra +
+            b"Connection: close\r\n\r\n" + body)
 
 
 async def _read_head(reader):
@@ -371,6 +416,264 @@ async def _serve_static(path, cw):
     await cw.drain()
 
 
+def _log_secret_sweep_error(exc):
+    # Only the exception type: the message can carry a path or a filename, and a secret
+    # value must never reach a log either.
+    print("devterm secret sweep failed: " + type(exc).__name__, file=sys.stderr, flush=True)
+
+
+def _sweep_secrets():
+    """Delete expired secrets and orphaned temp files, whether or not anyone asked."""
+    if os.path.islink(SECRETS):
+        _log_secret_sweep_error(OSError("secret directory is a symlink"))
+        return
+    if not os.path.isdir(SECRETS):
+        return
+    try:
+        names = os.listdir(SECRETS)
+    except OSError as e:
+        _log_secret_sweep_error(e)
+        return
+    cutoff = time.time() - SECRET_TTL_SEC
+    for name in names:
+        if not name.endswith((".tmp", ".txt")):
+            continue
+        full = os.path.join(SECRETS, name)
+        try:
+            if name.endswith(".tmp"):
+                if os.path.isfile(full) or os.path.islink(full):
+                    os.unlink(full)
+                continue
+            secret_name = name[:-4]
+            if not _RE_SECRET_NAME.fullmatch(secret_name):
+                continue
+            if (os.path.isfile(full) and not os.path.islink(full)
+                    and os.path.getmtime(full) < cutoff):
+                os.unlink(full)
+        except OSError as e:
+            _log_secret_sweep_error(e)
+
+
+async def _secret_sweep_loop():
+    while True:
+        await asyncio.sleep(SECRET_SWEEP_SEC)
+        try:
+            _sweep_secrets()
+        except Exception as e:
+            # One exception must not kill the periodic task — that task IS the TTL.
+            _log_secret_sweep_error(e)
+
+
+def _store_secret(name, raw):
+    """Write the secret to a fresh inode, then replace. -> (ok, "limit"|"io"|None)."""
+    if os.path.islink(SECRETS):
+        return False, "io"
+    try:
+        os.makedirs(SECRETS, mode=0o700, exist_ok=True)
+        os.chmod(SECRETS, 0o700)
+        final = os.path.join(SECRETS, name + ".txt")
+        current = 0
+        now = time.time()
+        for entry in os.listdir(SECRETS):
+            if entry.endswith(".tmp") or not entry.endswith(".txt"):
+                continue
+            entry_name = entry[:-4]
+            if not _RE_SECRET_NAME.fullmatch(entry_name):
+                continue
+            ep = os.path.join(SECRETS, entry)
+            if (os.path.isfile(ep) and not os.path.islink(ep)
+                    and os.path.getmtime(ep) + SECRET_TTL_SEC > now):
+                current += 1
+        if current >= SECRET_MAX_FILES and not os.path.lexists(final):
+            return False, "limit"
+    except OSError:
+        return False, "io"
+
+    tmp = os.path.join(SECRETS, "." + name + "." + str(os.getpid()) + ".tmp")
+    fd = None
+    tmp_created = False
+    try:
+        # O_EXCL|O_NOFOLLOW + 0600 from creation: never widen an existing file's mode and
+        # never follow a symlink someone left in the way.
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        tmp_created = True
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            fd = None
+            f.write(raw)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, os.path.join(SECRETS, name + ".txt"))
+        tmp_created = False
+        return True, None
+    except OSError:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if tmp_created:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+        return False, "io"
+
+
+def _secret_origin_ok(headers):
+    """Same-origin guard for the secret endpoints.
+
+    Unlike the read-only alert, these WRITE. The identity header cannot be forged from
+    the tailnet (this gate is loopback-only), but a page on another origin could still
+    make the browser POST here, so a cross-origin request is refused outright rather
+    than answered. No Origin header at all (curl, the terminal itself) is fine."""
+    origin = headers.get(b"origin", b"")
+    if not origin:
+        return True
+    host = headers.get(b"host", b"").decode("latin1").lower()
+    try:
+        parsed = urllib.parse.urlsplit(origin.decode("latin1"))
+        same = parsed.scheme in ("http", "https") and parsed.netloc.lower() == host
+    except (UnicodeError, ValueError):
+        return False
+    return bool(host) and same
+
+
+def _secret_remain(name):
+    try:
+        return max(0, math.ceil(os.path.getmtime(os.path.join(SECRETS, name + ".txt"))
+                                + SECRET_TTL_SEC - time.time()))
+    except OSError:
+        return SECRET_TTL_SEC
+
+
+async def _serve_secret_put(cr, headers, leftover, cw):
+    """Store a normalized secret atomically and answer with the path, never the value."""
+    if headers.get(b"content-type", b"").split(b";", 1)[0].strip().lower() != b"application/json":
+        await _send_json(cw, b"415 Unsupported Media Type",
+                         {"ok": False, "error": "Content-Type must be application/json"})
+        return
+    if not _secret_origin_ok(headers):
+        await _send_json(cw, b"403 Forbidden", {"ok": False, "error": "origin not allowed"})
+        return
+    try:
+        declared = int(headers.get(b"content-length", b"0"))
+    except ValueError:
+        declared = 0
+    if declared > SECRET_BODY_MAX:
+        await _send_json(cw, b"413 Payload Too Large", {"ok": False, "error": "secret body too large"})
+        return
+    d = await _read_json_body(cr, headers, leftover, limit=SECRET_BODY_MAX)
+    name = d.get("name") if d is not None else None
+    value = d.get("value") if d is not None else None
+    if not isinstance(name, str) or not _RE_SECRET_NAME.fullmatch(name):
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "invalid name"})
+        return
+    if not isinstance(value, str):
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "value required"})
+        return
+    # Normalize newlines and strip: a value pasted from a browser or an email arrives with
+    # CRLF or trailing whitespace, and `export X=$(cat file)` would carry it into the env.
+    normalized = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not normalized:
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "value required"})
+        return
+    normalized += "\n"
+    try:
+        raw = normalized.encode("utf-8")
+    except UnicodeEncodeError:
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "value not encodable"})
+        return
+    if len(raw) > SECRET_MAX_BYTES:
+        await _send_json(cw, b"413 Payload Too Large", {"ok": False, "error": "value too large"})
+        return
+    _sweep_secrets()
+    ok, reason = _store_secret(name, raw)
+    if not ok:
+        status = b"400 Bad Request" if reason == "limit" else b"500 Internal Server Error"
+        error = "secret limit reached" if reason == "limit" else "secret storage failed"
+        await _send_json(cw, status, {"ok": False, "error": error})
+        return
+    await _send_json(cw, b"200 OK", {"ok": True, "name": name,
+                                    "path": "~/.devterm-secrets/" + name + ".txt",
+                                    "ttl_sec": SECRET_TTL_SEC,
+                                    "remain_sec": _secret_remain(name)})
+
+
+async def _serve_secret_list(headers, cw):
+    """Metadata for the unexpired secrets — names, sizes, time left. Never a value."""
+    if not _secret_origin_ok(headers):
+        await _send_json(cw, b"403 Forbidden", {"ok": False, "error": "origin not allowed"})
+        return
+    _sweep_secrets()
+    if os.path.islink(SECRETS):
+        await _send_json(cw, b"500 Internal Server Error", {"ok": False, "error": "secret storage failed"})
+        return
+    if not os.path.lexists(SECRETS):
+        await _send_json(cw, b"200 OK", {"ok": True, "secrets": [], "ttl_sec": SECRET_TTL_SEC})
+        return
+    if not os.path.isdir(SECRETS):
+        await _send_json(cw, b"500 Internal Server Error", {"ok": False, "error": "secret storage failed"})
+        return
+    try:
+        now = time.time()
+        items = []
+        for filename in os.listdir(SECRETS):
+            if not filename.endswith(".txt"):
+                continue
+            name = filename[:-4]
+            if not _RE_SECRET_NAME.fullmatch(name):
+                continue
+            full = os.path.join(SECRETS, filename)
+            if os.path.islink(full) or not os.path.isfile(full):
+                continue
+            remain = max(0, math.ceil(os.path.getmtime(full) + SECRET_TTL_SEC - now))
+            if remain <= 0:
+                continue
+            items.append({"name": name, "path": "~/.devterm-secrets/" + filename,
+                          "bytes": os.path.getsize(full), "remain_sec": remain})
+        items.sort(key=lambda item: item["name"])
+    except OSError:
+        await _send_json(cw, b"500 Internal Server Error", {"ok": False, "error": "secret storage failed"})
+        return
+    await _send_json(cw, b"200 OK", {"ok": True, "secrets": items, "ttl_sec": SECRET_TTL_SEC})
+
+
+async def _serve_secret_del(cr, headers, leftover, cw):
+    """Delete by name. A valid name that is already gone is still a success (the caller
+    wanted it gone, and it is)."""
+    if headers.get(b"content-type", b"").split(b";", 1)[0].strip().lower() != b"application/json":
+        await _send_json(cw, b"415 Unsupported Media Type",
+                         {"ok": False, "error": "Content-Type must be application/json"})
+        return
+    if not _secret_origin_ok(headers):
+        await _send_json(cw, b"403 Forbidden", {"ok": False, "error": "origin not allowed"})
+        return
+    try:
+        declared = int(headers.get(b"content-length", b"0"))
+    except ValueError:
+        declared = 0
+    if declared > SECRET_BODY_MAX:
+        await _send_json(cw, b"413 Payload Too Large", {"ok": False, "error": "secret body too large"})
+        return
+    d = await _read_json_body(cr, headers, leftover, limit=SECRET_BODY_MAX)
+    name = d.get("name") if d is not None else None
+    if not isinstance(name, str) or not _RE_SECRET_NAME.fullmatch(name):
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "invalid name"})
+        return
+    if os.path.islink(SECRETS):
+        await _send_json(cw, b"500 Internal Server Error", {"ok": False, "error": "secret storage failed"})
+        return
+    try:
+        os.unlink(os.path.join(SECRETS, name + ".txt"))
+    except FileNotFoundError:
+        pass
+    except OSError:
+        await _send_json(cw, b"500 Internal Server Error", {"ok": False, "error": "secret deletion failed"})
+        return
+    await _send_json(cw, b"200 OK", {"ok": True, "name": name})
+
+
 def _cleanup_old_uploads():
     """Remove regular files in ~/uploads past the TTL (protects dirs/symlinks)."""
     if not os.path.isdir(UPLOADS):
@@ -495,8 +798,48 @@ async def _read_json_body(cr, headers, leftover, limit=MAX_BODY):
     return obj if isinstance(obj, dict) else None
 
 
-async def _send_json(cw, status, payload):
-    cw.write(_resp(status, json.dumps(payload).encode(), b"application/json; charset=utf-8"))
+def _finite_number(value):
+    """The value if it is a real finite number, else None. Guards every threshold
+    comparison: a NaN would silently compare False and mute a warning."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            if math.isfinite(value):
+                return value
+        except (OverflowError, ValueError):
+            pass
+    return None
+
+
+def _cors_origin(headers):
+    """The request Origin if it is *this box on another port*, else None.
+
+    Why: the Airlock return widget is injected into upstream bundles that run on their
+    own ports (a browser IDE, an agent runner, ...), so it reads /acct-alert
+    cross-origin. Identity comes from the ingress header, not a cookie, so a simple
+    credential-less GET needs nothing but an echoed ACAO (no preflight, no ACAC).
+
+    Never '*' and never an arbitrary origin: tailnet domains are public suffixes, so a
+    *different node* would also be same-site. Echo only when the origin's first
+    hostname label equals this host's — same box, any port.
+    """
+    origin = headers.get(b"origin", b"")
+    if not origin:
+        return None
+    try:
+        h = urllib.parse.urlsplit(origin.decode("latin1")).hostname or ""
+    except (UnicodeError, ValueError):
+        return None
+    if h and h.split(".")[0] == socket.gethostname().split(".")[0]:
+        return origin
+    return None
+
+
+async def _send_json(cw, status, payload, cors=None):
+    extra = b""
+    if cors:
+        extra = b"Access-Control-Allow-Origin: " + cors + b"\r\nVary: Origin\r\n"
+    cw.write(_resp(status, json.dumps(payload).encode(),
+                   b"application/json; charset=utf-8", extra=extra))
     await cw.drain()
 
 
@@ -1259,14 +1602,9 @@ def _codex_available():
     return bool(b) and (os.path.isfile(b) or shutil.which("codex") is not None)
 
 
-async def _serve_accounts(cw):
-    """Account list (claude-switch) + usage (merged from the shared store, if any).
-
-    When accounts are disabled or claude-switch is absent, returns a clean disabled
-    payload so the UI can hide itself."""
-    if not _accounts_enabled():
-        await _send_json(cw, b"200 OK", {"enabled": False, "active": None, "accounts": []})
-        return
+async def _acct_list_with_usage():
+    """`claude-switch list --json` + usage merged from the shared store (if any).
+    Shared by /accounts and /acct-alert so both see exactly the same account state."""
     data = {"active": None, "accounts": []}
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1285,12 +1623,166 @@ async def _serve_accounts(cw):
     for a in data.get("accounts", []):
         ent = store.get(f"{a.get('email')}|{a.get('kind')}") or {}
         if ent.get("usage"):
+            # age = how old the reading is. Without it a number cannot be trusted.
             a["usage"] = dict(ent["usage"], age=int(now - (ent.get("observedAt") or now)))
         else:
             a["usage"] = {"err": "no data"}
+        # Which boxes hold this account (identity only, never a secret). Two boxes on
+        # one account burn the 5h window twice as fast, so it is worth seeing before a
+        # swap. Empty unless a shared store is configured.
         a["holders"] = ent.get("holders") or []
+    return data
+
+
+async def _serve_accounts(cw):
+    """Account list + usage + the warning thresholds the frontend colours rows with.
+
+    When accounts are disabled or claude-switch is absent, returns a clean disabled
+    payload so the UI can hide itself."""
+    if not _accounts_enabled():
+        await _send_json(cw, b"200 OK", {"enabled": False, "active": None, "accounts": []})
+        return
+    data = await _acct_list_with_usage()
+    # Ship the thresholds too: if the frontend held its own numbers they would drift
+    # from the /acct-alert verdict (USAGE_TH is the only source).
+    data["thresholds"] = dict(USAGE_TH)
     data["enabled"] = True
     await _send_json(cw, b"200 OK", data)
+
+
+async def _live_usage_cached():
+    """The active account's own 5h/7d reading, cached for LIVE_USAGE_TTL.
+
+    This is the fallback source for /acct-alert on a box with no shared usage store —
+    i.e. the default single-box install. The probe queries with this box's own token, so
+    only numbers leave. Returns {} when there is nothing to report."""
+    now = time.time()
+    payload = _live_usage_cache.get("payload")
+    if payload is not None and now - _live_usage_cache.get("at", 0.0) <= LIVE_USAGE_TTL:
+        return payload
+    result = await _probe_json(["--usage", "live"])
+    usage = {}
+    if isinstance(result, dict):
+        u = result.get("usage")
+        if isinstance(u, dict):
+            usage = dict(u)
+        rt_days = _finite_number(result.get("rtDaysLeft"))
+        if rt_days is not None:
+            usage["rtDaysLeft"] = rt_days
+    _live_usage_cache.update(at=now, payload=usage)
+    return usage
+
+
+def _acct_alert_level(u5, u7, rt_days, codex_u7=None):
+    """The active account's warning level — (level, reason). level = none|warn|crit.
+
+    Each axis is graded on its own, then the worst (severity, reason-priority) wins.
+    Reason priority is login=3 > usage=2 > codex=1: at equal severity a looming login
+    expiry is the more actionable message, and codex is the newest axis so it never
+    displaces the two that were there before.
+    A spent 5h window does not mute the 7d axis — "5h exhausted" and "7d critical" are
+    separate facts and collapsing them hides the one that lasts longer."""
+    u5 = _finite_number(u5)
+    u7 = _finite_number(u7)
+    rt_days = _finite_number(rt_days)
+    codex_u7 = _finite_number(codex_u7)
+    candidates = []
+    if u5 is not None and u5 < USAGE_TH["lock5"]:
+        if u5 >= USAGE_TH["crit5"]:
+            candidates.append((2, 2, "crit", "usage"))
+        elif u5 >= USAGE_TH["warn5"]:
+            candidates.append((1, 2, "warn", "usage"))
+    if u7 is not None:
+        if u7 >= USAGE_TH["crit7"]:
+            candidates.append((2, 2, "crit", "usage"))
+        elif u7 >= USAGE_TH["warn7"]:
+            candidates.append((1, 2, "warn", "usage"))
+    if rt_days is not None and rt_days <= USAGE_TH["rtWarnDays"]:
+        candidates.append((1, 3, "warn", "login"))
+    if codex_u7 is not None:
+        if codex_u7 >= USAGE_TH["crit7"]:
+            candidates.append((2, 1, "crit", "codex"))
+        elif codex_u7 >= USAGE_TH["warn7"]:
+            candidates.append((1, 1, "warn", "codex"))
+    if not candidates:
+        return "none", None
+    _, _, level, reason = max(candidates, key=lambda item: (item[0], item[1]))
+    return level, reason
+
+
+async def _serve_acct_alert(headers, cw):
+    """`GET /acct-alert` — only the active account's warning level. No email, no token
+    (level + numbers + time remaining).
+
+    Who reads it: devterm's own account icon, and the Airlock return widget injected
+    into tools that run on other ports. Because the verdict comes from one place
+    (USAGE_TH), devterm and the widget change colour at the same instant.
+
+    Where the numbers come from, in order — a single-box install has no collector, so
+    this must still work without one:
+      1. the shared usage store, when one is configured (a fleet has a collector);
+      2. otherwise this box probing its own live account (cached LIVE_USAGE_TTL);
+      3. otherwise level="none" — no data is not a warning. Silence beats inventing one.
+    """
+    now = time.time()
+    payload = _acct_alert_cache["payload"]
+    if payload is None or now - _acct_alert_cache["at"] > ACCT_ALERT_TTL:
+        claude_error = None
+        u = {}
+        rt_days = None
+        u5 = u7 = None
+        try:
+            data = await _acct_list_with_usage()
+            if not isinstance(data, dict):
+                raise ValueError("accounts payload is not an object")
+            accounts = data.get("accounts", [])
+            if not isinstance(accounts, list):
+                raise ValueError("accounts payload is not a list")
+            act = next((a for a in accounts if isinstance(a, dict) and a.get("active")), None)
+            u = (act or {}).get("usage") or {}
+            if not isinstance(u, dict):
+                raise ValueError("usage payload is not an object")
+            u5 = _finite_number(u.get("use5h"))
+            u7 = _finite_number(u.get("use7d"))
+            rt = _finite_number((act or {}).get("rtExpiry"))
+            rt_days = _finite_number(((rt / 1000.0) - now) / 86400.0 if rt is not None else None)
+            if u5 is None and u7 is None:
+                # No shared store (or nothing in it for this account): ask this box.
+                live = await _live_usage_cached()
+                if isinstance(live, dict) and live:
+                    u = dict(live)
+                    u5 = _finite_number(live.get("use5h"))
+                    u7 = _finite_number(live.get("use7d"))
+                    if rt_days is None:
+                        rt_days = _finite_number(live.get("rtDaysLeft"))
+        except Exception as exc:
+            # Isolated from the codex axis. Only the exception type is reported — never
+            # a token, a path, or raw response text.
+            claude_error = f"accounts-{type(exc).__name__}"
+            u = {}
+            u5, u7 = None, None
+        try:
+            codex = await _codex_usage_cached()
+        except Exception as exc:
+            codex = {"stale": True, "err": f"cache-{type(exc).__name__}"}
+        if not isinstance(codex, dict):
+            codex = {"stale": True, "err": "cache-invalid"}
+        codex_u7 = _finite_number(codex.get("use7d"))
+        level, reason = _acct_alert_level(u5, u7, rt_days, codex_u7)
+        payload = {"ok": True, "level": level, "reason": reason,
+                   "use5h": u5, "use7d": u7,
+                   "reset5h": u.get("reset5h"), "reset7d": u.get("reset7d"),
+                   "rtDays": (int(rt_days) if rt_days is not None else None),
+                   "stale": bool(u.get("stale")), "err": u.get("err") or claude_error,
+                   "codexUse7d": codex_u7,
+                   "codexReset7d": codex.get("reset7d"),
+                   "codexPlan": codex.get("plan"),
+                   "codexCredits": codex.get("resetCredits"),
+                   "codexStale": bool(codex.get("stale")),
+                   "codexErr": codex.get("lastErr") or codex.get("err"),
+                   "thresholds": dict(USAGE_TH)}
+        _acct_alert_cache.update(at=now, payload=payload)
+    await _send_json(cw, b"200 OK", payload, cors=_cors_origin(headers))
 
 
 async def _serve_acct_switch(cr, headers, leftover, cw):
@@ -1311,6 +1803,8 @@ async def _serve_acct_switch(cr, headers, leftover, cw):
         out, err = await proc.communicate()
         ok = proc.returncode == 0
         payload = {"ok": ok, "active": name if ok else None}
+        if ok:
+            _invalidate_acct_caches()
         if not ok:
             payload["error"] = (err or out or b"").decode("utf-8", "replace")[:200]
     except (FileNotFoundError, OSError) as e:
@@ -1327,6 +1821,7 @@ async def _serve_codex_login_start(cw):
     if not _codex_available():
         await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "codex not available"})
         return
+    _invalidate_codex_usage_cache()   # login wipes auth.json: cached numbers are void
     try:
         if os.path.isfile(CODEX_AUTH):
             shutil.copy2(CODEX_AUTH, CODEX_AUTH_BAK)
@@ -1395,6 +1890,7 @@ async def _serve_codex_login_cancel(cw):
         if os.path.isfile(CODEX_AUTH_BAK):
             shutil.move(CODEX_AUTH_BAK, CODEX_AUTH)
             restored = True
+            _invalidate_codex_usage_cache()
     except OSError as e:
         await _send_json(cw, b"400 Bad Request", {"ok": False, "error": f"restore failed: {e}"})
         return
@@ -1413,6 +1909,8 @@ async def _serve_codex_logout(cw):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, err = await asyncio.wait_for(proc.communicate(), timeout=20)
         ok = proc.returncode == 0
+        if ok:
+            _invalidate_codex_usage_cache()
         payload = {"ok": ok}
         if not ok:
             payload["error"] = (err or out or b"").decode("utf-8", "replace")[:200]
@@ -1440,6 +1938,8 @@ async def _serve_acct_remove(cr, headers, leftover, cw):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, err = await proc.communicate()
         ok = proc.returncode == 0
+        if ok:
+            _invalidate_acct_caches()
         payload = {"ok": ok}
         if not ok:
             payload["error"] = (err or out or b"").decode("utf-8", "replace")[:200]
@@ -1464,6 +1964,278 @@ async def _claude_switch(args, timeout=40):
     return (proc.returncode == 0,
             (out or b"").decode("utf-8", "replace").strip(),
             (err or b"").decode("utf-8", "replace").strip())
+
+
+def _signal_probe_group(pgid, sig):
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+async def _kill_probe_group(proc, pgid):
+    """Reap a probe that was started in its own session, group and all.
+
+    The codex probe spawns an `app-server` child; if the probe dies without running its
+    own cleanup, that child outlives us. Killing the group takes it too."""
+    if proc is None or pgid is None:
+        return
+    if proc.returncode == 0:
+        # Clean exit: the probe already reaped its app-server group in its own finally,
+        # and communicate() has reaped the probe, so this pgid may already be recycled.
+        # Signalling now could only kill an unrelated process group.
+        return
+    _signal_probe_group(pgid, signal.SIGTERM)
+    try:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=PROBE_KILL_GRACE)
+        except asyncio.TimeoutError:
+            pass
+        except (OSError, ChildProcessError):
+            pass
+    finally:
+        # A re-cancel must not let us skip the SIGKILL promotion.
+        _signal_probe_group(pgid, signal.SIGKILL)
+        try:
+            await proc.wait()
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            while current is not None and current.cancelling():
+                current.uncancel()
+            try:
+                await proc.wait()
+            except (OSError, ChildProcessError):
+                pass
+        except (OSError, ChildProcessError):
+            pass
+
+
+async def _probe_json(args, timeout=25):
+    """Run claude-status with args and return its parsed JSON (None on any failure).
+    Same probe as _run_probe, but for internal callers instead of an HTTP response."""
+    if not (CLAUDE_STATUS and os.path.isfile(CLAUDE_STATUS)):
+        return None
+    proc = None
+    probe_pgid = None
+    out = None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, CLAUDE_STATUS, *args,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True)
+        # A child of a new session is its own group leader, so we do not need to call
+        # getpgid() again at reap time (by then the pid may be gone).
+        probe_pgid = proc.pid
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        if proc.returncode != 0:
+            return None
+    except (FileNotFoundError, OSError):
+        return None
+    except asyncio.TimeoutError:
+        return None
+    except asyncio.CancelledError:
+        raise
+    finally:
+        await _kill_probe_group(proc, probe_pgid)
+    try:
+        result = json.loads((out or b"").decode().strip().splitlines()[-1])
+    except (ValueError, IndexError, UnicodeDecodeError):
+        return None
+    return result if isinstance(result, dict) else None
+
+
+# ---- Codex usage cache ------------------------------------------------------
+# Reading Codex utilization costs an `app-server` spawn, so it is cached with a TTL and
+# refreshed in a single background task. Callers never block on more than one refresh,
+# and a login/logout invalidates the cache so a previous account's numbers cannot be
+# served under the new identity.
+
+def _codex_auth_mtime():
+    try:
+        return os.path.getmtime(CODEX_AUTH)
+    except OSError:
+        return None
+
+
+def _codex_observed_at(value_at):
+    if value_at <= 0:
+        return None
+    return datetime.fromtimestamp(value_at, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _codex_cache_value_at():
+    return _codex_usage_cache.get("valueAt", 0.0)
+
+
+def _codex_has_usage_value(result):
+    return (isinstance(result, dict)
+            and any(_finite_number(result.get(key)) is not None
+                    for key in ("use5h", "use7d")))
+
+
+def _invalidate_codex_usage_cache():
+    task = _codex_usage_cache.get("task")
+    if task is not None and not task.done():
+        task.cancel()
+    _acct_alert_cache.update(at=0.0, payload=None)
+    _codex_usage_cache.update(valueAt=0.0, lastTryAt=0.0, payload=None,
+                              authMtime=_codex_auth_mtime(), task=None)
+
+
+def _invalidate_acct_caches():
+    """Drop the derived account caches after a mutation (swap / remove / login).
+    The alert verdict and the live-usage reading both describe "the account in use", so
+    a swap makes both wrong at once."""
+    _acct_alert_cache.update(at=0.0, payload=None)
+    _live_usage_cache.update(at=0.0, payload=None)
+
+
+def _codex_pending_payload(err="pending"):
+    return {"use5h": None, "use7d": None, "reset5h": None, "reset7d": None,
+            "plan": None, "resetCredits": None, "observedAt": None,
+            "err": err, "stale": True}
+
+
+async def _codex_usage_refresh(auth_mtime):
+    current_task = asyncio.current_task()
+    try_at = time.time()
+    _codex_usage_cache["lastTryAt"] = try_at
+    try:
+        probe_error = None
+        try:
+            result = await _probe_json(["--codex-usage"])
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            result = None
+            probe_error = f"probe-{type(exc).__name__}"
+
+        # A login/logout (or a newer refresh) invalidated this task: do not attribute
+        # the previous account's numbers to the current one.
+        if (_codex_usage_cache.get("task") is not current_task
+                or _codex_usage_cache.get("authMtime") != auth_mtime
+                or _codex_auth_mtime() != auth_mtime):
+            return
+        now = time.time()
+        result_error = result.get("err") if isinstance(result, dict) else None
+        last_err = result_error or probe_error or "probe-failed"
+        if _codex_has_usage_value(result):
+            payload = dict(result)
+            payload["observedAt"] = _codex_observed_at(now)
+            # The numbers are a fresh observation, so not stale; a partial parse error
+            # is kept as side information only.
+            payload["stale"] = False
+            if result_error:
+                payload["lastErr"] = last_err
+            else:
+                payload.pop("lastErr", None)
+            _codex_usage_cache.update(valueAt=now, lastTryAt=now, payload=payload)
+            _acct_alert_cache.update(at=0.0, payload=None)
+        elif _codex_usage_cache.get("payload") is not None:
+            # Keep the last good value, marked stale — better than blanking the UI.
+            payload = dict(_codex_usage_cache["payload"], stale=True, lastErr=last_err)
+            _codex_usage_cache.update(lastTryAt=now, payload=payload)
+        elif isinstance(result, dict):
+            payload = dict(result, stale=True, lastErr=last_err)
+            payload["observedAt"] = None
+            _codex_usage_cache.update(lastTryAt=now, valueAt=0.0, payload=payload)
+        else:
+            payload = _codex_pending_payload(last_err)
+            payload["lastErr"] = last_err
+            _codex_usage_cache.update(lastTryAt=now, valueAt=0.0, payload=payload)
+    finally:
+        if _codex_usage_cache.get("task") is current_task:
+            _codex_usage_cache["task"] = None
+
+
+def _codex_usage_refresh_start(auth_mtime):
+    task = _codex_usage_cache.get("task")
+    if task is None or task.done():
+        task = asyncio.create_task(_codex_usage_refresh(auth_mtime))
+        _codex_usage_cache["task"] = task
+    return task
+
+
+def _codex_usage_refresh_due(now, force=False):
+    if force:
+        return True
+    last_try = _codex_usage_cache.get("lastTryAt", 0.0)
+    if _codex_usage_cache.get("payload") is None:
+        return now - last_try >= CODEX_USAGE_RETRY
+    payload = _codex_usage_cache["payload"]
+    # Only a value-less failure (initial, or a preserved last-good) retries quickly. A
+    # partial reading is stale=False + lastErr, so it rides the normal value TTL.
+    if isinstance(payload, dict) and payload.get("stale") and payload.get("lastErr"):
+        return now - last_try >= CODEX_USAGE_RETRY
+    if not _codex_has_usage_value(payload):
+        return now - last_try >= CODEX_USAGE_RETRY
+    value_at = _codex_cache_value_at()
+    if value_at > 0 and now - value_at <= CODEX_USAGE_TTL:
+        return False
+    if value_at > 0 and last_try <= value_at:
+        return True
+    return now - last_try >= CODEX_USAGE_RETRY
+
+
+def _codex_timeout_payload():
+    payload = _codex_usage_cache.get("payload")
+    if payload is not None:
+        return dict(payload, stale=True, lastErr="timeout")
+    result = _codex_pending_payload("timeout")
+    result["lastErr"] = "timeout"
+    return result
+
+
+async def _codex_usage_cached(force=False, wait=False):
+    retried_after_cancel = False
+    while True:
+        auth_mtime = _codex_auth_mtime()
+        if auth_mtime != _codex_usage_cache.get("authMtime"):
+            _invalidate_codex_usage_cache()
+            auth_mtime = _codex_usage_cache["authMtime"]
+
+        now = time.time()
+        task = _codex_usage_cache.get("task")
+        if task is None or task.done():
+            task = None
+        if task is None and _codex_usage_refresh_due(now, force=force):
+            task = _codex_usage_refresh_start(auth_mtime)
+
+        if wait and task is not None:
+            try:
+                await asyncio.wait_for(asyncio.shield(task), timeout=CODEX_USAGE_WAIT)
+            except asyncio.TimeoutError:
+                return _codex_timeout_payload()
+            except asyncio.CancelledError:
+                if not task.cancelled():
+                    raise
+                # A login/logout cancelled the refresh we were waiting on: restart once
+                # against the new auth state, then give up rather than loop.
+                if retried_after_cancel:
+                    return _codex_pending_payload()
+                retried_after_cancel = True
+                if _codex_usage_cache.get("task") is task:
+                    _invalidate_codex_usage_cache()
+                auth_mtime = _codex_auth_mtime()
+                if auth_mtime != _codex_usage_cache.get("authMtime"):
+                    _invalidate_codex_usage_cache()
+                    auth_mtime = _codex_usage_cache["authMtime"]
+                _codex_usage_refresh_start(auth_mtime)
+                continue
+            task = _codex_usage_cache.get("task")
+            if task is None or task.done():
+                task = None
+        payload = _codex_usage_cache.get("payload")
+        if payload is None:
+            return _codex_pending_payload()
+        if task is None and not _codex_usage_refresh_due(time.time(), force=force):
+            return dict(payload)
+        return dict(payload, stale=True) if task is not None else dict(payload)
+
+
+async def _serve_codex_usage(headers, cw):
+    payload = await _codex_usage_cached(wait=True)
+    await _send_json(cw, b"200 OK", payload, cors=_cors_origin(headers))
 
 
 async def _run_probe(cw, args=()):
@@ -1622,6 +2394,16 @@ async def handle(cr, cw):
             await _serve_claude_usage(head, cw)
         elif path == b"/acct-usage-now" and method == b"POST":
             await _serve_acct_usage_now(cw)
+        elif path == b"/codex-usage" and method == b"GET":
+            await _serve_codex_usage(headers, cw)
+        elif path == b"/acct-alert" and method == b"GET":
+            await _serve_acct_alert(headers, cw)
+        elif path == b"/secret-put" and method == b"POST":
+            await _serve_secret_put(cr, headers, leftover, cw)
+        elif path == b"/secret-list" and method == b"GET":
+            await _serve_secret_list(headers, cw)
+        elif path == b"/secret-del" and method == b"POST":
+            await _serve_secret_del(cr, headers, leftover, cw)
         elif path == b"/acct-login-url" and method == b"POST":
             await _serve_acct_login_url(cw)
         elif path == b"/acct-login-code" and method == b"POST":
@@ -1714,10 +2496,14 @@ async def main():
     if not ALLOW:
         sys.stderr.write("devterm-gate: warning: AIRLOCK_OWNER unset — no owner "
                          "allowed, all requests 403 (fail-closed)\n")
+    # The TTL is this task, not a promise in the docs: expired secrets are removed even
+    # if nobody ever calls an endpoint again.
+    asyncio.create_task(_secret_sweep_loop())
     server = await asyncio.start_server(handle, LISTEN_HOST, LISTEN_PORT)
     where = ", ".join(str(s.getsockname()) for s in server.sockets)
     print(f"devterm-gate on {where} -> ttyd {TTYD_HOST}:{TTYD_PORT}; web={WEB_ROOT}; "
-          f"accounts={_accounts_enabled()}; markwand={MARKWAND}; orca={bool(ORCA_SHIM)}", flush=True)
+          f"accounts={_accounts_enabled()}; markwand={MARKWAND}; orca={bool(ORCA_SHIM)}; "
+          f"secret_ttl={SECRET_TTL_SEC}s", flush=True)
     async with server:
         await server.serve_forever()
 

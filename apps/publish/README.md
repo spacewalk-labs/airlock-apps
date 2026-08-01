@@ -58,12 +58,44 @@ Snapshot metadata (owner, source name, expiry) lives in
 `~/.local/state/airlock/publish-public.json`, deliberately **outside** the
 served directory. Local snapshots are capped at 25 MB; the remote path is not.
 
-Password-gating is not a feature of this app — put an nginx `auth_basic` in
-front of a separate directory if you need it.
+### Password-gated snapshots (local mode only)
 
-### mode = "remote" (default) — you host an ingest service
+In local mode, a public publish can use `mode: "open"` (default) or
+`mode: "gated"`. A gated publish requires a non-empty password. It is written under
+`gated_dir` and is served as `<base_url>/g/<slug>/`; an open snapshot remains
+at `<base_url>/<slug>/`. The two directories are separate so switching an
+existing slug between modes first removes the old copy. Re-publishing a gated
+slug rotates its password; revoking or expiring it removes its credential.
+
+The installer writes `public-includes.d/publish-gated.conf` in the nginx config
+directory. Include it once inside the public server block alongside the open root
+configuration:
+
+```toml
+[apps.publish.public_target]
+gated_dir     = "/opt/airlock/share-gated"  # separate from share_dir and public_dir
+htpasswd_dir  = "/opt/airlock/publish-gated-auth" # separate from every served directory
+# htpasswd_bin = "htpasswd"                 # Apache utility with bcrypt support
+```
+
+```nginx
+root /opt/airlock/share-public;
+location / { try_files $uri $uri/ $uri/index.html =404; }
+include /etc/airlock/nginx/public-includes.d/publish-gated.conf;
+```
+
+The gate uses nginx `auth_basic`. Its username is the published slug and its
+password is the value supplied for that gated publish. Each slug has a separate
+credential file, so a password for one document cannot unlock another. Airlock uses the system
+`htpasswd -B` implementation because Python 3.13 no longer supplies `crypt`.
+If that tool is unavailable, gated publishing fails closed while open publishing
+continues to work.
+
+### mode = "remote" (default) — you host an open-only ingest service
 
 Snapshots are POSTed to *your* endpoint, which returns the public URL.
+Bundles and password gates are local-only because the remote ingest contract has
+no corresponding shape, and this box's nginx is the component that enforces the gate.
 
 ```toml
 [apps.publish.public_target]
@@ -87,7 +119,7 @@ JSON over HTTPS. The token is sent in the `X-Airlock-Publish-Token` header.
 | Method + path        | Request body                                              | Response                                              |
 |----------------------|----------------------------------------------------------|------------------------------------------------------|
 | `POST /ingest`       | `{slug, owner, src, title, ttl_hours, html_b64}`         | `{ok, result:{expiry, ttl_hours}}`                   |
-| `GET  /list?owner=`  | —                                                        | `{ok, items:[{slug, owner, src, title, expiry, expired}]}` |
+| `GET  /list?owner=`  | —                                                        | `{ok, items:[{slug, owner, src, title, expiry, expired, mode}]}` |
 | `POST /revoke`       | `{slug, owner}`                                          | `{ok}`                                               |
 | `POST /set-expiry`   | `{slug, owner, ttl_hours}`                               | `{ok}`                                               |
 
@@ -99,3 +131,15 @@ JSON over HTTPS. The token is sent in the `X-Airlock-Publish-Token` header.
 
 A minimal target is just a small web service that stores each `html_b64` under
 its `slug`, serves it until `expiry`, and returns 404 afterwards.
+
+### Bundle approval API (local mode only)
+
+Local mode's `POST /publish/api/publish-plan` accepts `{entry, max_docs}` and returns a
+read-only BFS proposal of linked local HTML files. It returns `plan_id`,
+`plan_expires`, candidates, missing files, failed reads, truncation status, and
+the server-clamped `max_docs`. To publish an approved subset, send
+`{name: entry, docs: [...], plan_id}` to `POST /publish/api/publish-public`.
+Plans are owner-bound, expire after ten minutes, and are consumed atomically
+before the build, including if that build then fails. The builder rechecks all
+approved document digests and rewrites links between selected members; links to
+unselected local documents are returned as warnings.
