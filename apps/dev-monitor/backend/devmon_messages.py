@@ -20,8 +20,8 @@ from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 
 # ---- constants / validation ----
-ID_RE = re.compile(r'^[A-Za-z0-9._:-]{1,128}$')      # event_id/group_key/source
-SKILL_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}$')  # skill name (installed-skill format)
+ID_RE = re.compile(r'^[A-Za-z0-9._:-]{1,128}\Z')      # event_id/group_key/source
+SKILL_RE = re.compile(r'^[a-z0-9][a-z0-9-]{0,63}\Z')  # skill name (installed-skill format)
 MAX_PAYLOAD = 16 * 1024                                # 16KB
 MAX_URL = 2048                                         # upper bound for link.url
 APPROVAL_TTL = timedelta(minutes=5)                   # approval nonce lifetime

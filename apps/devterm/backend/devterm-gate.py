@@ -124,7 +124,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # ---- clipboard image / file uploads — shared ~/uploads drop (24h TTL) ----
 UPLOADS = os.path.expanduser(os.environ.get("DEVTERM_UPLOADS", "~/uploads"))
-_RE_UPLOAD = re.compile(r"^image(\d{3,})-\d{8}-\d{6}\.jpg$")   # auto-saved images only (protects manual files)
+_RE_UPLOAD = re.compile(r"^image(\d{3,})-\d{8}-\d{6}\.jpg\Z")   # auto-saved images only (protects manual files)
 _RE_UPLOAD_FILE = re.compile(r"^file(\d{3,})-\d{8}-\d{6}\.")   # uploaded-file seq (any extension)
 UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024           # image save cap (paste/annotate — canvas-encoded, so far smaller in practice)
@@ -142,7 +142,7 @@ SECRET_SWEEP_SEC = min(60, max(1, SECRET_TTL_SEC // 4))
 SECRET_MAX_BYTES = 64 * 1024                  # UTF-8 cap after normalization
 SECRET_BODY_MAX = 96 * 1024                   # request-body cap for the secret JSON
 SECRET_MAX_FILES = 64                         # stops forgotten secrets accumulating
-_RE_SECRET_NAME = re.compile(r"^(?!\.)[A-Za-z0-9._-]{1,48}$")
+_RE_SECRET_NAME = re.compile(r"^(?!\.)[A-Za-z0-9._-]{1,48}\Z")
 
 # ---- tab prefs (order / hidden / color / theme) stored server-side so any device
 #      or browser sees the same layout. Owner is singular, so one file. ----

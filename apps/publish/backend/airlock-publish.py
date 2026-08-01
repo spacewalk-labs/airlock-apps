@@ -76,10 +76,10 @@ LOCK_FILE = os.path.join(STATE_DIR, 'publish-public.lock')
 LOCAL_MAX_BYTES = 25 * 1024 * 1024      # local disk guard; the remote path stays unlimited
 RECONCILE_GRACE = 24 * 3600             # untracked slug dirs get swept after this
 TTL_MIN_H, TTL_MAX_H, TTL_DEFAULT_H = 1, 24 * 365, 336
-_RE_SLUG = re.compile(r'^[a-z0-9][a-z0-9-]{2,63}$')
+_RE_SLUG = re.compile(r'^[a-z0-9][a-z0-9-]{2,63}\Z')
 # Transaction siblings are private recovery records, never publishable slugs.
 _RE_TRANSACTION = re.compile(
-    r'^(?P<slug>[a-z0-9][a-z0-9-]{2,63})\.(?P<kind>old|stage|failed)-[0-9a-f]+$')
+    r'^(?P<slug>[a-z0-9][a-z0-9-]{2,63})\.(?P<kind>old|stage|failed)-[0-9a-f]+\Z')
 
 # A plan is a short-lived, single-use capability for an explicit bundle build.
 MAX_BUNDLE_DOCS = 50
@@ -300,10 +300,10 @@ def unpublish_batch(names, include_direct=False):
 def _wt_to_main_candidates(target):
     """If a broken target points inside a git worktree, propose the main-repo path."""
     candidates = []
-    m = re.match(r'^(.*?)-wt/[^/]+/(.+)$', target)      # ~/x/repo-wt/<slug>/rest -> ~/x/repo/rest
+    m = re.match(r'^(.*?)-wt/[^/]+/(.+)\Z', target)      # ~/x/repo-wt/<slug>/rest -> ~/x/repo/rest
     if m:
         candidates.append(f'{m.group(1)}/{m.group(2)}')
-    m = re.match(r'^(.+?)/wt/[^/]+/(.+)$', target)       # ~/x/repo/wt/<slug>/rest -> ~/x/repo/rest
+    m = re.match(r'^(.+?)/wt/[^/]+/(.+)\Z', target)       # ~/x/repo/wt/<slug>/rest -> ~/x/repo/rest
     if m:
         candidates.append(f'{m.group(1)}/{m.group(2)}')
     seen = set()
@@ -722,7 +722,7 @@ def build_bundle_files(entry, docs, include_integrity=False):
 def _slugify(title, name):
     def s(x):
         return re.sub(r'[^a-z0-9]+', '-', (x or '').lower()).strip('-')[:32].strip('-')
-    fbase = s(re.sub(r'\.html?$', '', name.lower()))
+    fbase = s(re.sub(r'\.html?\Z', '', name.lower()))
     tbase = s(title)
     base = fbase if len(fbase) >= 4 else (tbase if len(tbase) >= 4 else (fbase or tbase or 'doc'))
     return f'{base}-{secrets.token_hex(3)}'
@@ -1005,7 +1005,7 @@ def _sweep(state, now):
 
 
 def _mint_slug(state, base):
-    stem = re.sub(r'-[0-9a-f]{6}$', '', base or '') or 'doc'
+    stem = re.sub(r'-[0-9a-f]{6}\Z', '', base or '') or 'doc'
     for _ in range(50):
         cand = f'{stem}-{secrets.token_hex(3)}'
         if (cand not in state['items'] and not os.path.exists(os.path.join(PUBLIC_DIR, cand))
@@ -1511,7 +1511,7 @@ def public_set_expiry(slug, owner, ttl_hours):
 
 
 # ==== uploads — clipboard image / arbitrary file drop into ~/uploads ====
-_RE_UPLOAD = re.compile(r'^image(\d{3,})-\d{8}-\d{6}\.jpg$')   # only auto-named files (protect manual ones)
+_RE_UPLOAD = re.compile(r'^image(\d{3,})-\d{8}-\d{6}\.jpg\Z')   # only auto-named files (protect manual ones)
 UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024
 FILE_MAX_BYTES = 50 * 1024 * 1024

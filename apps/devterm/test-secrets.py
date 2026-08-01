@@ -32,10 +32,29 @@ g.SECRETS = os.path.join(tmp, "secrets")
 
 # ---- name shape: this is what keeps a name out of the filesystem ----
 ok_names = ["GH_TOKEN", "a", "x.y-z_1", "A" * 48]
-bad_names = ["", ".hidden", "../escape", "a/b", "with space", "A" * 49, "naïve", "a\x00b"]
+# "GH_TOKEN\n" is here because Python's `$` also matches before a trailing newline, so a
+# `^...$` pattern accepts one character its character class forbids and lets a {1,N} cap be
+# exceeded by one. The app itself never accepted these — every call site is fullmatch — so
+# this pair passes either way; the assertion further down tests the pattern, which does not.
+bad_names = ["", ".hidden", "../escape", "a/b", "with space", "A" * 49, "naïve", "a\x00b",
+             "GH_TOKEN\n", "A" * 48 + "\n"]
 check("valid names accepted", all(g._RE_SECRET_NAME.fullmatch(n) for n in ok_names))
 check("path escape / dotfile / oversize rejected",
       not any(g._RE_SECRET_NAME.fullmatch(n) for n in bad_names))
+
+# The upload name is the one pattern here that a query string reaches directly.
+ok_uploads = ["image001-20260801-120000.jpg"]
+bad_uploads = ["image001-20260801-120000.jpg\n", "image1-20260801-120000.jpg", "note.jpg"]
+check("upload names accepted", all(g._RE_UPLOAD.match(n) for n in ok_uploads))
+check("upload names with a trailing newline rejected",
+      not any(g._RE_UPLOAD.match(n) for n in bad_uploads))
+
+# Every _RE_SECRET_NAME call site is fullmatch, so the case above passes with or without
+# the anchor — it cannot detect a regression on its own. This asserts the property the
+# anchor actually provides: the pattern is safe by itself, not only where someone
+# remembered fullmatch. It fails the moment the pattern ends at `$` again.
+check("_RE_SECRET_NAME is anchored at end-of-string, not before a trailing newline",
+      g._RE_SECRET_NAME.match("GH_TOKEN\n") is None)
 
 # ---- storage: fresh inode, tight modes ----
 ok, reason = g._store_secret("GH_TOKEN", b"value\n")

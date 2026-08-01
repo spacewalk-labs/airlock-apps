@@ -140,8 +140,40 @@ def t_slug_abuse(tmp):
     share, pub, _s, env = make_dirs(tmp)
     m = load(env)
     os.makedirs(pub, exist_ok=True)
-    for bad in ('../x', '.', '..', 'a/b', 'x' * 200, '', '-lead', 'UPPER', 'ok/../../etc'):
+    # 'ok-slug\n' is here because Python's `$` also matches before a trailing newline. While
+    # _RE_SLUG ended at `$` this slug was accepted, and _htpasswd_hash would then have written
+    # a two-line credential record whose second line is a valid bcrypt hash under an empty
+    # user name — the startswith(slug + ':') guard passes, because that is what htpasswd emits.
+    for bad in ('../x', '.', '..', 'a/b', 'x' * 200, '', '-lead', 'UPPER', 'ok/../../etc',
+                'ok-slug\n', 'a' * 64 + '\n'):
         check(f'_slug_dir refuses {bad!r}', m._slug_dir(bad) is None)
+        check(f'_htpasswd_path refuses {bad!r}', m._htpasswd_path(bad) is None)
+    # _RE_TRANSACTION is only ever used with fullmatch, and _RE_UPLOAD only filters names
+    # that came from listdir — where a newline-terminated filename is perfectly possible but
+    # nothing downstream distinguishes it. Either way a behavioural case would pass with or
+    # without the anchor, so assert the pattern property directly and keep every anchored
+    # pattern in this file covered by something that can actually fail.
+    check('_RE_TRANSACTION is anchored at end-of-string',
+          m._RE_TRANSACTION.match('doc-a1b2c3.old-deadbe\n') is None)
+    check('_RE_UPLOAD is anchored at end-of-string',
+          m._RE_UPLOAD.match('image001-20260801-120000.jpg\n') is None)
+
+    # The worktree path parsers are behavioural, not a gate, so the anchor check cannot
+    # speak for them: replacing `\Z` with nothing would still pass it. A symlink target may
+    # legally end in a newline, and with `$` the capture silently dropped it — the repair
+    # candidate then named a different file from the broken link that was measured.
+    check('worktree target maps to the main repo',
+          m._wt_to_main_candidates('/home/u/proj-wt/branch/docs/a.html')
+          == ['/home/u/proj/docs/a.html'])
+    check('worktree target maps from the /wt/ layout too',
+          m._wt_to_main_candidates('/home/u/proj/wt/branch/docs/a.html')
+          == ['/home/u/proj/docs/a.html'])
+    # One newline case per pattern: the '-wt/' form is matched by the first regex and the
+    # '/wt/' form by the second, so a single case leaves the other free to regress.
+    check('a -wt/ target ending in a newline proposes nothing rather than a truncated path',
+          m._wt_to_main_candidates('/home/u/proj-wt/branch/docs/a.html\n') == [])
+    check('a /wt/ target ending in a newline proposes nothing rather than a truncated path',
+          m._wt_to_main_candidates('/home/u/proj/wt/branch/docs/a.html\n') == [])
     # a symlinked slug dir must not be followed when deleting
     victim = os.path.join(tmp, 'victim')
     os.makedirs(victim, exist_ok=True)

@@ -101,6 +101,27 @@ class TestValidation(unittest.TestCase):
         with self.assertRaises(MSG.ValidationError):
             MSG.ingest(msg(event_id='bad id/../x'))
 
+    def test_id_with_a_trailing_newline_rejected(self):
+        """Python's `$` also matches before a trailing newline.
+
+        While ID_RE ended at `$` these ids were accepted, so a spool file named
+        `e1\\n.json` — a legal filename, and the spool requires the name to equal the
+        event_id — produced a card whose identity carried a control character into the
+        Slack line and the audit log. The second case is the length cap: 128 + '\\n' is
+        129 characters and was accepted as if it were 128.
+        """
+        for bad in ('ok\n', 'a' * 128 + '\n'):
+            with self.assertRaises(MSG.ValidationError):
+                MSG.ingest(msg(event_id=bad))
+        with self.assertRaises(MSG.ValidationError):
+            MSG.ingest(msg(group_key='resource:disk\n'))
+
+    def test_skill_pattern_is_anchored_at_end_of_string(self):
+        # Both SKILL_RE call sites .strip() first, so an ingest-level case would pass with
+        # or without the anchor and could not detect a regression. This asserts the
+        # property the anchor provides rather than the one strip() happens to provide.
+        self.assertIsNone(MSG.SKILL_RE.match('cleanup\n'))
+
     def test_naive_ts_rejected(self):
         with self.assertRaises(MSG.ValidationError):
             MSG.ingest(msg(created='2026-07-20T14:00:00'))   # no timezone
