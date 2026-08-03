@@ -2,8 +2,11 @@
 # orca smoke — against a live install (after orchestrator render + reload).
 # orca may answer / with a redirect, so 200 OR 302 both count as reachable.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-orca}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

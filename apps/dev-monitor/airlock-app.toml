@@ -1,0 +1,59 @@
+contract = 1
+id = "dev-monitor"
+
+# Transcribed from the former APP_DEFAULTS["dev-monitor"] entry.
+[config.defaults]
+backend_port = 18804
+messages = false
+slack_webhook_env = ""
+exec_cwd_root = ""
+exec_session = "devmon-exec"
+skill_allow = ""
+
+# Transcribed from install/prerequisites.tsv's four dev-monitor rows (F11).
+[[prerequisites]]
+command = "python3"
+predicate = "major-gte"
+expected = "3.11"
+fix = "sudo apt-get update && sudo apt-get install -y python3"
+note = "Application runtime"
+
+[[prerequisites]]
+command = "systemctl"
+predicate = "present"
+expected = "-"
+fix = "sudo apt-get update && sudo apt-get install -y systemd"
+note = "User service"
+
+[[prerequisites]]
+command = "journalctl"
+predicate = "present"
+expected = "-"
+fix = "sudo apt-get update && sudo apt-get install -y systemd"
+note = "Log viewer"
+
+[[prerequisites]]
+command = "curl"
+predicate = "present"
+expected = "-"
+fix = "sudo apt-get update && sudo apt-get install -y curl"
+note = "Smoke check"
+
+# Appendix: one user unit, one hub-locations fragment, the dashboard webroot
+# page, and the env file the unit's EnvironmentFile= line reads. The spool
+# (~/.local/state/airlock/dev-monitor/) is retained operator data — never
+# declared. backend_port is proxied by the hub's own nginx, never
+# tailscale-served directly, so it is NOT a serve_ports entry.
+[artifacts]
+units = ["airlock-dev-monitor.service"]
+fragments = ["hub-locations.d/dev-monitor.conf"]
+webroot = ["monitor/index.html"]
+files = ["~/.config/airlock/dev-monitor.env"]
+
+# From hub/index.html's APPS table (dev-monitor row).
+[tile]
+label = "Dev Monitor"
+sub = "system status"
+cat = "system"
+path = "/monitor/"
+glyph = "app-monitor"

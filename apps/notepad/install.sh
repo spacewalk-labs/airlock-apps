@@ -11,8 +11,15 @@
 # Config from airlock.toml. Honors AIRLOCK_DRY_RUN=1.
 set -euo pipefail
 
+# ABI (D5): the orchestrator sets AIRLOCK_ROOT/AIRLOCK_APP_DIR/AIRLOCK_APP_ID
+# and runs this script with cwd = AIRLOCK_APP_DIR. Fall back to the
+# $0-relative computation for a standalone invocation (a test harness that
+# runs this script directly, outside install/airlock-install.sh) — both
+# resolve to the same path when run through the orchestrator.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+HERE="${AIRLOCK_APP_DIR:-$HERE}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-notepad}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

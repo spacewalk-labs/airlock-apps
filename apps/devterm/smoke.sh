@@ -3,8 +3,11 @@
 # reloaded nginx). Verifies the layered gate: ttyd (PTY) -> devterm-gate (client+API)
 # -> nginx owner-gate, and that identity is owner-only at every gated layer.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-devterm}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

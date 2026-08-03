@@ -3,8 +3,11 @@
 # Covers the owner gate, per-slot routing (/s/1/), a real WebSocket handshake,
 # the slot manager API (/api/list), and that the shell embeds the return widget.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-code-server}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 # lib.sh turns on `set -e`. This smoke aggregates failures itself (via `fail`

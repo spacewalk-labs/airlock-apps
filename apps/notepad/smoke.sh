@@ -2,8 +2,11 @@
 # notepad smoke — against a live install (after orchestrator render + reload).
 # Static page behind the hub; upload API is covered by the publish smoke.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-provided AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-notepad}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

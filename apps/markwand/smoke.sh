@@ -4,8 +4,11 @@
 # server (not a separate port): the /markwand/ locations inherit its server-level
 # $hub_ok gate, which admits the owner AND the collaborators.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-markwand}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

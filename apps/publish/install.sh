@@ -12,10 +12,17 @@
 # configured. Config from airlock.toml. Honors AIRLOCK_DRY_RUN=1.
 set -euo pipefail
 
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_DIR/
+# AIRLOCK_APP_ID, falling back to $0-relative computation for a standalone
+# invocation (a test harness that runs this script directly).
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+HERE="${AIRLOCK_APP_DIR:-$HERE}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-publish}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
+# shellcheck source=/dev/null
+. "$HERE/render.sh"
 
 require_cmd python3 systemctl sudo
 
@@ -28,8 +35,16 @@ IDENTITY_HEADER="${AIRLOCK_IDENTITY_HEADER:?}"
 SHARE_DIR="${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}"
 SHARE_DIR="${SHARE_DIR/#\~/$HOME}"
 UPLOADS_DIR="$HOME/uploads"
-BACKEND_PY="$ROOT/apps/publish/backend/airlock-publish.py"
 UNIT_DIR="$HOME/.config/systemd/user"
+# AIRLOCK_RENDER_DIR: harness-only destination-root override (highest
+# priority). Redirects only where render output lands — install/lib.sh
+# fail-closes if this is set without AIRLOCK_DRY_RUN=1, since real system
+# mutations (systemctl, sudo tailscale serve, and orca's own sudo nft/
+# systemctl calls) are gated on dry-run alone, not on this variable.
+if [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
+  CONFD="$AIRLOCK_RENDER_DIR/confd"
+  UNIT_DIR="$AIRLOCK_RENDER_DIR/units"
+fi
 
 # Optional pluggable external-publish target (absent = share-manager only).
 #   mode=remote (default) -> POST snapshots to an ingest service you host
@@ -211,68 +226,19 @@ if [ "$PUBLIC_MODE" = local ]; then
 fi
 
 # --- 2. systemd user unit (loopback backend) + TTL cleanup timer ---
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+# AIRLOCK_RENDER_DIR forces this write branch even under AIRLOCK_DRY_RUN=1 — see
+# install/lib.sh's fail-closed guard (RENDER_DIR without DRY_RUN=1 never reaches
+# this line) and apps/feedback/install.sh's identical comment.
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
   log "[dry] write $UNIT_DIR/airlock-publish.service (127.0.0.1:$BACKEND_PORT, share=$SHARE_DIR)"
 else
   install -d "$UNIT_DIR"
-  cat >"$UNIT_DIR/airlock-publish.service" <<UNIT
-[Unit]
-Description=airlock publish — static-share manager + uploads (127.0.0.1:${BACKEND_PORT})
-After=network.target
-
-[Service]
-Type=simple
-# Optional secret (the external-publish token) — safe if the file is absent.
-EnvironmentFile=-%h/.config/airlock-publish.env
-Environment=AIRLOCK_PUBLISH_BACKEND_PORT=${BACKEND_PORT}
-Environment=AIRLOCK_PUBLISH_SHARE_DIR=${SHARE_DIR}
-Environment=AIRLOCK_PUBLISH_UPLOADS_DIR=${UPLOADS_DIR}
-Environment=AIRLOCK_IDENTITY_HEADER=${IDENTITY_HEADER}
-Environment=AIRLOCK_PUBLISH_INGEST_URL=${INGEST_URL}
-Environment=AIRLOCK_PUBLISH_BASE_URL=${BASE_URL}
-Environment=AIRLOCK_PUBLISH_TOKEN_ENV=${TOKEN_ENV}
-Environment=AIRLOCK_PUBLISH_PUBLIC_MODE=${PUBLIC_MODE}
-Environment=AIRLOCK_PUBLISH_PUBLIC_DIR=${PUBLIC_DIR}
-Environment=AIRLOCK_PUBLISH_STATE_DIR=${STATE_DIR}
-Environment=AIRLOCK_PUBLISH_GATED_DIR=${GATED_DIR}
-Environment=AIRLOCK_PUBLISH_HTPASSWD_DIR=${HTPASSWD_DIR}
-Environment=AIRLOCK_PUBLISH_HTPASSWD_BIN=${HTPASSWD_BIN}
-ExecStart=$(command -v python3) ${BACKEND_PY}
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=default.target
-UNIT
-  cat >"$UNIT_DIR/airlock-publish-cleanup.service" <<UNIT
-[Unit]
-Description=airlock publish — uploads TTL sweep (24h) + public snapshot expiry
-
-[Service]
-Type=oneshot
-# MUST mirror the service's public env — the sweep and the writer have to agree
-# on which directory and state file they are talking about.
-Environment=AIRLOCK_PUBLISH_UPLOADS_DIR=${UPLOADS_DIR}
-Environment=AIRLOCK_PUBLISH_PUBLIC_MODE=${PUBLIC_MODE}
-Environment=AIRLOCK_PUBLISH_PUBLIC_DIR=${PUBLIC_DIR}
-Environment=AIRLOCK_PUBLISH_STATE_DIR=${STATE_DIR}
-Environment=AIRLOCK_PUBLISH_GATED_DIR=${GATED_DIR}
-Environment=AIRLOCK_PUBLISH_HTPASSWD_DIR=${HTPASSWD_DIR}
-Environment=AIRLOCK_PUBLISH_HTPASSWD_BIN=${HTPASSWD_BIN}
-ExecStart=$(command -v python3) ${BACKEND_PY} --cleanup
-UNIT
-  cat >"$UNIT_DIR/airlock-publish-cleanup.timer" <<'UNIT'
-[Unit]
-Description=airlock publish — run uploads TTL sweep hourly
-
-[Timer]
-OnBootSec=10min
-OnUnitActiveSec=1h
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-UNIT
+  render_publish_unit_service "$BACKEND_PORT" "$SHARE_DIR" "$UPLOADS_DIR" "$IDENTITY_HEADER" \
+    "$INGEST_URL" "$BASE_URL" "$TOKEN_ENV" "$PUBLIC_MODE" "$PUBLIC_DIR" "$STATE_DIR" \
+    "$GATED_DIR" "$HTPASSWD_DIR" "$HTPASSWD_BIN" >"$UNIT_DIR/airlock-publish.service"
+  render_publish_unit_cleanup "$UPLOADS_DIR" "$PUBLIC_MODE" "$PUBLIC_DIR" "$STATE_DIR" \
+    "$GATED_DIR" "$HTPASSWD_DIR" "$HTPASSWD_BIN" >"$UNIT_DIR/airlock-publish-cleanup.service"
+  render_publish_unit_timer >"$UNIT_DIR/airlock-publish-cleanup.timer"
 fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-publish.service airlock-publish-cleanup.timer
@@ -290,30 +256,7 @@ fi
 # --- 4. nginx subpath fragment (included inside the hub server = server-level gate) ---
 frag="$CONFD/hub-locations.d/publish.conf"
 install -d "$CONFD/hub-locations.d"
-sed_replacement() { printf '%s' "$1" | sed 's/[\\&|]/\\&/g'; }
-BACKEND_PORT_SED="$(sed_replacement "$BACKEND_PORT")"
-SHARE_DIR_SED="$(sed_replacement "$SHARE_DIR")"
-GATED_DIR_SED="$(sed_replacement "$GATED_DIR")"
-HTPASSWD_DIR_SED="$(sed_replacement "$HTPASSWD_DIR")"
-{
-  echo "# publish subpath — generated by apps/publish/install.sh"
-  sed -e "s|@@BACKEND@@|${BACKEND_PORT_SED}|g" -e "s|@@SHARE@@|${SHARE_DIR_SED}|g" <<'NGINX'
-# API backend (backend strips the /publish/ prefix itself). Uploads need a body cap.
-location /publish/api/ {
-    proxy_pass http://127.0.0.1:@@BACKEND@@;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    client_max_body_size 60m;
-    add_header Cache-Control "no-cache" always;
-}
-# Served static-share directory (hub gate = owner + collaborators, server level).
-location /publish/files/ {
-    alias @@SHARE@@/;
-    autoindex on;
-    add_header Cache-Control "no-cache" always;
-}
-NGINX
-} > "$frag"
+render_publish_nginx_main "$BACKEND_PORT" "$SHARE_DIR" > "$frag"
 log "wrote nginx fragment: $frag"
 
 if [ "$PUBLIC_MODE" = local ]; then
@@ -321,18 +264,7 @@ if [ "$PUBLIC_MODE" = local ]; then
   # updates one slug-specific credential file, so nginx does not need a reload.
   gated_frag="$CONFD/public-includes.d/publish-gated.conf"
   install -d "$CONFD/public-includes.d"
-  {
-    echo "# gated public snapshots — include inside the public nginx server"
-    sed -e "s|@@GATED@@|${GATED_DIR_SED}|g" -e "s|@@AUTHDIR@@|${HTPASSWD_DIR_SED}|g" <<'NGINX'
-location ~ "^/g/(?<gslug>[a-z0-9][a-z0-9-]{2,63})(?<gpath>/.*)?$" {
-    auth_basic "Restricted document";
-    auth_basic_user_file @@AUTHDIR@@/$gslug.htpasswd;
-    alias @@GATED@@/$gslug$gpath;
-    index index.html;
-    add_header Cache-Control "no-store" always;
-}
-NGINX
-  } > "$gated_frag"
+  render_publish_nginx_gated "$GATED_DIR" "$HTPASSWD_DIR" > "$gated_frag"
   # The former top-level location was generated by an older release. Remove
   # it after writing the replacement under the normal includes directory.
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then

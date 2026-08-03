@@ -2,8 +2,11 @@
 # feedback smoke — against a live install (after orchestrator render + reload).
 # Same-origin subpath, so the gate under test is the HUB nginx server.
 set -uo pipefail
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_ID,
+# falling back to $0-relative computation for a standalone invocation.
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-feedback}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 

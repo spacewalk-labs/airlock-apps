@@ -28,11 +28,18 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+# ABI (D5): prefer the orchestrator-supplied AIRLOCK_ROOT/AIRLOCK_APP_DIR/
+# AIRLOCK_APP_ID, falling back to $0-relative computation for a standalone
+# invocation (a test harness that runs this script directly).
+ROOT="${AIRLOCK_ROOT:-$(cd "$HERE/../.." && pwd)}"
+HERE="${AIRLOCK_APP_DIR:-$HERE}"
+AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-orca}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
 # shellcheck source=/dev/null
 . "$ROOT/gate/nginx-lib.sh"
+# shellcheck source=/dev/null
+. "$HERE/render.sh"
 
 airlock_load orca
 # Return-widget menu attributes. With devterm installed the widget's tap opens a small
@@ -76,7 +83,17 @@ SQUASHFS="$ORCA_DIR/squashfs-root"
 APPRUN="$SQUASHFS/AppRun"
 SERVELOG="$ORCA_DIR/serve.log"
 UNIT_DIR="$HOME/.config/systemd/user"
+# AIRLOCK_RENDER_DIR: harness-only destination-root override (highest
+# priority). Redirects only where render output lands — install/lib.sh
+# fail-closes if this is set without AIRLOCK_DRY_RUN=1, since real system
+# mutations (systemctl, sudo tailscale serve, and orca's own sudo nft/
+# systemctl calls) are gated on dry-run alone, not on this variable.
 REAP_BIN="$HOME/.local/bin/airlock-orca-reap"
+if [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
+  CONFD="$AIRLOCK_RENDER_DIR/confd"
+  UNIT_DIR="$AIRLOCK_RENDER_DIR/units"
+  REAP_BIN="$AIRLOCK_RENDER_DIR/bin/airlock-orca-reap"
+fi
 PAIRING_FILE="$HOME/.config/orca/airlock-pairing-code"
 # Dedicated Xvfb display number so we never squat an ambient :99 someone else runs.
 XDISP=59
@@ -158,101 +175,44 @@ else
 fi
 
 # --- 3. systemd --user units: reap helper + dedicated Xvfb + orca serve ---
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+# AIRLOCK_RENDER_DIR forces this write branch even under AIRLOCK_DRY_RUN=1 — see
+# install/lib.sh's fail-closed guard (RENDER_DIR without DRY_RUN=1 never reaches
+# this line) and apps/feedback/install.sh's identical comment.
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
   log "[dry] write $REAP_BIN, $UNIT_DIR/airlock-orca-xvfb.service, $UNIT_DIR/airlock-orca.service"
 else
-  install -d "$UNIT_DIR" "$HOME/.local/bin"
+  install -d "$UNIT_DIR" "$(dirname "$REAP_BIN")"
 
   # Daemon reap — orca forks its daemon into app-orca-*.scope (app.slice), which
   # the service's KillMode never reaches. Runs as ExecStopPost (i.e. on every
   # restart): kill the daemon pid (PID-reuse-safe via /proc/<pid>/exe) and stop
   # every leftover app-orca-*.scope (one agent-browser child leaks per restart).
-  cat >"$REAP_BIN" <<'REAP'
-#!/usr/bin/env bash
-# airlock-orca daemon reap — ExecStopPost for airlock-orca.service. PID-reuse safe.
-for f in "$HOME"/.config/orca/daemon/daemon-v*.pid; do
-    [ -f "$f" ] || continue
-    p=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["pid"])' "$f" 2>/dev/null)
-    [ -n "$p" ] || { rm -f "$f"; continue; }
-    exe=$(readlink -f "/proc/$p/exe" 2>/dev/null)
-    case "$exe" in
-        *orca*) kill "$p" 2>/dev/null || true ;;   # only orca-family pids (PID-reuse guard)
-    esac
-    rm -f "$f"
-done
-# Reclaim self-detached scopes: killing the daemon leaves its app-orca-*.scope and
-# the agent-browser child inside it, which otherwise accumulate one per restart.
-# orca is single-instance and this only runs while the service is down, so every
-# app-orca-* here belongs to the dying (or already-dead) instance -> stop them all.
-systemctl --user stop 'app-orca-*.scope' 2>/dev/null || true
-exit 0
-REAP
-  chmod +x "$REAP_BIN"
+  render_orca_reap_script >"$REAP_BIN"
+  # RENDER_DIR is a harness text-emission-only hook — no chmod, no touching real
+  # (non-redirected) state under $HOME.
+  if [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
+    chmod +x "$REAP_BIN"
+  fi
 
   # Dedicated persistent Xvfb — orca is Electron and needs a real X display even
   # headless. A per-start xvfb-run races the socket create on some boxes ('Missing
   # X server'); a standing unit removes that race. orca (below) After/Requires it.
-  if write_if_changed "$UNIT_DIR/airlock-orca-xvfb.service" <<UNIT
-[Unit]
-Description=airlock-orca-xvfb — dedicated virtual display (:${XDISP}) for Orca ADE
-After=default.target
-
-[Service]
-Type=simple
-# Clear a stale lock/socket for our own display (:${XDISP}) before Xvfb recreates it.
-ExecStartPre=-/bin/sh -c 'rm -f /tmp/.X${XDISP}-lock /tmp/.X11-unix/X${XDISP}'
-# -extension GLX: on boxes with NVIDIA userspace EGL/GBM libs, Xvfb SIGSEGVs while
-#   loading libEGL_nvidia during GLX init (no real GPU in a container). orca renders
-#   with LIBGL_ALWAYS_SOFTWARE so it never needs server GLX -> disabling it is safe.
-ExecStart=/usr/bin/Xvfb :${XDISP} -screen 0 1280x1024x24 -nolisten tcp -extension GLX
-# active != socket-ready -> poll for the socket (up to ~10s) so orca's After holds.
-ExecStartPost=/bin/sh -c 'for _ in \$(seq 1 100); do [ -S /tmp/.X11-unix/X${XDISP} ] && exit 0; sleep 0.1; done; exit 1'
-Restart=always
-RestartSec=2
-
-[Install]
-WantedBy=default.target
-UNIT
+  if render_orca_unit_xvfb "$XDISP" | write_if_changed "$UNIT_DIR/airlock-orca-xvfb.service"
   then need_restart=1; fi
 
   # orca serve — single instance behind the loopback gate.
-  if write_if_changed "$UNIT_DIR/airlock-orca.service" <<UNIT
-[Unit]
-Description=airlock-orca — Orca ADE headless serve (behind the 127.0.0.1 owner gate)
-Requires=airlock-orca-xvfb.service
-After=default.target airlock-orca-xvfb.service
-
-[Service]
-Type=simple
-Environment=LIBGL_ALWAYS_SOFTWARE=1
-Environment=APPDIR=${SQUASHFS}
-# DISPLAY is provided by the dedicated Xvfb unit; without it orca SIGSEGVs.
-Environment=DISPLAY=:${XDISP}
-# Defensive: even with xvfb active the socket can lag a moment — wait for it.
-ExecStartPre=/bin/sh -c 'for _ in \$(seq 1 100); do [ -S /tmp/.X11-unix/X${XDISP} ] && exit 0; sleep 0.1; done; echo "X${XDISP} socket not ready"; exit 1'
-# --pairing-code fixed (above) -> stable webClientUrl. --pairing-address rewrites
-# the endpoint the web client dials to the public gate (default ws://0.0.0.0:BACKEND
-# is not browser-reachable). The webClientUrl is only ever emitted to serve.log
-# (Electron stdout never reaches journald), so capture it there.
-ExecStart=/bin/sh -c 'exec ${APPRUN} serve --port ${BACKEND_PORT} --pairing-code ${PAIRING_CODE} --pairing-address wss://${FQDN}:${HTTPS_PORT} > ${SERVELOG} 2>&1'
-# The daemon self-detaches into app-orca-*.scope, so reclaim it on stop.
-ExecStopPost=${REAP_BIN}
-Restart=on-failure
-RestartSec=3
-# Backstop only — app-orca-*.scope lives in app.slice, outside this cap.
-MemoryMax=8G
-TasksMax=1024
-NoNewPrivileges=yes
-
-[Install]
-WantedBy=default.target
-UNIT
+  if render_orca_unit_serve "$SQUASHFS" "$XDISP" "$APPRUN" "$BACKEND_PORT" "$PAIRING_CODE" \
+       "$FQDN" "$HTTPS_PORT" "$SERVELOG" "$REAP_BIN" \
+     | write_if_changed "$UNIT_DIR/airlock-orca.service"
   then need_restart=1; fi
 
   # serve.log 0600 (it holds the pairing webClientUrl). ExecStart's '>' preserves
-  # an existing file's mode, so lock it down before the first start.
-  [ -e "$SERVELOG" ] || : > "$SERVELOG" 2>/dev/null || true
-  chmod 600 "$SERVELOG" 2>/dev/null || true
+  # an existing file's mode, so lock it down before the first start. Skipped under
+  # RENDER_DIR: SERVELOG is real (non-redirected) $HOME state, not a render target.
+  if [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
+    [ -e "$SERVELOG" ] || : > "$SERVELOG" 2>/dev/null || true
+    chmod 600 "$SERVELOG" 2>/dev/null || true
+  fi
 fi
 
 airlock_run systemctl --user daemon-reload
@@ -276,33 +236,40 @@ fi
 # otherwise silently reopen the hole.
 NFT_FILE="/etc/airlock/orca-loopback.nft"
 NFT_UNIT="/etc/systemd/system/airlock-orca-firewall.service"
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+if [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
+  NFT_FILE="$AIRLOCK_RENDER_DIR/etc-airlock/orca-loopback.nft"
+  NFT_UNIT="$AIRLOCK_RENDER_DIR/etc-systemd-system/airlock-orca-firewall.service"
+fi
+# AIRLOCK_RENDER_DIR forces text emission for this sudo-tee write site even under
+# AIRLOCK_DRY_RUN=1 — but unlike every other app's --user unit write, this one's
+# real branch reaches sudo (system-scope nft file + unit). The RENDER_DIR branch
+# below therefore CANNOT share the real branch: it writes the same rendered bytes
+# with a plain redirect instead, and never touches sudo/systemctl (install/lib.sh's
+# fail-closed guard means RENDER_DIR is always paired with DRY_RUN=1, so this is
+# the ONLY way this path is reached without AIRLOCK_DRY_RUN=1 alone taking the
+# first branch instead).
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
   log "[dry] render_loopback_nft airlock_orca $BACKEND_PORT -> $NFT_FILE"
   log "[dry] write $NFT_UNIT + sudo nft -f (drop non-loopback -> :$BACKEND_PORT)"
+elif [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
+  install -d "$(dirname "$NFT_FILE")" "$(dirname "$NFT_UNIT")"
+  render_loopback_nft airlock_orca "$BACKEND_PORT" > "$NFT_FILE"
+  render_orca_unit_firewall "$BACKEND_PORT" "$NFT_FILE" > "$NFT_UNIT"
 else
   sudo install -d "$(dirname "$NFT_FILE")"
   render_loopback_nft airlock_orca "$BACKEND_PORT" | sudo tee "$NFT_FILE" >/dev/null
-  sudo tee "$NFT_UNIT" >/dev/null <<UNIT
-[Unit]
-Description=airlock-orca firewall — drop non-loopback traffic to :${BACKEND_PORT} (orca binds 0.0.0.0)
-After=network.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-# Idempotent re-apply: drop only our own table, then reload it (docker untouched).
-ExecStart=/bin/sh -c '/usr/sbin/nft delete table inet airlock_orca 2>/dev/null; /usr/sbin/nft -f ${NFT_FILE}'
-ExecStop=/usr/sbin/nft delete table inet airlock_orca
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+  render_orca_unit_firewall "$BACKEND_PORT" "$NFT_FILE" | sudo tee "$NFT_UNIT" >/dev/null
   sudo systemctl daemon-reload
   sudo systemctl enable --now airlock-orca-firewall.service
 fi
 
 # --- 5. tailscale serve: HTTPS (secure context, for clipboard) -> the owner gate ---
-airlock_run sudo tailscale serve --bg --https="${HTTPS_PORT}" "http://127.0.0.1:${GATE_PORT}"
+# The platform renders this now (manifest [serve.https]; child-4 P2b STEP 0
+# — install/lib.sh's airlock_render_serve_https, called from
+# install/airlock-install.sh right after this script returns) — byte-
+# identical to the direct call this used to make
+# (install/test-serve-https-parity.sh proved the two productions equal
+# before this line was removed).
 
 # --- 6. install the patched web client (vendored dist) to a world-readable path ---
 # nginx workers (www-data) serve the alias'd files at request time, so the dist must
@@ -380,63 +347,8 @@ fi
 # only covers its own location; emit_owner_gate guards only location /).
 frag="$CONFD/servers.d/orca.conf"
 install -d "$CONFD/servers.d"
-extra=""; extra_arg=""
-if [ "$ORCA_WEB_ENABLED" = 1 ]; then
-  extra="$(mktemp)"; extra_arg="$extra"
-  # unquoted heredoc: nginx runtime vars are \$-escaped (emitted literal); shell vars
-  # (${BACKEND_PORT}, ${ORCA_DIST_SERVE}) are expanded. All expanded vars are set, so
-  # this is safe under `set -u` (see the $var-expansion trap noted in gate/nginx-lib.sh).
-  cat > "$extra" <<NGINX
-    # ---- patched Orca web client (vendored) + zero-paste entry ----
-    location = / {
-        absolute_redirect off;
-        if (\$owner_ok = 0) { return 403; }
-        if (\$orca_redir) { return 302 \$orca_redir; }
-        proxy_pass http://127.0.0.1:${BACKEND_PORT};
-        proxy_http_version 1.1;
-        proxy_set_header Host \$host;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_read_timeout 86400s;
-        # WS-safe: no X-Forwarded-* (orca verifies Origin).
-    }
-    location = /web-index.html {
-        absolute_redirect off;
-        if (\$owner_ok = 0) { return 403; }
-        return 302 /orca-web/web-index.html\$is_args\$args;
-    }
-    location = /orca-web/web-index.html {
-        if (\$owner_ok = 0) { return 403; }
-        alias ${ORCA_DIST_SERVE}/web-index.html;
-        default_type text/html;
-        add_header Cache-Control "no-store" always;
-        sub_filter '</body>' '<script src="/airlock-return.js" data-anchor="bottom-right"${WIDGET_MENU_ATTRS} defer></script></body>';
-        sub_filter_once on;
-    }
-    location /orca-web/assets/ {
-        if (\$owner_ok = 0) { return 403; }
-        alias ${ORCA_DIST_SERVE}/assets/;
-        access_log off;
-    }
-NGINX
-fi
-{
-  echo "# orca owner gate — generated by apps/orca/install.sh"
-  if [ "$ORCA_WEB_ENABLED" = 1 ]; then
-    # http-context map: the bare gate root redirects the owner's document navigation to
-    # the patched client (with pairing when captured); a WebSocket upgrade gets "" so it
-    # is proxied to the runtime instead. $http_upgrade is "websocket" only on WS upgrade.
-    cat <<NGINX
-map \$http_upgrade \$orca_redir {
-    default     "/orca-web/web-index.html${pairing_frag}";
-    "websocket" "";
-}
-NGINX
-  fi
-  emit_owner_gate "$GATE_PORT" "127.0.0.1:${BACKEND_PORT}" owner_ok \
-    "${WEBROOT}/assets/airlock-return.js" bottom-right "$extra_arg"
-} > "$frag"
-[ -n "$extra" ] && rm -f "$extra"
+render_orca_nginx "$GATE_PORT" "$BACKEND_PORT" "$WEBROOT" "$ORCA_WEB_ENABLED" \
+  "$ORCA_DIST_SERVE" "$WIDGET_MENU_ATTRS" "$pairing_frag" > "$frag"
 # The fragment embeds the pairing blob (deviceToken) when captured -> lock to owner/root
 # (nginx master reads config as root). serve.log is already 0600 for the same reason.
 if [ -n "$pairing_frag" ]; then chmod 600 "$frag" 2>/dev/null || true; fi
