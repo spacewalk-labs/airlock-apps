@@ -318,6 +318,66 @@ else
   fi
 fi
 
+# --- 2f. process-group sweep (idempotent; layers on 2e — order matters) ---
+# The one leak 2e deliberately left open: when the agent LEADER exits before we
+# terminate it, terminateWithTreeKill returns "already-exited" and stops — and by then
+# the leader's MCP children have been reparented, so a ppid-walking tree-kill can no
+# longer find them. They survive as orphans.
+# A process group outlives its leader, so killing the GROUP reaches them. Controlled
+# experiment (josh-dev 2026-08-06): detached=false -> grandchild orphaned and
+# kill(-pid) returns ESRCH (harmless); detached=true -> kill(-pgid) kills it. In both
+# cases the child stays in swk-paseo.service's cgroup, so KillMode=control-group still
+# sweeps everything on restart. codex already spawns its app-server detached upstream
+# and merely never killed the group; claude needed both halves.
+# 🔴 This must run AFTER 2e: its claude-agent anchors are text 2e introduces. If 2e was
+# skipped, this exits 20 and skips too — never half a fix.
+PGROUP_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/orphan-process-group.mjs"
+PGROUP_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/orphan-process-group.test.mjs"
+CLAUDE_QUERY_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/claude/query.js"
+CODEX_TRANSPORT_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/codex/app-server-transport.js"
+apply_pgroup() {  # <mode> <target-js>
+  local mode="$1" target="$2" pg_rc=0 pg_out pg_tmp
+  if [ ! -f "$target" ]; then
+    log "warning: $mode target not found ($target) — process-group sweep skipped"
+    return 0
+  fi
+  pg_out="$(node "$PGROUP_PATCHER" "$mode" "$target")" || pg_rc=$?
+  case "$pg_rc" in
+    10) log "process-group sweep already applied ($mode)" ;;
+    20) log "process-group sweep anchors missing for $mode (drift, or 2e skipped) — skipped" ;;
+    0)
+      pg_tmp="${target}.paseo-new.mjs"
+      if node --check "$pg_tmp"; then
+        mv "$pg_tmp" "$target" || die "process-group sweep mv failed ($mode)"
+        need_restart=1
+        log "process-group sweep applied ($mode)"
+      else
+        rm -f "$pg_tmp"
+        die "process-group sweep produced invalid JS ($mode) — not applied"
+      fi
+      ;;
+    *) die "process-group patcher error ($mode rc=$pg_rc): $pg_out" ;;
+  esac
+}
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] apply process-group sweep to claude agent/query and codex transport"
+elif [ ! -f "$PGROUP_PATCHER" ]; then
+  log "warning: process-group patcher not found ($PGROUP_PATCHER) — skipped"
+else
+  apply_pgroup claude-agent    "$CLAUDE_AGENT_JS"
+  apply_pgroup claude-query    "$CLAUDE_QUERY_JS"
+  apply_pgroup codex-transport "$CODEX_TRANSPORT_JS"
+  # Drives the shipped sweep against REAL detached processes: spawns a leader with a
+  # child, kills only the leader, and asserts the sweep reaps the survivor. A syntax
+  # check cannot tell us that, and this is the half of the fix that signals other
+  # processes — it should never ship unverified.
+  if [ -f "$PGROUP_TEST" ] && grep -q 'paseo-process-group' "$CLAUDE_AGENT_JS" 2>/dev/null; then
+    node "$PGROUP_TEST" "$CLAUDE_AGENT_JS" >/dev/null 2>&1 \
+      || die "process-group behaviour check failed — the patched bundle does not reap descendants as intended"
+    log "process-group behaviour check passed"
+  fi
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).

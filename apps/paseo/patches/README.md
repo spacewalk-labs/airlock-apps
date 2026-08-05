@@ -58,6 +58,28 @@ the MIT license that covers the rest of Airlock.
   case loudly instead. Verify after install:
   `node orphan-process-guard.test.mjs <installed>/providers/claude/agent.js`.
 
+- **`orphan-process-group.mjs`** (+ `orphan-process-group.test.mjs`) — closes the one
+  leak the guard above deliberately left open. When the agent **leader** exits before we
+  terminate it, `terminateWithTreeKill` returns `"already-exited"` and stops — and by then
+  the leader's MCP children have been reparented, so a ppid-walking tree-kill can no longer
+  find them; they survive as orphans. A **process group outlives its leader**, so killing
+  the group reaches them. Controlled experiment (josh-dev 2026-08-06):
+
+  | spawn | pgid | leader kill | `kill(-pid)` |
+  |---|---|---|---|
+  | `detached: false` | ≠ pid | grandchild orphaned | **ESRCH** (no such group — harmless) |
+  | `detached: true` | = pid | grandchild orphaned | grandchild **dies** ✅ |
+
+  In both cases the child stays in `swk-paseo.service`'s cgroup, so `KillMode=control-group`
+  still sweeps everything on daemon restart — `detached` does not escape the cgroup. That
+  ESRCH result is what makes the sweep safe if the spawn edit ever fails to apply: a group id
+  *is* its leader's pid, so `kill(-pid)` can only reach the group led by that same process.
+  codex already spawned its app-server detached upstream and merely never killed the group;
+  claude needed both halves. 🔴 Apply **after** `orphan-process-guard.mjs` — the
+  `claude-agent` anchors are text that patch introduces (otherwise exit 20 = skip, not a
+  half-fix). The behaviour check spawns real detached processes and asserts the shipped
+  sweep reaps a survivor, because this is the half that signals other processes.
+
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live
