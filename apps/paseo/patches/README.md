@@ -34,6 +34,30 @@ the MIT license that covers the rest of Airlock.
   reassemble byte-for-byte, so an upstream format change skips instead of
   mangling the file. Edit `PRUNE_IDS` to change which models are hidden.
 
+- **`orphan-process-guard.mjs`** (+ `orphan-process-guard-{claude,codex}.patch`, the
+  reference copies, and `orphan-process-guard.test.mjs`, a behaviour check) — paseo
+  leaks the agent processes it spawns. Both providers track exactly one live child
+  (`this.childProcess` / `this.client`) and terminate it behind an `if (handle)` with
+  no else branch, and neither honours the closed flag on its spawn entry point
+  (`ensureQuery()` / `connect()`). A control-plane call landing during or after close —
+  `setMode`, `setModel`, `listCommands`, `revertFiles`, a codex reconnect, or the
+  in-flight spawn simply finishing late — starts a **replacement** process on a session
+  nothing will ever close again; it runs until the box is rebooted. close() reports
+  success because at that instant there was genuinely nothing to kill, and the
+  surrounding `session_close.start/complete` lines are `logger.trace`, which the
+  daemon's info-level logger never emits — so the whole class of leak was unobservable.
+  Measured on josh-dev 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
+  The patch makes ownership a `Set` (a replaced handle is still terminated), gates both
+  spawn entry points, terminates a late arrival on the spot instead of storing it, and
+  `logger.warn`s every branch that used to be silent. Two independent targets, one
+  invocation each (`claude` / `codex`) so a drift in one does not disable the other;
+  anchors must be present **and unique** or it exits 20. Deliberately out of scope:
+  `detached: true` + process-group kill, which would also cover MCP children orphaned
+  when the leader exits first — that changes the signal/session semantics of the
+  provider spawn and needs its own change and observation window; this patch logs that
+  case loudly instead. Verify after install:
+  `node orphan-process-guard.test.mjs <installed>/providers/claude/agent.js`.
+
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live

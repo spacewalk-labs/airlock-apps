@@ -260,6 +260,64 @@ else
   esac
 fi
 
+# --- 2e. orphan process guard (idempotent; claude + codex providers) ---
+# paseo leaks the agent processes it spawns. Both providers track exactly one live
+# child (`this.childProcess` / `this.client`) and kill it behind an `if (handle)`
+# with no else branch, and neither honours the closed flag on its spawn entry point
+# (ensureQuery / connect). So a control-plane call landing during or after close —
+# setMode, setModel, listCommands, revertFiles, a codex reconnect, or just the
+# in-flight spawn finishing late — starts a REPLACEMENT process on a session nothing
+# will ever close again. It then runs until the box is rebooted, and close() reports
+# success because at that instant there genuinely was nothing to kill. Measured on
+# josh-dev 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
+# The patch makes ownership a Set (so a replaced handle is still terminated), gates
+# both spawn entry points on the closed flag, terminates late arrivals on the spot,
+# and warns at level 40 — the surrounding session_close lines are logger.trace, which
+# the daemon's info-level logger never emits, so this class of leak was unobservable.
+ORPHANGUARD_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/orphan-process-guard.mjs"
+ORPHANGUARD_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/orphan-process-guard.test.mjs"
+CODEX_AGENT_JS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/server/agent/providers/codex-app-server-agent.js"
+apply_orphan_guard() {  # <mode> <target-js>
+  local mode="$1" target="$2" og_rc=0 og_out og_tmp
+  if [ ! -f "$target" ]; then
+    log "warning: $mode provider not found ($target) — orphan guard skipped"
+    return 0
+  fi
+  og_out="$(node "$ORPHANGUARD_PATCHER" "$mode" "$target")" || og_rc=$?
+  case "$og_rc" in
+    10) log "orphan guard already applied ($mode)" ;;
+    20) log "orphan guard anchors missing or ambiguous for $mode (paseo version drift) — skipped" ;;
+    0)
+      og_tmp="${target}.paseo-new.mjs"
+      if node --check "$og_tmp"; then
+        mv "$og_tmp" "$target" || die "orphan guard mv failed ($mode)"
+        need_restart=1   # bundle changed -> restart so the daemon runs the patched provider
+        log "orphan guard applied ($mode)"
+      else
+        rm -f "$og_tmp"
+        die "orphan guard produced invalid JS ($mode) — not applied"
+      fi
+      ;;
+    *) die "orphan guard patcher error ($mode rc=$og_rc): $og_out" ;;
+  esac
+}
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] apply orphan process guard to $CLAUDE_AGENT_JS and $CODEX_AGENT_JS"
+elif [ ! -f "$ORPHANGUARD_PATCHER" ]; then
+  log "warning: orphan guard patcher not found ($ORPHANGUARD_PATCHER) — skipped"
+else
+  apply_orphan_guard claude "$CLAUDE_AGENT_JS"
+  apply_orphan_guard codex  "$CODEX_AGENT_JS"
+  # Syntax-valid is not the same as behaving. This check slices the two guard methods
+  # back out of the installed bundle and drives them against fake children, so a patch
+  # that applied but reassembled wrongly fails the install instead of shipping quietly.
+  if [ -f "$ORPHANGUARD_TEST" ] && grep -q 'paseo-orphan-guard' "$CLAUDE_AGENT_JS" 2>/dev/null; then
+    node "$ORPHANGUARD_TEST" "$CLAUDE_AGENT_JS" >/dev/null 2>&1 \
+      || die "orphan guard behaviour check failed — the patched bundle does not behave as intended"
+    log "orphan guard behaviour check passed"
+  fi
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
