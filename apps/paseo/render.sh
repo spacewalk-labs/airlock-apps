@@ -10,16 +10,30 @@
 # scratch file) — a procedural copy of the splicing logic, since the
 # original assembly is several heredocs plus shell logic, not one heredoc.
 
-# render_paseo_unit UNIT_PATH HOME FQDN HTTPS_PORT PASEO_BIN BACKEND_PORT
+# render_paseo_unit UNIT_PATH HOME FQDN HTTPS_PORT PASEO_BIN BACKEND_PORT PY PID_GUARD
 # HOME is a local (shadows $HOME for this function only — pops on return) so
 # the heredoc body below can reference ${HOME} exactly as the source does.
+# PY/PID_GUARD: interpreter + apps/paseo/paseo-clear-stale-pid.py path, spliced
+# into an ExecStartPre that reaps a stale $HOME/.paseo/paseo.pid before start
+# (see that script's header for why: upstream never reaps it itself).
 render_paseo_unit() {
-  local UNIT_PATH="$1" HOME="$2" FQDN="$3" HTTPS_PORT="$4" PASEO_BIN="$5" BACKEND_PORT="$6"
+  local UNIT_PATH="$1" HOME="$2" FQDN="$3" HTTPS_PORT="$4" PASEO_BIN="$5" BACKEND_PORT="$6" \
+        PY="$7" PID_GUARD="$8"
   cat <<UNITEOF
 [Unit]
 Description=airlock-paseo — Paseo daemon (coding-agent orchestration + web UI) behind the owner gate
 Documentation=https://github.com/getpaseo/paseo
-After=default.target
+# NOT After=default.target: this unit is WantedBy=default.target below, and a
+# unit that is both Wanted by a target and ordered After that SAME target is a
+# guaranteed ordering cycle (the target gets an implicit After= on everything
+# it Wants — systemd.unit(5) "Default Dependencies" — so default.target ends
+# up After= this unit AND this unit After= default.target). Measured on a real
+# box: "Found ordering cycle on default.target/start ... Job
+# airlock-paseo-browse-host.service/start deleted to break ordering cycle" —
+# the unit never started on boot, only via a manual 'systemctl start'.
+# network.target matches every other app unit in this repo (dev-monitor,
+# devterm, feedback, publish, code-server) and carries no such back-edge.
+After=network.target
 
 [Service]
 Type=simple
@@ -39,6 +53,17 @@ Environment=PASEO_HOSTNAMES=${FQDN},${FQDN}:${HTTPS_PORT},localhost
 # Headless: no dictation/voice (avoids an unexpected ~600MB speech model download).
 Environment=PASEO_DICTATION_ENABLED=false
 Environment=PASEO_VOICE_MODE_ENABLED=false
+# Reap a stale singleton pidfile before every start (including on-boot and every
+# Restart=always retry): upstream (@getpaseo/cli) writes \$PASEO_HOME/paseo.pid to
+# enforce "only one daemon" but never reaps it itself, so a record surviving a
+# reboot (stale pid, sometimes already reused by an unrelated process) makes the
+# daemon refuse to start FOREVER with "Another Paseo daemon is already running" —
+# measured on a real box, RestartSec=3 looping it (counter into double digits).
+# Leading '-': a guard-script problem must never block the real ExecStart; the
+# script itself only ever deletes the file when it can prove staleness (dead pid,
+# or a live pid whose uid/hostname/start-time contradict the record) and always
+# exits 0 either way. See apps/paseo/paseo-clear-stale-pid.py.
+ExecStartPre=-${PY} ${PID_GUARD} ${HOME}/.paseo/paseo.pid
 # --foreground: Type=simple. --no-relay: no upstream relay outbound. --web-ui: the
 # browser UI. --listen 127.0.0.1: loopback bind (the gate is the only ingress).
 ExecStart=${PASEO_BIN} daemon start --foreground --no-relay --web-ui --listen 127.0.0.1:${BACKEND_PORT}

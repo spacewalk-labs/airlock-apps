@@ -42,7 +42,14 @@ render_orca_unit_xvfb() {
   cat <<UNIT
 [Unit]
 Description=airlock-orca-xvfb — dedicated virtual display (:${XDISP}) for Orca ADE
-After=default.target
+# NOT After=default.target: this unit is WantedBy=default.target below, and a
+# unit both Wanted by a target and ordered After that same target is a
+# guaranteed ordering cycle (the target gets an implicit After= on everything
+# it Wants — systemd.unit(5) "Default Dependencies"). Same anti-pattern
+# measured and fixed in apps/paseo/render.sh — see that comment for the exact
+# boot-log signature. network.target matches every other non-dependent app
+# unit in this repo and carries no such back-edge.
+After=network.target
 
 [Service]
 Type=simple
@@ -70,7 +77,9 @@ render_orca_unit_serve() {
 [Unit]
 Description=airlock-orca — Orca ADE headless serve (behind the 127.0.0.1 owner gate)
 Requires=airlock-orca-xvfb.service
-After=default.target airlock-orca-xvfb.service
+# NOT After=default.target — same WantedBy=default.target ordering-cycle
+# anti-pattern as airlock-orca-xvfb.service above; see that comment.
+After=network.target airlock-orca-xvfb.service
 
 [Service]
 Type=simple

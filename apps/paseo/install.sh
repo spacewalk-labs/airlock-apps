@@ -95,6 +95,11 @@ NPM_ROOT="$PASEO_PREFIX/lib/node_modules"
 PASEO_BIN="$NPM_GBIN/paseo"
 export PATH="$NPM_GBIN:$PATH"
 
+# ExecStartPre stale-pidfile guard (apps/paseo/paseo-clear-stale-pid.py) — see that
+# script's header. In-repo path, same convention as devterm's GATE_PY.
+STALE_PID_GUARD="$HERE/paseo-clear-stale-pid.py"
+PY="$(command -v python3)"
+
 # Unit PATH — npm global bin + provider CLI locations (claude=~/.local/bin,
 # codex=~/.npm-global/bin) + node bin + system. The daemon spawns provider CLIs
 # against this PATH — a mismatch here is the #1 pilot gotcha (provider "not found").
@@ -277,6 +282,7 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
 else
   install -d "$UNIT_DIR"
   if render_paseo_unit "$UNIT_PATH" "$HOME" "$FQDN" "$HTTPS_PORT" "$PASEO_BIN" "$BACKEND_PORT" \
+       "$PY" "$STALE_PID_GUARD" \
      | write_if_changed "$UNIT"
   then need_restart=1; fi
 fi

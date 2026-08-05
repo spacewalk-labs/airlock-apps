@@ -40,7 +40,11 @@ render_code_server_unit_manager() {
   cat <<UNIT
 [Unit]
 Description=airlock code-server slot manager API (127.0.0.1:${MANAGER_PORT})
-After=default.target
+# NOT After=default.target — same WantedBy=default.target ordering-cycle
+# anti-pattern fixed in apps/paseo/render.sh; see that comment for the exact
+# boot-log signature this produces. network.target matches
+# airlock-code-server@.service just below and every other app unit here.
+After=network.target
 
 [Service]
 Type=simple
