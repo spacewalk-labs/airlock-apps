@@ -10,15 +10,19 @@
 # scratch file) — a procedural copy of the splicing logic, since the
 # original assembly is several heredocs plus shell logic, not one heredoc.
 
-# render_paseo_unit UNIT_PATH HOME FQDN HTTPS_PORT PASEO_BIN BACKEND_PORT PY PID_GUARD
+# render_paseo_unit UNIT_PATH HOME FQDN HTTPS_PORT PASEO_BIN BACKEND_PORT PY PID_GUARD \
+#                   MEMMAX MEMHIGH TASKSMAX
 # HOME is a local (shadows $HOME for this function only — pops on return) so
 # the heredoc body below can reference ${HOME} exactly as the source does.
 # PY/PID_GUARD: interpreter + apps/paseo/paseo-clear-stale-pid.py path, spliced
 # into an ExecStartPre that reaps a stale $HOME/.paseo/paseo.pid before start
 # (see that script's header for why: upstream never reaps it itself).
+# MEMMAX/MEMHIGH/TASKSMAX: resource backstop, sized from the box's RAM by the
+# caller (install.sh). Passed in rather than computed here so the rendered text
+# stays a pure function of its arguments — the golden-render tests depend on it.
 render_paseo_unit() {
   local UNIT_PATH="$1" HOME="$2" FQDN="$3" HTTPS_PORT="$4" PASEO_BIN="$5" BACKEND_PORT="$6" \
-        PY="$7" PID_GUARD="$8"
+        PY="$7" PID_GUARD="$8" MEMMAX="$9" MEMHIGH="${10}" TASKSMAX="${11}"
   cat <<UNITEOF
 [Unit]
 Description=airlock-paseo — Paseo daemon (coding-agent orchestration + web UI) behind the owner gate
@@ -76,9 +80,29 @@ ExecStart=${PASEO_BIN} daemon start --foreground --no-relay --web-ui --listen 12
 # be command substitution — the comment would RUN at install time and vanish.)
 Restart=always
 RestartSec=3
-# Backstop only (idle ~440M; runaway multi-session could OOM — watch in prod).
-MemoryMax=8G
-TasksMax=1024
+# Backstop, not a reservation (idle ~440M). Sized from the box's RAM by the
+# installer: MemoryMax = total - max(4GiB, 15%), so a runaway multi-session tree
+# cannot take the machine down with it.
+#
+# MemoryHigh (~89% of max) is the part that matters in practice. MemoryMax alone
+# is a cliff: the cgroup runs flat out to the ceiling and then the allocation is
+# refused, and each runtime dies its own way there (node=SIGABRT, chrome=SIGTRAP,
+# python=SIGSEGV) with no warning first. MemoryHigh does not refuse — it forces
+# reclaim and throttles, so the result is a slowdown instead of a crash, and the
+# 'high' counter in memory.events becomes an early signal. Measured on a box that
+# had max but no high: high 1,886,403 / max 27,479 / oom_kill 0 — the kernel never
+# killed anything, the sessions just got strangled and timed out. Read the counters
+# with: cat /sys/fs/cgroup/user.slice/user-\$(id -u).slice/user@\$(id -u).service/\\
+#       app.slice/airlock-paseo.service/memory.events
+# 'high' climbing is by design; 'max' climbing means the box is too small.
+# Keep high < max — above max it is inert.
+MemoryMax=${MEMMAX}
+MemoryHigh=${MEMHIGH}
+# Agent trees fork wide (a CLI plus its children per session, times N sessions).
+# 1024 was a real ceiling on a busy box: pids.events 'max' climbs, fork() starts
+# failing, and it surfaces as unrelated-looking tool errors rather than as a
+# resource limit. This is a backstop, not a reservation, so it is cheap to raise.
+TasksMax=${TASKSMAX}
 NoNewPrivileges=yes
 
 [Install]

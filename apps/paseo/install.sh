@@ -68,6 +68,30 @@ CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 BROWSE="${AIRLOCK_PASEO_BROWSE:-false}"
 BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
 
+# ---- Resource backstop, sized from this box's RAM ----
+# The unit used to carry a flat MemoryMax=8G with no MemoryHigh. On a big box that
+# is a silent ceiling (sessions die at 8G on a 32GiB machine); on a small one the
+# same number is most of the machine. Derive it instead: cgroup memory.max first
+# (a container's own limit — /proc/meminfo leaks the host's total inside LXC and
+# would over-size the cap), MemTotal as the fallback.
+# Reserve = max(4GiB, 15%) for the OS and every other app on the box; MemoryHigh
+# = ~89% of max so there is a throttle band below the cliff (see render.sh).
+# AIRLOCK_PASEO_MEM_CAP_BYTES is a test seam (install/test-render-parity.sh pins
+# it so the golden does not bake in the RAM of whichever box ran the suite). It is
+# not a supported knob — the point of this block is that no box has to be told.
+_cap="${AIRLOCK_PASEO_MEM_CAP_BYTES:-$(cat /sys/fs/cgroup/memory.max 2>/dev/null || true)}"
+case "$_cap" in ''|max|*[!0-9]*) _cap=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) * 1024 )) ;; esac
+_cap_gib=$(( _cap / 1024 / 1024 / 1024 ))
+_reserve_gib=$(( (_cap_gib * 15 + 99) / 100 ))
+[ "$_reserve_gib" -lt 4 ] && _reserve_gib=4
+_memmax_gib=$(( _cap_gib - _reserve_gib ))
+[ "$_memmax_gib" -lt 2 ] && _memmax_gib=2
+_memhigh_gib=$(( _memmax_gib * 8 / 9 ))
+[ "$_memhigh_gib" -lt 1 ] && _memhigh_gib=1
+PASEO_MEMMAX="${_memmax_gib}G"
+PASEO_MEMHIGH="${_memhigh_gib}G"
+PASEO_TASKSMAX=24576
+
 PASEO_PKG="@getpaseo/cli"
 # Version PIN — do NOT track latest. paseo is pre-1.0; a floating install would
 # drift the web-ui bundle and the depth4 anchor out from under us.
@@ -269,7 +293,7 @@ fi
 # in-flight spawn finishing late — starts a REPLACEMENT process on a session nothing
 # will ever close again. It then runs until the box is rebooted, and close() reports
 # success because at that instant there genuinely was nothing to kill. Measured on
-# josh-dev 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
+# Pilot box 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
 # The patch makes ownership a Set (so a replaced handle is still terminated), gates
 # both spawn entry points on the closed flag, terminates late arrivals on the spot,
 # and warns at level 40 — the surrounding session_close lines are logger.trace, which
@@ -324,7 +348,7 @@ fi
 # the leader's MCP children have been reparented, so a ppid-walking tree-kill can no
 # longer find them. They survive as orphans.
 # A process group outlives its leader, so killing the GROUP reaches them. Controlled
-# experiment (josh-dev 2026-08-06): detached=false -> grandchild orphaned and
+# experiment (pilot box, 2026-08-06): detached=false -> grandchild orphaned and
 # kill(-pid) returns ESRCH (harmless); detached=true -> kill(-pgid) kills it. In both
 # cases the child stays in swk-paseo.service's cgroup, so KillMode=control-group still
 # sweeps everything on restart. codex already spawns its app-server detached upstream
@@ -400,7 +424,7 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
 else
   install -d "$UNIT_DIR"
   if render_paseo_unit "$UNIT_PATH" "$HOME" "$FQDN" "$HTTPS_PORT" "$PASEO_BIN" "$BACKEND_PORT" \
-       "$PY" "$STALE_PID_GUARD" \
+       "$PY" "$STALE_PID_GUARD" "$PASEO_MEMMAX" "$PASEO_MEMHIGH" "$PASEO_TASKSMAX" \
      | write_if_changed "$UNIT"
   then need_restart=1; fi
 fi

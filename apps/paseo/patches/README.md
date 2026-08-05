@@ -46,7 +46,7 @@ the MIT license that covers the rest of Airlock.
   success because at that instant there was genuinely nothing to kill, and the
   surrounding `session_close.start/complete` lines are `logger.trace`, which the
   daemon's info-level logger never emits — so the whole class of leak was unobservable.
-  Measured on josh-dev 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
+  Measured on the pilot box 2026-08-05: 18 orphans, 2.9G RSS + 1.9G swap.
   The patch makes ownership a `Set` (a replaced handle is still terminated), gates both
   spawn entry points, terminates a late arrival on the spot instead of storing it, and
   `logger.warn`s every branch that used to be silent. Two independent targets, one
@@ -63,7 +63,7 @@ the MIT license that covers the rest of Airlock.
   terminate it, `terminateWithTreeKill` returns `"already-exited"` and stops — and by then
   the leader's MCP children have been reparented, so a ppid-walking tree-kill can no longer
   find them; they survive as orphans. A **process group outlives its leader**, so killing
-  the group reaches them. Controlled experiment (josh-dev 2026-08-06):
+  the group reaches them. Controlled experiment (pilot box, 2026-08-06):
 
   | spawn | pgid | leader kill | `kill(-pid)` |
   |---|---|---|---|

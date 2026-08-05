@@ -11,13 +11,13 @@
 // when the agent LEADER exits before we terminate it, `terminateWithTreeKill`
 // returns "already-exited" and stops — and by then the leader's MCP children have
 // been reparented away, so a ppid-walking tree-kill can no longer find them. They
-// survive as orphans. Measured on josh-dev 2026-08-05/06.
+// survive as orphans. Measured on the pilot box 2026-08-05/06.
 //
 // Fix: give the leader its own PROCESS GROUP and kill the group, not the tree.
 // A process group outlives its leader, so `kill(-pgid)` reaches the descendants
 // even though the ppid chain is gone.
 //
-// Verified by controlled experiment (2026-08-06, josh-dev):
+// Verified by controlled experiment (2026-08-06, pilot box):
 //
 //   detached=false  pgid != pid   leader kill -> grandchild ORPHANED
 //                                 kill(-pid) -> ESRCH (no such group; harmless)
