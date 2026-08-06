@@ -82,7 +82,12 @@
   }
   function requestClose() {
     // The parent owns the modal. Standalone (no parent) there is nothing to close.
-    if (window.parent && window.parent !== window) window.parent.postMessage('swk-panel-close', '*');
+    if (!window.parent || window.parent === window) return;
+    // Both spellings for one release (2026-08-07 rename): the parent may be an
+    // out-of-tree frontend still listening for the old name, and our own listener
+    // ignores the second message once the modal is gone.
+    window.parent.postMessage('airlock-panel-close', '*');
+    window.parent.postMessage('swk-panel-close', '*');
   }
   document.getElementById('closeBtn').addEventListener('click', requestClose);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') requestClose(); });
