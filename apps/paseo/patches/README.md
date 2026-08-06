@@ -70,7 +70,7 @@ the MIT license that covers the rest of Airlock.
   | `detached: false` | ≠ pid | grandchild orphaned | **ESRCH** (no such group — harmless) |
   | `detached: true` | = pid | grandchild orphaned | grandchild **dies** ✅ |
 
-  In both cases the child stays in `swk-paseo.service`'s cgroup, so `KillMode=control-group`
+  In both cases the child stays in `airlock-paseo.service`'s cgroup, so `KillMode=control-group`
   still sweeps everything on daemon restart — `detached` does not escape the cgroup. That
   ESRCH result is what makes the sweep safe if the spawn edit ever fails to apply: a group id
   *is* its leader's pid, so `kill(-pid)` can only reach the group led by that same process.

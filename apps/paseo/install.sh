@@ -350,7 +350,7 @@ fi
 # A process group outlives its leader, so killing the GROUP reaches them. Controlled
 # experiment (pilot box, 2026-08-06): detached=false -> grandchild orphaned and
 # kill(-pid) returns ESRCH (harmless); detached=true -> kill(-pgid) kills it. In both
-# cases the child stays in swk-paseo.service's cgroup, so KillMode=control-group still
+# cases the child stays in airlock-paseo.service's cgroup, so KillMode=control-group still
 # sweeps everything on restart. codex already spawns its app-server detached upstream
 # and merely never killed the group; claude needed both halves.
 # 🔴 This must run AFTER 2e: its claude-agent anchors are text 2e introduces. If 2e was

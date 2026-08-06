@@ -23,7 +23,7 @@
 //                                 kill(-pid) -> ESRCH (no such group; harmless)
 //   detached=true   pgid == pid   leader kill -> grandchild orphaned
 //                                 kill(-pgid) -> grandchild DIES
-//   both cases      child cgroup == swk-paseo.service  (detached does NOT escape
+//   both cases      child cgroup == airlock-paseo.service  (detached does NOT escape
 //                   the cgroup, so `KillMode=control-group` still sweeps on restart)
 //
 // The ESRCH result is what makes the kill safe when the spawn edit did not apply:
