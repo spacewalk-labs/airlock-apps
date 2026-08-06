@@ -170,6 +170,7 @@ def init_db(path):
         conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('PRAGMA busy_timeout=5000')
         conn.executescript(_SCHEMA)
+        _ensure_run_lifecycle_columns(conn)
         conn.commit()
     finally:
         conn.close()
@@ -178,6 +179,19 @@ def init_db(path):
         os.chmod(path, 0o600)
     except OSError:
         pass
+
+
+def _ensure_run_lifecycle_columns(conn):
+    """Apply the run-lifecycle columns to databases created before retention existed."""
+    columns = {row[1] for row in conn.execute('PRAGMA table_info(runs)').fetchall()}
+    additions = (
+        ('keep_requested', 'INTEGER NOT NULL DEFAULT 0'),
+        ('kept_at', 'TEXT'),
+        ('reclaimed_at', 'TEXT'),
+    )
+    for name, definition in additions:
+        if name not in columns:
+            conn.execute('ALTER TABLE runs ADD COLUMN %s %s' % (name, definition))
 
 
 def _conn():
@@ -240,7 +254,10 @@ CREATE TABLE IF NOT EXISTS runs (
   error       TEXT,
   created_at  TEXT NOT NULL,
   started_at  TEXT,
-  ended_at    TEXT
+  ended_at    TEXT,
+  keep_requested INTEGER NOT NULL DEFAULT 0,
+  kept_at     TEXT,
+  reclaimed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_card ON runs(card_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
@@ -472,8 +489,11 @@ def undismiss(card_id):
 
 # ---- queries ----
 def _card_to_dict(row):
+    result_prefix = 'devmon:run-result:'
+    group_key = row['group_key']
+    result_run_id = group_key[len(result_prefix):] if group_key.startswith(result_prefix) else None
     return {
-        'card_id': row['card_id'], 'group_key': row['group_key'], 'source': row['source'],
+        'card_id': row['card_id'], 'group_key': group_key, 'source': row['source'],
         'kind': row['kind'], 'urgency': row['urgency'], 'title': row['title'],
         'body': row['body'],
         'action': json.loads(row['action_json']) if row['action_json'] else None,
@@ -482,7 +502,7 @@ def _card_to_dict(row):
         'read_at': row['read_at'], 'slack_sent_at': row['slack_sent_at'],
         'pinned': bool(row['pinned']), 'archived': row['archived_at'] is not None,
         'occurrence_count': row['occurrence_count'], 'last_seen': row['last_seen'],
-        'run_id': row['run_id'],
+        'run_id': row['run_id'], 'result_run_id': result_run_id,
     }
 
 
@@ -556,11 +576,15 @@ def sweep():
                              (iso(now), r['card_id']))
                 _audit(conn, 'archive', None, r['card_id'], 'sweep')
         # 2) 180d hard purge, including the card's execution/approval/delivery ledgers so the
-        #    original plan does not persist forever (#7). Exclude cards with an active run_id:
-        #    deleting the DB record while tmux lives would be destructive over-deletion (#7 regression).
+        #    original plan does not persist forever (#7). Exclude cards with an active run_id,
+        #    a kept run, or any terminal run that still has a tmux target: deleting the DB record
+        #    while the pane lives would make later generation-aware reclamation impossible.
         old = iso(now - RETENTION)
-        purged = conn.execute('SELECT card_id FROM cards WHERE received_at<=? AND run_id IS NULL',
-                             (old,)).fetchall()
+        purged = conn.execute(
+            'SELECT card_id FROM cards WHERE received_at<=? AND run_id IS NULL '
+            'AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.card_id=cards.card_id '
+            'AND r.reclaimed_at IS NULL AND (r.keep_requested=1 OR r.tmux_target IS NOT NULL))',
+            (old,)).fetchall()
         for r in purged:
             cid = r['card_id']
             conn.execute('DELETE FROM occurrences WHERE card_id=?', (cid,))
@@ -583,6 +607,7 @@ def sweep():
 # ============================================================
 RUN_ACTIVE = ('starting', 'running')
 RUN_TERMINAL = ('done', 'failed', 'stopped', 'interrupted')
+RUN_KEEPABLE = RUN_ACTIVE + RUN_TERMINAL
 
 
 def canonical_plan(card_row, exec_cfg):
@@ -768,8 +793,8 @@ def _emit_run_result(run_id, status, exit_code, card_title):
         'kind': 'info',
         'urgency': 'normal',
         'title': title,
-        'body': 'Run %s%s. The run window (tmux) is still open; you can keep watching it in devterm.'
-                % (label, rc),
+        'body': 'Run %s%s. The run window (tmux) is still open for 24 hours after turn end; '
+                'use Keep if you want it indefinitely.' % (label, rc),
         'outcome': '%s%s' % (label, rc),
         'why_it_matters': 'This is the result of the work you approved and ran; use it to decide whether to keep watching it or run it again.',
         'followup': 'Open the run window (%s) in devterm and check its output.' % run_window_name(run_id),
@@ -820,6 +845,62 @@ def run_fail(run_id, error):
 def run_stop(run_id):
     """Owner stop -> stopped. -> (changed, tmux_target); the caller kills target."""
     return _run_terminate(run_id, 'stopped')
+
+
+def run_keep(run_id):
+    """Record the owner's explicit request to retain a run window indefinitely.
+
+    Keep is allowed while a run is active as well as after turn completion, so an owner can
+    make the decision before stepping away. It is intentionally one-way: this operation is an
+    exemption from automatic reclamation, not another timer to manage.
+    -> (ok, error), where an already-kept run is an idempotent success.
+    """
+    conn = _conn()
+    with conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute(
+            'SELECT status, keep_requested, kept_at, reclaimed_at FROM runs WHERE run_id=?',
+            (run_id,)).fetchone()
+        if row is None:
+            return (False, 'not_found')
+        if row['reclaimed_at'] is not None:
+            return (False, 'already_reclaimed')
+        if row['status'] not in RUN_KEEPABLE:
+            return (False, 'not_keepable')
+        if row['keep_requested']:
+            return (True, None)
+        now = iso(now_utc())
+        conn.execute('UPDATE runs SET keep_requested=1, kept_at=? WHERE run_id=?',
+                     (now, run_id))
+        _audit(conn, 'run_keep', None, None, run_id)
+    return (True, None)
+
+
+def reclaimable_runs():
+    """Return terminal runs whose windows may still be reclaimed by the backend reaper."""
+    rows = _conn().execute(
+        'SELECT * FROM runs WHERE status IN (\'done\', \'failed\', \'stopped\', \'interrupted\') '
+        'AND ended_at IS NOT NULL AND keep_requested=0 AND reclaimed_at IS NULL'
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def run_mark_reclaimed(run_id, reason='retention'):
+    """Record that external cleanup of a terminal run completed successfully."""
+    conn = _conn()
+    with conn:
+        conn.execute('BEGIN IMMEDIATE')
+        row = conn.execute(
+            'SELECT card_id, status, keep_requested, reclaimed_at FROM runs WHERE run_id=?',
+            (run_id,)).fetchone()
+        if (row is None or row['status'] not in RUN_TERMINAL or row['keep_requested']
+                or row['reclaimed_at'] is not None):
+            return False
+        conn.execute('UPDATE runs SET reclaimed_at=? WHERE run_id=?',
+                     (iso(now_utc()), run_id))
+        _audit(conn, 'run_reclaimed', None, row['card_id'],
+               '%s: %s' % (reason, run_id))
+    return True
 
 
 def run_window_name(run_id):
@@ -942,6 +1023,8 @@ def _run_to_dict(r):
     return {'run_id': r['run_id'], 'card_id': r['card_id'], 'status': r['status'],
             'exit_code': r['exit_code'], 'error': r['error'], 'tmux_target': r['tmux_target'],
             'created_at': r['created_at'], 'started_at': r['started_at'], 'ended_at': r['ended_at'],
+            'keep': bool(r['keep_requested']), 'kept_at': r['kept_at'],
+            'reclaimed_at': r['reclaimed_at'],
             'plan': json.loads(r['plan_json'])}
 
 

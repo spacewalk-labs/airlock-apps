@@ -12,7 +12,9 @@ Contract (why this way):
     Gate = owner access + click.
   - On exit, it leaves a sentinel using **fsync + rename** (atomic) → the backend watcher decides
     done/failed. After leaving the sentinel, it execs into a login shell → the pane stays alive so
-    the owner can inspect the result and do follow-up work.
+    the owner can inspect the result and do follow-up work. The backend retains a completed Claude
+    pane for 24 hours after turn end, unless the owner explicitly chooses Keep, then reclaims the
+    pane and this run's sentinel files together.
   - 🔴 **claude does not exit even when the work is done** (interactive REPL — it waits at the
     prompt when a turn ends). If we wait only for "process exit", the run stays `running` forever
     and the card remains locked (observed 2026-07-30: still `running` 43 minutes after completion).
@@ -111,6 +113,33 @@ def turnend_paths(sentinel_dir, run_id):
     """(marker, settings file) — keep both inside sentinel_dir (0700, owner-only)."""
     return (os.path.join(sentinel_dir, run_id + '.turnend'),
             os.path.join(sentinel_dir, run_id + '.settings.json'))
+
+
+RUN_SENTINEL_SUFFIXES = ('.done', '.tmp', '.turnend', '.settings.json', '.settings.json.tmp')
+
+
+def run_sentinel_paths(sentinel_dir, run_id):
+    """Return every temporary or completion file owned by one run."""
+    return tuple(os.path.join(sentinel_dir, run_id + suffix)
+                 for suffix in RUN_SENTINEL_SUFFIXES)
+
+
+def cleanup_run_sentinels(sentinel_dir, run_id):
+    """Remove one run's sentinel files and return any removal failures.
+
+    This is deliberately scoped to the exact run id. The lifecycle reaper calls it after
+    killing the run's tmux window so a forced close cannot leave the turn-end settings file
+    behind forever.
+    """
+    failures = []
+    for path in run_sentinel_paths(sentinel_dir, run_id):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            failures.append((path, exc))
+    return failures
 
 
 def write_turnend_settings(sentinel_dir, run_id):

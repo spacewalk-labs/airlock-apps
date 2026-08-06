@@ -379,6 +379,7 @@
     <div class="runview-terminal" id="runview-terminal"></div>
     <div class="sheet-actions">
       <button class="mbtn" id="runview-pop" type="button" disabled>Open terminal ↗</button>
+      <button class="mbtn" id="runview-keep" type="button" disabled>Keep window</button>
       <button class="mbtn" id="runview-stop" type="button">Stop</button>
       <button class="mbtn" id="runview-close" type="button">Close</button>
     </div>
@@ -776,10 +777,11 @@
     if (message.occurrence_count > 1) meta.appendChild(msgEl('span', null, 'x' + message.occurrence_count));
     meta.appendChild(msgEl('span', 'mstatus', message.read_at ? 'Read' : 'Unread'));
     main.appendChild(meta);
-    if (message.run_id) {
-      var status = msgEl('button', 'mrun', 'Action running — view status');
+    var statusRunId = message.run_id || message.result_run_id;
+    if (statusRunId) {
+      var status = msgEl('button', 'mrun', message.run_id ? 'Action running — view status' : 'Action completed — view status');
       status.type = 'button';
-      status.addEventListener('click', function () { openRunView(message.run_id, message.title); });
+      status.addEventListener('click', function () { openRunView(statusRunId, message.title); });
       main.appendChild(status);
     }
     card.appendChild(main);
@@ -791,6 +793,17 @@
         stopRun(message.run_id, function (text, ok) { msgToast(text); if (!ok) stop.disabled = false; });
       });
       actions.appendChild(stop);
+    } else if (message.result_run_id) {
+      var keep = msgEl('button', 'mbtn', 'Keep window'); keep.type = 'button';
+      keep.addEventListener('click', function () {
+        keep.disabled = true;
+        keepRun(message.result_run_id, function (text, ok) {
+          keep.textContent = ok ? 'Kept' : 'Keep window';
+          if (!ok) keep.disabled = false;
+          msgToast(text);
+        });
+      });
+      actions.appendChild(keep);
     } else if (message.kind === 'action') {
       var run = msgEl('button', 'mbtn primary', 'Run'); run.type = 'button';
       run.addEventListener('click', function () { openExecSheet(message); });
@@ -948,6 +961,8 @@
     clearTimeout(runView.retry);
     document.getElementById('runview-terminal').textContent = '';
     document.getElementById('runview-pop').disabled = true;
+    document.getElementById('runview-keep').disabled = true;
+    document.getElementById('runview-keep').textContent = 'Keep window';
     runView = { runId: null, poll: null, retry: null, terminalUrl: null, finished: null };
   }
   function renderRunStatus(run) {
@@ -956,6 +971,8 @@
     body.appendChild(planLine('Status:', RUN_STATE_LABEL[run.status] || run.status));
     if (run.exit_code != null) body.appendChild(planLine('Exit code:', run.exit_code));
     if (run.error) body.appendChild(planLine('Error:', run.error));
+    if (run.reclaimed_at) body.appendChild(planLine('Reclaimed:', run.reclaimed_at + ' (24-hour retention expired)'));
+    else if (run.keep) body.appendChild(planLine('Retention:', 'Kept indefinitely by owner'));
     if (run.plan) {
       if (run.plan.cwd) body.appendChild(planLine('Working directory:', run.plan.cwd));
       if (run.plan.exec) body.appendChild(planLine('Command:', showArgv(run.plan.exec)));
@@ -964,6 +981,9 @@
     }
     var active = run.status === 'starting' || run.status === 'running';
     document.getElementById('runview-stop').disabled = !active;
+    var keepButton = document.getElementById('runview-keep');
+    keepButton.disabled = !!run.keep || !!run.reclaimed_at;
+    keepButton.textContent = run.keep ? 'Kept' : 'Keep window';
   }
   function pollRunStatus(runId) {
     return ownerFetch('/runs/' + encodeURIComponent(runId)).then(ownerResponse).then(function (res) {
@@ -1067,6 +1087,15 @@
         pollRunStatus(runId); loadMessages();
       }).catch(function (error) { report('Stop error: ' + error.message, false); });
   }
+  function keepRun(runId, report) {
+    return ownerFetch('/runs/' + encodeURIComponent(runId) + '/keep', { method: 'POST' }).then(ownerResponse)
+      .then(function (res) {
+        if (res.status === 403) { disableMessages(403); report('Could not keep the action window.', false); return; }
+        if (!res.ok || !res.data.ok) { report('Could not keep the action window: ' + (res.data.error || res.status), false); return; }
+        report('Action window kept indefinitely.', true);
+        pollRunStatus(runId); loadMessages();
+      }).catch(function (error) { report('Keep error: ' + error.message, false); });
+  }
   document.getElementById('runview-close').addEventListener('click', closeRunView);
   document.getElementById('runview-pop').addEventListener('click', function () {
     if (!runView.terminalUrl) return;
@@ -1079,6 +1108,14 @@
     if (!runView.runId) return;
     var button = this; button.disabled = true;
     stopRun(runView.runId, function (text, ok) { if (!ok) button.disabled = false; msgToast(text); });
+  });
+  document.getElementById('runview-keep').addEventListener('click', function () {
+    if (!runView.runId) return;
+    var button = this; button.disabled = true;
+    keepRun(runView.runId, function (text, ok) {
+      if (!ok) button.disabled = false;
+      msgToast(text);
+    });
   });
   document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && runView.runId) closeRunView(); });
 

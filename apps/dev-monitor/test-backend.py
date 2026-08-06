@@ -11,16 +11,19 @@ a card forever. Those are exactly the places a bug is invisible until someone is
 No install, no network, no tmux required.
 """
 import importlib.util
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND = os.path.join(HERE, 'backend')
 sys.path.insert(0, BACKEND)
+import action_runner
 
 
 def _load_backend():
@@ -222,6 +225,88 @@ class StuckLaunchTest(_ExecBase):
         card_id, run_id = self._approved_run(age_seconds=DM.STARTING_GRACE_S + 60)
         self._reap(live_names=None, session_present=True)
         self.assertEqual(MSG.get_run(run_id)['status'], 'starting')
+
+
+class CompletedRunLifecycleTest(_ExecBase):
+    """The completed Claude pane is retained for 24h, then all of its resources leave together."""
+
+    def _completed_run(self, target='p1:@1', age_seconds=None, exec_plan=False):
+        card_id, run_id = self._approved_run()
+        MSG.run_mark_running(run_id, target)
+        if exec_plan:
+            conn = MSG._conn()
+            conn.execute('UPDATE runs SET plan_json=? WHERE run_id=?',
+                         (json.dumps({'cwd': self.cwd, 'exec': ['/bin/true']}), run_id))
+            conn.commit()
+        MSG.run_finish(run_id, 0)
+        now = MSG.now_utc()
+        if age_seconds is not None:
+            ended = MSG.iso(now - timedelta(seconds=age_seconds))
+            conn = MSG._conn()
+            conn.execute('UPDATE runs SET ended_at=? WHERE run_id=?', (ended, run_id))
+            conn.commit()
+        return card_id, run_id, target, now
+
+    def _sentinels(self, run_id):
+        paths = action_runner.run_sentinel_paths(DM.EXEC_CONFIG['sentinel_dir'], run_id)
+        for path in paths:
+            with open(path, 'w') as fh:
+                fh.write('owned by this run')
+        return paths
+
+    def _reap(self, alive, now):
+        calls = []
+        saved = DM._tmux
+        try:
+            DM._tmux = lambda *args, **kwargs: calls.append(args) or ''
+            with redirect_stderr(io.StringIO()) as err:
+                DM._reap_completed_runs(alive, now=now)
+            return calls, err.getvalue()
+        finally:
+            DM._tmux = saved
+
+    def test_expired_run_reclaims_process_window_and_sentinels_together(self):
+        _, run_id, target, now = self._completed_run(
+            age_seconds=DM.RUN_RETENTION_S)
+        paths = self._sentinels(run_id)
+        calls, log = self._reap({target}, now)
+        self.assertEqual(calls, [('kill-window', '-t', '@1')])
+        self.assertTrue(MSG.get_run(run_id)['reclaimed_at'])
+        self.assertTrue(all(not os.path.exists(path) for path in paths))
+        self.assertIn('reclaimed expired run=' + run_id, log)
+        self.assertIn('reason=turn ended more than 24h ago', log)
+        self.assertIn('process=tmux-pane', log)
+        self.assertIn('sentinels=removed', log)
+
+    def test_run_inside_24_hours_is_not_reclaimed(self):
+        _, run_id, target, now = self._completed_run(
+            age_seconds=DM.RUN_RETENTION_S - 1)
+        paths = self._sentinels(run_id)
+        calls, _ = self._reap({target}, now)
+        self.assertEqual(calls, [])
+        self.assertIsNone(MSG.get_run(run_id)['reclaimed_at'])
+        self.assertTrue(all(os.path.exists(path) for path in paths))
+
+    def test_keep_exempts_an_expired_run(self):
+        _, run_id, target, now = self._completed_run(
+            age_seconds=DM.RUN_RETENTION_S + 1)
+        paths = self._sentinels(run_id)
+        self.assertEqual(MSG.run_keep(run_id), (True, None))
+        calls, _ = self._reap({target}, now)
+        self.assertEqual(calls, [])
+        run = MSG.get_run(run_id)
+        self.assertTrue(run['keep'])
+        self.assertIsNone(run['reclaimed_at'])
+        self.assertTrue(all(os.path.exists(path) for path in paths))
+
+    def test_exec_plan_is_outside_claude_retention_reaper(self):
+        _, run_id, target, now = self._completed_run(
+            age_seconds=DM.RUN_RETENTION_S + 1, exec_plan=True)
+        paths = self._sentinels(run_id)
+        calls, _ = self._reap({target}, now)
+        self.assertEqual(calls, [])
+        self.assertIsNone(MSG.get_run(run_id)['reclaimed_at'])
+        self.assertTrue(all(os.path.exists(path) for path in paths))
 
 
 class PlanFileTest(_ExecBase):

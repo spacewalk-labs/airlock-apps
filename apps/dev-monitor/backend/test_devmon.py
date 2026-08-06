@@ -10,6 +10,7 @@ import json
 import os
 import re
 import stat
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -323,6 +324,22 @@ class TestSweep(unittest.TestCase):
     def setUp(self):
         fresh_db()
 
+    def test_old_run_schema_gets_lifecycle_columns(self):
+        fd, path = tempfile.mkstemp(suffix='.db')
+        os.close(fd)
+        c = sqlite3.connect(path)
+        c.execute(
+            'CREATE TABLE runs (run_id TEXT PRIMARY KEY, card_id TEXT NOT NULL, '
+            'plan_sha256 TEXT NOT NULL, plan_json TEXT NOT NULL, status TEXT NOT NULL, '
+            'tmux_target TEXT, exit_code INTEGER, error TEXT, created_at TEXT NOT NULL, '
+            'started_at TEXT, ended_at TEXT)')
+        c.commit()
+        c.close()
+        MSG._local = threading.local()
+        MSG.init_db(path)
+        columns = {row[1] for row in MSG._conn().execute('PRAGMA table_info(runs)').fetchall()}
+        self.assertTrue({'keep_requested', 'kept_at', 'reclaimed_at'} <= columns)
+
     def test_purge_180d(self):
         MSG.ingest(msg(event_id='old', group_key='g'))
         old = MSG.iso(MSG.now_utc() - timedelta(days=200))
@@ -369,6 +386,51 @@ class TestSweep(unittest.TestCase):
         c.commit()
         MSG.sweep()
         self.assertEqual(c.execute('SELECT COUNT(*) FROM cards').fetchone()[0], 1)  # not deleted
+
+    def test_purge_skips_card_with_kept_run(self):
+        # A kept window may outlive the normal card retention, so its run record must not be
+        # purged while the reaper still needs the Keep exemption.
+        tmp = tempfile.mkdtemp()
+        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}
+        p = {'schema_version': 1, 'event_id': 'kept', 'group_key': 'kept', 'source': 's',
+             'kind': 'action', 'urgency': 'normal', 'title': 'T',
+             'created_at': MSG.iso(MSG.now_utc()),
+             'recommended_action': {'cwd': tmp, 'prompt': 'p', 'explain': 'w'}}
+        MSG.ingest(p)
+        appr = MSG.issue_approval('kept', cfg)
+        res = MSG.redeem_approval('kept', appr['nonce'], cfg)
+        MSG.run_finish(res['run_id'], 0)
+        self.assertEqual(MSG.run_keep(res['run_id']), (True, None))
+        c = MSG._conn()
+        c.execute('UPDATE cards SET received_at=?',
+                  (MSG.iso(MSG.now_utc() - timedelta(days=200)),))
+        c.commit()
+        MSG.sweep()
+        self.assertEqual(c.execute('SELECT COUNT(*) FROM cards').fetchone()[0], 1)
+        self.assertEqual(c.execute('SELECT COUNT(*) FROM runs').fetchone()[0], 1)
+
+    def test_purge_skips_unreclaimed_terminal_target(self):
+        # If the monitor was down when the 24h reaper should have run, retain the target record
+        # so a later sweep can still kill the correct generation instead of orphaning the pane.
+        tmp = tempfile.mkdtemp()
+        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}
+        p = {'schema_version': 1, 'event_id': 'targeted', 'group_key': 'targeted', 'source': 's',
+             'kind': 'action', 'urgency': 'normal', 'title': 'T',
+             'created_at': MSG.iso(MSG.now_utc()),
+             'recommended_action': {'cwd': tmp, 'prompt': 'p', 'explain': 'w'}}
+        MSG.ingest(p)
+        appr = MSG.issue_approval('targeted', cfg)
+        res = MSG.redeem_approval('targeted', appr['nonce'], cfg)
+        MSG.run_mark_running(res['run_id'], 'p1:@1')
+        MSG.run_finish(res['run_id'], 0)
+        c = MSG._conn()
+        c.execute('UPDATE cards SET received_at=? WHERE card_id=?',
+                  (MSG.iso(MSG.now_utc() - timedelta(days=200)), 'targeted'))
+        c.commit()
+        MSG.sweep()
+        self.assertIsNotNone(c.execute('SELECT card_id FROM cards WHERE card_id=?',
+                                       ('targeted',)).fetchone())
+        self.assertIsNotNone(MSG.get_run(res['run_id']))
         self.assertEqual(c.execute('SELECT COUNT(*) FROM runs').fetchone()[0], 1)
 
     def test_archive_only_excess_and_not_pinned(self):
@@ -656,6 +718,16 @@ class TestExec(unittest.TestCase):
         self.assertEqual(target, '@7')
         self.assertEqual(MSG.get_run(res['run_id'])['status'], 'stopped')
 
+    def test_run_keep_is_persistent_and_idempotent(self):
+        cid = self._action()
+        appr = MSG.issue_approval(cid, self.cfg)
+        res = MSG.redeem_approval(cid, appr['nonce'], self.cfg)
+        self.assertEqual(MSG.run_keep(res['run_id']), (True, None))
+        MSG.run_finish(res['run_id'], 0)
+        self.assertTrue(MSG.get_run(res['run_id'])['keep'])
+        self.assertEqual(MSG.run_keep(res['run_id']), (True, None))
+        self.assertEqual(MSG.reclaimable_runs(), [])
+
     # ---- terminal notification cards (so results are not missed when the modal is closed) ----
     def _result_cards(self):
         return [c for c in MSG.feed('active')['messages']
@@ -671,6 +743,7 @@ class TestExec(unittest.TestCase):
         self.assertIn('✅ Run completed', cards[0]['title'])
         self.assertEqual(cards[0]['kind'], 'info')
         self.assertIn('rc=0', cards[0]['body'])
+        self.assertEqual(cards[0]['result_run_id'], res['run_id'])
 
     def test_run_failed_emits_result_card_with_rc(self):
         cid = self._action()

@@ -30,12 +30,14 @@ try:
     import devmon_spool
     import devmon_owner
     import devmon_slack
+    import action_runner
     _MESSAGES_AVAILABLE = True
 except ImportError:
     MSG = None
     devmon_spool = None
     devmon_owner = None
     devmon_slack = None
+    action_runner = None
     _MESSAGES_AVAILABLE = False
 
 PORT = int(os.environ.get('AIRLOCK_DEV_MONITOR_BACKEND_PORT', '18804'))
@@ -62,6 +64,9 @@ _TMUX_LOCK = threading.Lock()
 # How long a run may sit in 'starting' with no window of its own name before the
 # reaper calls it a failed launch. Only has to outlast one _launch_run under the lock.
 STARTING_GRACE_S = 120
+# A completed Claude run is useful for one day after its turn ends. This is a product
+# retention rule, not an environment/configuration knob.
+RUN_RETENTION_S = 24 * 60 * 60
 
 # History sampling — record cpu%/mem% every minute, summarize into 1h/1d/7d
 # averages (ring buffer + a persistent CSV under XDG data home, never /tmp).
@@ -801,6 +806,9 @@ class Handler(BaseHTTPRequestHandler):
                 })
                 return
         if len(parts) == 6 and parts[:4] == ['', 'api', 'owner', 'runs']:
+            if parts[5] == 'keep':
+                self._owner_keep(self._seg(parts[4]))
+                return
             if parts[5] == 'stop':
                 self._owner_stop(self._seg(parts[4]))
                 return
@@ -902,6 +910,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         changed, _ = MSG.run_stop(run_id)
         self._json(200 if changed else 409, {'ok': bool(changed), 'run_id': run_id})
+
+    def _owner_keep(self, run_id):
+        """Persist an owner's Keep choice under the same lock as tmux lifecycle changes."""
+        with _TMUX_LOCK:
+            ok, error = MSG.run_keep(run_id)
+        if ok:
+            self._json(200, {'ok': True, 'run_id': run_id, 'keep': True})
+            return
+        status = 404 if error == 'not_found' else 409
+        self._json(status, {'ok': False, 'run_id': run_id, 'error': error})
 
     def log_message(self, fmt, *args):
         sys.stderr.write(f'[airlock-dev-monitor] {self.address_string()} - {fmt % args}\n')
@@ -1100,6 +1118,83 @@ def _reap_stuck_starting(session):
         sys.stderr.write(f"[reaper] released stuck run={run['run_id']} (no window was ever created)\n")
 
 
+def _is_claude_run(run):
+    """Return whether a run used the interactive Claude path rather than direct exec."""
+    try:
+        plan = json.loads(run.get('plan_json') or '{}')
+    except (TypeError, ValueError):
+        # A malformed historical plan must not become an immortal process/window.
+        return True
+    return not (isinstance(plan.get('exec'), list) and plan['exec'])
+
+
+def _reap_completed_runs(alive_ids, now=None):
+    """Reclaim expired Claude runs as one process/window/sentinel lifecycle.
+
+    ``now`` is an intentionally narrow test seam so the 24-hour boundary can be asserted
+    without sleeping; it is not a supported retention override or configuration knob.
+    """
+    if not EXEC_CONFIG or action_runner is None or alive_ids is None:
+        return
+    clock_now = MSG.now_utc() if now is None else now
+    alive = set(alive_ids)
+    for run in MSG.reclaimable_runs():
+        if not _is_claude_run(run):
+            continue
+        try:
+            ended = MSG.parse_rfc3339(run['ended_at'])
+        except (TypeError, ValueError) as exc:
+            sys.stderr.write(f"[reaper] cannot age run={run.get('run_id')}: {exc}\n")
+            continue
+        age = (clock_now - ended).total_seconds()
+        if age < RUN_RETENTION_S:
+            continue
+
+        run_id = run['run_id']
+        target = run.get('tmux_target')
+        if target and ':' not in target:
+            # A legacy @N target cannot be matched to the current tmux server generation safely.
+            sys.stderr.write(f"[reaper] cannot reclaim run={run_id}: unsupported tmux target {target}\n")
+            continue
+
+        # Keep and automatic reclaim share this lock. The re-read closes the race where an
+        # owner presses Keep after the candidate query but before kill-window.
+        with _TMUX_LOCK:
+            latest = MSG.get_run(run_id)
+            if (latest is None or latest['status'] not in MSG.RUN_TERMINAL
+                    or latest.get('keep') or latest.get('reclaimed_at') is not None):
+                continue
+            target = latest.get('tmux_target')
+            if target and ':' not in target:
+                sys.stderr.write(f"[reaper] cannot reclaim run={run_id}: unsupported tmux target {target}\n")
+                continue
+
+            if target and target in alive:
+                if _tmux('kill-window', '-t', _win_id(target)) is None:
+                    sys.stderr.write(f"[reaper] expired run={run_id} window kill failed target={target}\n")
+                    continue
+                window_action = 'killed'
+            elif target:
+                window_action = 'already absent'
+            else:
+                window_action = 'no target'
+
+            failures = action_runner.cleanup_run_sentinels(
+                EXEC_CONFIG['sentinel_dir'], run_id)
+            if failures:
+                detail = '; '.join('%s: %s' % (path, exc) for path, exc in failures)
+                sys.stderr.write(f"[reaper] expired run={run_id} sentinel cleanup failed: {detail}\n")
+                continue
+            if not MSG.run_mark_reclaimed(run_id, reason='turn ended more than 24h ago'):
+                # Keep may have won a direct caller race; leave the reason visible rather than
+                # claiming that all three resources were reclaimed.
+                sys.stderr.write(f"[reaper] expired run={run_id} reclaim state changed before recording\n")
+                continue
+            sys.stderr.write(
+                f"[reaper] reclaimed expired run={run_id} reason=turn ended more than 24h ago; "
+                f"process=tmux-pane window={window_action} target={target or '-'} sentinels=removed\n")
+
+
 def _reap_plan_files():
     """Delete the plan file of every run that is no longer active.
 
@@ -1134,6 +1229,7 @@ def _reaper_loop(stop_event, session):
             MSG.reap_runs(keys)
             _reap_view_sessions()
             _reap_stuck_starting(session)
+            _reap_completed_runs(keys)
             _reap_plan_files()
         except Exception as exc:
             sys.stderr.write(f'[reaper] {exc}\n')
