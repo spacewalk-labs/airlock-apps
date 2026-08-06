@@ -1511,7 +1511,7 @@ def public_set_expiry(slug, owner, ttl_hours):
 
 
 # ==== uploads — clipboard image / arbitrary file drop into ~/uploads ====
-_RE_UPLOAD = re.compile(r'^image(\d{3,})-\d{8}-\d{6}\.jpg\Z')   # only auto-named files (protect manual ones)
+_RE_UPLOAD = re.compile(r'^image([0-9]{3,})-[0-9]{8}-[0-9]{6}\.jpg\Z')   # only auto-named files (protect manual ones)
 UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024
 FILE_MAX_BYTES = 50 * 1024 * 1024

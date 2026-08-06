@@ -98,7 +98,7 @@ def _parse_iso8601_utc(s):
     accepts a literal 'Z' suffix starting in Python 3.11, and this script must
     not silently misbehave on whatever python3 a box happens to ship."""
     m = re.match(
-        r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?Z\Z", s or ""
+        r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]+))?Z\Z", s or ""
     )
     if not m:
         return None

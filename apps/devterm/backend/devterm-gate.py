@@ -124,8 +124,8 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # ---- clipboard image / file uploads — shared ~/uploads drop (24h TTL) ----
 UPLOADS = os.path.expanduser(os.environ.get("DEVTERM_UPLOADS", "~/uploads"))
-_RE_UPLOAD = re.compile(r"^image(\d{3,})-\d{8}-\d{6}\.jpg\Z")   # auto-saved images only (protects manual files)
-_RE_UPLOAD_FILE = re.compile(r"^file(\d{3,})-\d{8}-\d{6}\.")   # uploaded-file seq (any extension)
+_RE_UPLOAD = re.compile(r"^image([0-9]{3,})-[0-9]{8}-[0-9]{6}\.jpg\Z")   # auto-saved images only (protects manual files)
+_RE_UPLOAD_FILE = re.compile(r"^file([0-9]{3,})-[0-9]{8}-[0-9]{6}\.")   # uploaded-file seq (any extension)
 UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024           # image save cap (paste/annotate — canvas-encoded, so far smaller in practice)
 FILE_MAX_BYTES = 200 * 1024 * 1024            # file upload save cap (arbitrary binary). ~/uploads has a 24h TTL so no disk creep
