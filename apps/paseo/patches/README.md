@@ -80,6 +80,11 @@ the MIT license that covers the rest of Airlock.
   half-fix). The behaviour check spawns real detached processes and asserts the shipped
   sweep reaps a survivor, because this is the half that signals other processes.
 
+- **`anchor-manifest.json`** — records the pinned Paseo/web-ui version, web-ui SHA, every
+  patcher's representative bundle anchors, and the guard-before-group dependency. The
+  offline drift test checks that the manifest still agrees with the installer and patcher
+  sources; it does not vendor any upstream bundle.
+
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live

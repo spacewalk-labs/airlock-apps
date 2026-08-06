@@ -1,0 +1,65 @@
+{
+  "paseo_version": "0.2.5",
+  "web_ui": {
+    "version": "@getpaseo/cli@0.2.5 (index-55db56b9)",
+    "sha256": "435dff4ee752a352ee81ff1eae02338163455b2f7e9b605f1ef30967007ce28c"
+  },
+  "patches": [
+    {
+      "id": "depth4-search",
+      "source": "apps/paseo/install.sh",
+      "anchors": [
+        "confidentResultScanThreshold: searchesWorkspace ? undefined : 5000,"
+      ]
+    },
+    {
+      "id": "claude-model-prune",
+      "source": "apps/paseo/patches/claude-model-prune.mjs",
+      "anchors": [
+        "export const CLAUDE_MODEL_MANIFEST = [",
+        "\\n];"
+      ]
+    },
+    {
+      "id": "image-attachments-persist",
+      "source": "apps/paseo/patches/image-attachments-persist.mjs",
+      "anchors": [
+        "import { randomUUID } from \"node:crypto\";",
+        "function isImageMimeType(value) {",
+        "                else if (chunk.type === \"image\") {"
+      ]
+    },
+    {
+      "id": "orphan-process-guard",
+      "source": "apps/paseo/patches/orphan-process-guard.mjs",
+      "anchors": [
+        "this.query = null;",
+        "this.childProcess = null;",
+        "    async ensureQuery() {",
+        "        this.client = null;",
+        "    async connect() {"
+      ]
+    },
+    {
+      "id": "orphan-process-group",
+      "source": "apps/paseo/patches/orphan-process-group.mjs",
+      "requires": ["orphan-process-guard"],
+      "anchors": [
+        "    async terminateLiveChildren(reason) {",
+        "            else if (result === \"already-exited\") {",
+        "                signal: spawnOptions.signal,",
+        "                stdio: [\"pipe\", \"pipe\", \"pipe\"],",
+        "        if (result === \"kill-timeout\") {"
+      ]
+    },
+    {
+      "id": "patch-web-ui",
+      "source": "apps/paseo/browse-host/bin/patch-web-ui.js",
+      "anchors": [
+        "if(!Ye||!(0,Be.getIsElectron)())return;e?.paneId&&at(Ye,e.paneId);const{browserId:t}=(0,le.createWorkspaceBrowser)()",
+        "if(!Ye||!(0,Be.getIsElectron)())return;const{browserId:t}=(0,le.createWorkspaceBrowser)({initialUrl:e})",
+        "{style:u.container,children:[S,_,I]})"
+      ]
+    }
+  ]
+}

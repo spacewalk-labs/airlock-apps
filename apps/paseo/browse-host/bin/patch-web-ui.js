@@ -94,6 +94,38 @@ function patchedName(src) {
   return "index-" + crypto.createHash("md5").update(src).digest("hex") + ".js";
 }
 
+// Match and replace the bundle without touching the filesystem. The test suite uses this
+// seam with a synthetic bundle whose SHA is supplied as `expectedSha`; the CLI keeps the
+// real PINNED_SHA default below. Keeping the SHA check in this core is important: the
+// fixture test proves the anchor checks, while the CLI still refuses an unrecognised
+// pristine @getpaseo bundle.
+function patchBundleContent(src, expectedSha = PINNED_SHA) {
+  if (src.includes(PATCHED_MARKER)) {
+    for (const p of PATCHES) {
+      if (!src.includes(p.repl)) throw new Error(`bundle half-patched: ${p.name} replacement missing — restore from a clean install`);
+    }
+    return { source: src, alreadyPatched: true };
+  }
+
+  const sha = crypto.createHash("sha256").update(src).digest("hex");
+  if (sha !== expectedSha) {
+    throw new Error(`bundle SHA mismatch — got ${sha}, pinned ${expectedSha} (${PINNED_VERSION}).\n` +
+        `  The @getpaseo/cli web-ui bundle changed. Re-derive the 3 anchors against a pristine bundle ` +
+        `(see "Re-deriving the anchors" in browse-host/README.md), update PINNED_SHA/PINNED_VERSION/PATCHES, ` +
+        `then re-run. Refusing to run an unpatched build.`);
+  }
+  for (const p of PATCHES) {
+    const c = occurrences(src, p.find);
+    if (c !== 1) throw new Error(`anchor ${p.name} found ${c}× (expected exactly 1) — refusing`);
+  }
+  for (const p of PATCHES) src = src.replace(p.find, p.repl);
+  for (const p of PATCHES) {
+    if (occurrences(src, p.find) !== 0) throw new Error(`post-patch: original anchor ${p.name} still present`);
+    if (!src.includes(p.repl)) throw new Error(`post-patch: replacement ${p.name} not applied`);
+  }
+  return { source: src, alreadyPatched: false };
+}
+
 // Patch the bundle AND cache-bust it. Expo serves index-<hash>.js as
 // `immutable, max-age=1yr`; patching in place keeps the same URL, so browsers
 // that cached the pre-patch bundle serve STALE bytes forever (dead "New browser"
@@ -107,11 +139,16 @@ function patchBundle(bundlePath) {
   const dir = path.dirname(bundlePath);
   const curName = path.basename(bundlePath);
   let src = fs.readFileSync(bundlePath, "utf8");
+  let result;
+  try {
+    result = patchBundleContent(src);
+  }
+  catch (err) {
+    die(String(err instanceof Error ? err.message : err));
+  }
+  src = result.source;
 
-  if (src.includes(PATCHED_MARKER)) {
-    for (const p of PATCHES) {
-      if (!src.includes(p.repl)) die(`bundle half-patched: ${p.name} replacement missing — restore from a clean install`);
-    }
+  if (result.alreadyPatched) {
     // Already patched. Migrate a bundle patched in place under the ORIGINAL name
     // to its content-hash name so immutable-cached clients stop getting stale bytes.
     const want = patchedName(src);
@@ -122,22 +159,6 @@ function patchBundle(bundlePath) {
     return { filename: want, oldFilename: curName };
   }
 
-  const sha = crypto.createHash("sha256").update(src).digest("hex");
-  if (sha !== PINNED_SHA) {
-    die(`bundle SHA mismatch — got ${sha}, pinned ${PINNED_SHA} (${PINNED_VERSION}).\n` +
-        `  The @getpaseo/cli web-ui bundle changed. Re-derive the 3 anchors against a pristine bundle ` +
-        `(see "Re-deriving the anchors" in browse-host/README.md), update PINNED_SHA/PINNED_VERSION/PATCHES, ` +
-        `then re-run. Refusing to run an unpatched build.`);
-  }
-  for (const p of PATCHES) {
-    const c = occurrences(src, p.find);
-    if (c !== 1) die(`anchor ${p.name} found ${c}× (expected exactly 1) — refusing`);
-  }
-  for (const p of PATCHES) src = src.replace(p.find, p.repl);
-  for (const p of PATCHES) {
-    if (occurrences(src, p.find) !== 0) die(`post-patch: original anchor ${p.name} still present`);
-    if (!src.includes(p.repl)) die(`post-patch: replacement ${p.name} not applied`);
-  }
   const newName = patchedName(src);
   fs.writeFileSync(path.join(dir, newName), src); // keep curName until index.html is repointed
   removeSiblings(path.join(dir, newName));         // no stale compressed siblings for the new bundle
@@ -211,4 +232,6 @@ function main() {
   log("done.");
 }
 
-main();
+module.exports = { patchBundleContent };
+
+if (require.main === module) main();
