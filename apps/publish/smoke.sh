@@ -24,8 +24,16 @@ c_list=$(code -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${HUB}/publish/a
 c_files=$(code -H "${HDR}: ${OWNER}"          "http://127.0.0.1:${HUB}/publish/files/")
 c_deny=$(code -H "${HDR}: nobody@example.com" "http://127.0.0.1:${HUB}/publish/api/list")
 c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/api/list")
-# the list endpoint must return valid JSON with ok:true for the owner
-okjson=no; curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list" | grep -q '"ok": *true' && okjson=yes
+# the list endpoint must return valid JSON with ok:true for the owner.
+# Captured and matched in-shell, never `curl | grep -q`: grep -q closes the pipe
+# at the first match, curl takes SIGPIPE, and under `set -o pipefail` the pipeline
+# reports FAILURE — so okjson would read `no` exactly when the answer is yes, and
+# only on the boxes whose list is big enough to fill a pipe buffer. markwand hit
+# this on an HTTP body and wrote it down (apps/markwand/smoke.sh:37-41); orca hit
+# it again on `ldconfig -p` and lost two installs to it. A list endpoint has no
+# code-visible bound on its size at all, which is what makes it the same shape.
+list_body="$(curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list")"
+okjson=no; [[ "$list_body" =~ \"ok\":[[:space:]]*true ]] && okjson=yes
 overlaps() {
   local left right
   left="$(readlink -f "$1" 2>/dev/null)"; right="$(readlink -f "$2" 2>/dev/null)"
@@ -48,7 +56,8 @@ if [ "$PUB_MODE" = local ]; then
   ! overlaps "$PUB_DIR" "${AIRLOCK_PUBLISH_SHARE_DIR:-/opt/airlock/share}" || localpub="OVERLAPS-SHARE:$PD"
   ! overlaps "$PUB_DIR" "$STATE_DIR" || [ "$localpub" != ok ] || localpub="OVERLAPS-STATE:$STATE_DIR"
   # the backend must actually report local mode (i.e. it did not refuse at startup)
-  curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health" | grep -q '"public_enabled": *true' \
+  health_body="$(curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health")"
+  [[ "$health_body" =~ \"public_enabled\":[[:space:]]*true ]] \
     || localpub="backend-disabled (check: journalctl --user -u airlock-publish)"
   GATED_DIR="$(airlock_config get apps.publish.public_target.gated_dir 2>/dev/null || true)"
   [ -n "$GATED_DIR" ] || GATED_DIR=/opt/airlock/share-gated

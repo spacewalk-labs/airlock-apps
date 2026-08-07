@@ -104,7 +104,7 @@ MemoryHigh=${MEMHIGH}
 # resource limit. 24576 was the next guess, chosen on one box.
 #
 # Owner decision (2026-08-07): the default is the most this box can give, not a
-# number picked somewhere else. `infinity` is not "unbounded" for a --user unit —
+# number picked somewhere else. 'infinity' is not "unbounded" for a --user unit —
 # it is enclosed by user-<uid>.slice, whose pids.max is the real ceiling (339389
 # on the box this was measured on; systemd's DefaultTasksMax is 15% of
 # kernel.threads-max elsewhere). Deferring to that is the only spelling of
@@ -113,7 +113,7 @@ MemoryHigh=${MEMHIGH}
 # above already had to unlearn.
 #
 # What it costs, stated plainly: this unit no longer carries a pids backstop of
-# its own, so `pids.events` on the unit will never show `max` climbing — the
+# its own, so 'pids.events' on the unit will never show 'max' climbing — the
 # slice's will instead. AIRLOCK_PASEO_TASKS_MAX puts a finite one back.
 TasksMax=${TASKSMAX}
 NoNewPrivileges=yes
