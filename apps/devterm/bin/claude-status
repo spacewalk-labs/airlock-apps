@@ -19,6 +19,7 @@ import binascii
 import datetime
 import json
 import os
+import re
 import select
 import shutil
 import signal
@@ -268,6 +269,28 @@ def _codex_observed_at():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+# The one Codex failure that looks like a healthy login: auth.json is present and its
+# id_token still parses, so _codex_status() reports "ok" with an email and a plan — but
+# the refresh token behind it has been revoked (the ChatGPT session that approved the
+# device code logged out, or signed in to another account). Nothing local can see that;
+# only a call that actually spends the credential gets told, and it arrives as an
+# app-server error. So it is classified here, and reported as its own `err` value:
+# "auth" means re-login, every other error means retry.
+_CODEX_AUTH_ERR_RE = re.compile(
+    r"could not be refreshed|sign ?in again|log ?in again|logged out"
+    r"|invalid_grant|unauthenticated|unauthorized", re.I)
+
+
+def _codex_auth_revoked(error):
+    """True when an app-server error means the stored credential is dead."""
+    if not isinstance(error, dict):
+        return False
+    if error.get("code") == 401:
+        return True
+    text = " ".join(str(error.get(k) or "") for k in ("message", "data"))
+    return bool(_CODEX_AUTH_ERR_RE.search(text))
+
+
 def _codex_norm(rate_limits, reset_credits=None):
     """Normalize app-server rate limits by window length (no IO).
 
@@ -492,7 +515,7 @@ def _codex_usage():
                     error = message.get("error")
                     if error is not None:
                         code = error.get("code") if isinstance(error, dict) else None
-                        rpc_err = "rpc-" + str(code)
+                        rpc_err = "auth" if _codex_auth_revoked(error) else "rpc-" + str(code)
                     else:
                         response = message
                     break

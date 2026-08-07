@@ -10,12 +10,19 @@ What it pins down, because these are the parts that fail quietly:
     no source at all it reports level="none" instead of inventing one;
   - that the cross-origin echo is limited to this same box (tailnet domains are public
     suffixes, so "same-site" is not a boundary);
+  - that a revoked Codex credential (auth.json still present, refresh token dead) is
+    graded crit instead of passing for a healthy login;
   - that no identity ever appears in the alert payload.
 """
-import asyncio, importlib.util, os, sys, types
+import asyncio, importlib.machinery, importlib.util, os, sys, types
 os.environ.setdefault("AIRLOCK_OWNER", "owner@example.com")
 spec = importlib.util.spec_from_file_location("gate", "apps/devterm/backend/devterm-gate.py")
 g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
+# claude-status has no .py extension (it is a command on PATH), so it needs an explicit
+# source loader. Importing it runs no side effects — main() is behind __main__.
+cs_loader = importlib.machinery.SourceFileLoader("claude_status", "apps/devterm/bin/claude-status")
+cs_spec = importlib.util.spec_from_loader("claude_status", cs_loader)
+cs = importlib.util.module_from_spec(cs_spec); cs_loader.exec_module(cs)
 
 fails = []
 def check(name, cond):
@@ -36,6 +43,25 @@ check("usage crit beats login warn",
 check("codex axis grades", g._acct_alert_level(0, 0, None, TH["crit7"]) == ("crit", "codex"))
 check("codex never displaces claude at equal severity",
       g._acct_alert_level(TH["warn5"], 0, None, TH["warn7"]) == ("warn", "usage"))
+# A revoked Codex credential: auth.json is still there, so nothing else in the account
+# line looks wrong. It has to raise the level on its own.
+check("revoked codex login is crit",
+      g._acct_alert_level(0, 0, None, None, "auth") == ("crit", "codex-login"))
+check("revoked codex login does not displace a claude crit",
+      g._acct_alert_level(TH["crit5"], 0, None, None, "auth") == ("crit", "usage"))
+check("a retryable codex error is not an alert",
+      g._acct_alert_level(0, 0, None, None, "rpc-500") == ("none", None))
+
+# claude-status is the only thing that can tell a revoked credential from a hiccup: it
+# is the caller that actually spends the token. Field message from the agent that failed.
+check("revoked-token message classifies as auth",
+      cs._codex_auth_revoked({"code": -32603, "message":
+          "Your access token could not be refreshed because you have since logged out "
+          "or signed in to another account. Please sign in again."}))
+check("401 classifies as auth", cs._codex_auth_revoked({"code": 401, "message": ""}))
+check("an unrelated rpc error is not auth",
+      not cs._codex_auth_revoked({"code": -32603, "message": "internal error"}))
+check("a non-dict error is not auth", not cs._codex_auth_revoked("boom"))
 check("NaN is not a number", g._finite_number(float("nan")) is None)
 check("bool is not a number", g._finite_number(True) is None)
 check("int passes", g._finite_number(0) == 0)
@@ -92,6 +118,9 @@ p = asyncio.run(alert_with(
 check("shared store wins over the probe", (p["use5h"], p["level"]) == (5, "none"))
 p = asyncio.run(alert_with(store_empty, {}, {"use7d": 95}))
 check("codex alone can raise the level", (p["level"], p["reason"]) == ("crit", "codex"))
+p = asyncio.run(alert_with(store_empty, {}, {"use7d": 5, "stale": True, "lastErr": "auth"}))
+check("a revoked codex login reaches the alert, numbers or not",
+      (p["level"], p["reason"], p["codexErr"]) == ("crit", "codex-login", "auth"))
 check("thresholds are shipped with the verdict", p["thresholds"] == TH)
 check("no identity in the payload",
       not any(k in p for k in ("email", "accounts", "token", "accessToken")))

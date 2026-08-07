@@ -1673,7 +1673,7 @@ async def _live_usage_cached():
     return usage
 
 
-def _acct_alert_level(u5, u7, rt_days, codex_u7=None):
+def _acct_alert_level(u5, u7, rt_days, codex_u7=None, codex_err=None):
     """The active account's warning level — (level, reason). level = none|warn|crit.
 
     Each axis is graded on its own, then the worst (severity, reason-priority) wins.
@@ -1681,7 +1681,10 @@ def _acct_alert_level(u5, u7, rt_days, codex_u7=None):
     expiry is the more actionable message, and codex is the newest axis so it never
     displaces the two that were there before.
     A spent 5h window does not mute the 7d axis — "5h exhausted" and "7d critical" are
-    separate facts and collapsing them hides the one that lasts longer."""
+    separate facts and collapsing them hides the one that lasts longer.
+    codex_err="auth" (claude-status's verdict that the stored Codex credential was
+    revoked) is graded as crit on the codex axis: the panel still shows a healthy
+    email + plan, so without this the first report is an agent failing mid-run."""
     u5 = _finite_number(u5)
     u7 = _finite_number(u7)
     rt_days = _finite_number(rt_days)
@@ -1704,6 +1707,10 @@ def _acct_alert_level(u5, u7, rt_days, codex_u7=None):
             candidates.append((2, 1, "crit", "codex"))
         elif codex_u7 >= USAGE_TH["warn7"]:
             candidates.append((1, 1, "warn", "codex"))
+    if codex_err == "auth":
+        # Not a usage problem: no Codex agent runs until someone re-logs in. Its own
+        # reason so the widget says "re-login" instead of quoting a percentage.
+        candidates.append((2, 1, "crit", "codex-login"))
     if not candidates:
         return "none", None
     _, _, level, reason = max(candidates, key=lambda item: (item[0], item[1]))
@@ -1768,7 +1775,8 @@ async def _serve_acct_alert(headers, cw):
         if not isinstance(codex, dict):
             codex = {"stale": True, "err": "cache-invalid"}
         codex_u7 = _finite_number(codex.get("use7d"))
-        level, reason = _acct_alert_level(u5, u7, rt_days, codex_u7)
+        codex_err = codex.get("lastErr") or codex.get("err")
+        level, reason = _acct_alert_level(u5, u7, rt_days, codex_u7, codex_err)
         payload = {"ok": True, "level": level, "reason": reason,
                    "use5h": u5, "use7d": u7,
                    "reset5h": u.get("reset5h"), "reset7d": u.get("reset7d"),
@@ -1779,7 +1787,7 @@ async def _serve_acct_alert(headers, cw):
                    "codexPlan": codex.get("plan"),
                    "codexCredits": codex.get("resetCredits"),
                    "codexStale": bool(codex.get("stale")),
-                   "codexErr": codex.get("lastErr") or codex.get("err"),
+                   "codexErr": codex_err,
                    "thresholds": dict(USAGE_TH)}
         _acct_alert_cache.update(at=now, payload=payload)
     await _send_json(cw, b"200 OK", payload, cors=_cors_origin(headers))

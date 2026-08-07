@@ -46,6 +46,11 @@ Wants=airlock-devterm.service
 [Service]
 Type=simple
 ${gate_env}ExecStart=${PY} ${GATE_PY}
+# KillMode=process, same reason as the ttyd unit: the gate starts a detached
+# \`codex login --device-auth\` that must outlive a redeploy. setsid does not leave the
+# cgroup, so the default (control-group) kills the pending login while the user is
+# entering the code on their phone — and the old credential is already backed out.
+KillMode=process
 Restart=on-failure
 RestartSec=2
 

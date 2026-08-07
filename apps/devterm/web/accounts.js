@@ -278,6 +278,16 @@ function codexUsageRow(usage) {
   const nm = document.createElement('span'); nm.className = 'nm';
   const pl = document.createElement('span'); pl.className = 'pl';
   const u7 = usage && usage.codexUse7d;
+  // auth.json is still here (so the row above shows an email and a plan) but the token
+  // behind it was revoked — the account line must say so, or the first symptom is an
+  // agent dying with "please sign in again". Numbers, if any, are from before the death.
+  if (usage && usage.codexErr === 'auth') {
+    nm.textContent = 'sign-in revoked — Re-login';
+    nm.style.color = C_RED;
+    pl.textContent = 'logged out elsewhere, or signed in to another account';
+    row.appendChild(nm); row.appendChild(pl);
+    return row;
+  }
   if (u7 == null) {
     nm.textContent = '7d usage';
     nm.style.color = C_GRAY;
