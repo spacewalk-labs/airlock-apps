@@ -7,6 +7,13 @@ id = "feedback"
 # (mail_to, mail_from, mail_api, mail_key_env — install.sh applies its own
 # "RESEND_API_KEY" fallback when mail_key_env is empty; declaring the same
 # value here as the default makes that fallback a no-op, byte-identical).
+[config]
+# The NAME of the env var holding the intake token, assigned as a default by the
+# installer (apps/feedback/install.sh:50). The token itself never appears here.
+runtime_env = [
+  "AIRLOCK_FEEDBACK_TOKEN",
+]
+
 [config.defaults]
 backend_port = 18805
 intake_url = "https://your-intake.example"

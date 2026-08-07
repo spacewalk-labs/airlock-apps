@@ -2,6 +2,14 @@ contract = 1
 id = "code-server"
 
 # Transcribed from the former APP_DEFAULTS["code-server"] entry.
+[config]
+# Written by the renderer into the manager unit, derived from a loopback constant
+# and the owner (apps/code-server/render.sh:51-55) — not values an operator sets.
+runtime_env = [
+  "AIRLOCK_CODE_SERVER_ALLOW",
+  "AIRLOCK_CODE_SERVER_MANAGER_HOST",
+]
+
 [config.defaults]
 https_port = 8444
 gate_port = 18808

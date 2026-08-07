@@ -2,6 +2,14 @@ contract = 1
 id = "dev-monitor"
 
 # Transcribed from the former APP_DEFAULTS["dev-monitor"] entry.
+[config]
+# Measured by the installer from the box's own FQDN (install.sh:64-83). Declaring
+# it as config would create a knob that does nothing, because the installer
+# overwrites whatever it was set to.
+runtime_env = [
+  "AIRLOCK_DEV_MONITOR_CORS_HOSTS",
+]
+
 [config.defaults]
 backend_port = 18804
 messages = false
