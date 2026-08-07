@@ -83,7 +83,7 @@
   function requestClose() {
     // The parent owns the modal. Standalone (no parent) there is nothing to close.
     if (!window.parent || window.parent === window) return;
-    // Both spellings for one release (2026-08-07 rename): the parent may be an
+    // Both spellings until 2026-09-07 (2026-08-07 rename): the parent may be an
     // out-of-tree frontend still listening for the old name, and our own listener
     // ignores the second message once the modal is gone.
     window.parent.postMessage('airlock-panel-close', '*');
