@@ -136,7 +136,9 @@ require_cmd node npm systemctl tailscale python3 ss sudo
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
 [ "${NODE_MAJOR:-0}" -ge 20 ] 2>/dev/null \
   || die "paseo needs node >= 20 (found $(node --version 2>/dev/null)). Upgrade node on this box, then re-run."
-NODE_BIN="$(dirname "$(readlink -f "$(command -v node)")")"
+# Every directory node can be found through — see airlock_cmd_dirs in
+# install/lib.sh for why the resolved path alone is not enough (snap).
+NODE_DIRS="$(airlock_cmd_dirs node)"
 
 # Fixed, user-writable npm prefix owned by this installer. A box's default npm
 # global prefix varies wildly (/usr = non-root EACCES; a private nvm/npm-global);
@@ -166,7 +168,8 @@ PY="$(command -v python3)"
 # no working providers. A directory that does not exist costs a PATH entry nothing;
 # a missing one costs the gotcha the comment above warns about.
 UNIT_PATH=""
-for d in "$NPM_GBIN" "$HOME/.local/bin" "$HOME/.npm-global/bin" "$NODE_BIN"; do
+# shellcheck disable=SC2086  # NODE_DIRS is newline-separated and deliberately split
+for d in "$NPM_GBIN" "$HOME/.local/bin" "$HOME/.npm-global/bin" $NODE_DIRS; do
   case ":${UNIT_PATH}:" in *":${d}:"*) continue ;; esac   # de-dupe
   UNIT_PATH="${UNIT_PATH}${d}:"
 done

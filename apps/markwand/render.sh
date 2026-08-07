@@ -5,9 +5,9 @@
 # to the inline text by install/test-render-parity.sh before any write site
 # moves (P1b).
 
-# render_markwand_unit_markserv CODE_ROOT MS_PORT MS_BIN
+# render_markwand_unit_markserv CODE_ROOT MS_PORT MS_BIN UNIT_PATH
 render_markwand_unit_markserv() {
-  local CODE_ROOT="$1" MS_PORT="$2" MS_BIN="$3"
+  local CODE_ROOT="$1" MS_PORT="$2" MS_BIN="$3" UNIT_PATH="$4"
   cat <<UNIT
 [Unit]
 Description=airlock markserv — markdown viewer for ${CODE_ROOT} (127.0.0.1:${MS_PORT})
@@ -16,7 +16,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${CODE_ROOT}
-Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+# markserv runs through env node, so this PATH decides whether the unit starts at
+# all. It was hardcoded here until 2026-08-07 with no entry for wherever node
+# actually lives, and a box that followed this repo's own preflight fix (snap)
+# crash-looped: env: node: No such file or directory. The installer derives it now
+# — see airlock_cmd_dirs in install/lib.sh.
+Environment=PATH=${UNIT_PATH}
 # --livereloadport false: no chokidar watcher (avoids EACCES on symlinked trees)
 ExecStart=${MS_BIN} --address 127.0.0.1 --port ${MS_PORT} --livereloadport false --browser false --silent ${CODE_ROOT}
 Restart=on-failure

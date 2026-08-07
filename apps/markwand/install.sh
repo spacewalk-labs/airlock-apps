@@ -81,6 +81,20 @@ if [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
   UNIT_DIR="$AIRLOCK_RENDER_DIR/units"
 fi
 
+# The markserv unit's PATH. markserv is a `#!/usr/bin/env node` script, so the
+# directory node is FOUND in has to be on it — see airlock_cmd_dirs in
+# install/lib.sh for the snap case that made this a crash-loop rather than a
+# preference. $HOME/.local/bin first: that is where this installer puts markserv.
+MS_UNIT_PATH="$HOME/.local/bin"
+while IFS= read -r _d; do
+  [ -n "$_d" ] || continue
+  case ":${MS_UNIT_PATH}:" in *":${_d}:"*) continue ;; esac
+  MS_UNIT_PATH="${MS_UNIT_PATH}:${_d}"
+done <<EOF
+$(airlock_cmd_dirs node)
+EOF
+MS_UNIT_PATH="${MS_UNIT_PATH}:/usr/local/bin:/usr/bin:/bin"
+
 # markserv wants its code_root to exist before it starts.
 airlock_run mkdir -p "$CODE_ROOT"
 
@@ -167,11 +181,11 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
   log "[dry] write $UNIT_DIR/airlock-filebrowser.service (127.0.0.1:$FB_PORT, root $CODE_ROOT)"
 elif [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
   install -d "$UNIT_DIR"
-  render_markwand_unit_markserv "$CODE_ROOT" "$MS_PORT" "$MS_BIN" >"$UNIT_DIR/airlock-markserv.service"
+  render_markwand_unit_markserv "$CODE_ROOT" "$MS_PORT" "$MS_BIN" "$MS_UNIT_PATH" >"$UNIT_DIR/airlock-markserv.service"
   render_markwand_unit_filebrowser "$CODE_ROOT" "$FB_PORT" "$FB_BIN" "$FB_DB" >"$UNIT_DIR/airlock-filebrowser.service"
 else
   install -d "$UNIT_DIR" "$HOME/.config/filebrowser" "$FB_BRANDING_DIR"
-  render_markwand_unit_markserv "$CODE_ROOT" "$MS_PORT" "$MS_BIN" >"$UNIT_DIR/airlock-markserv.service"
+  render_markwand_unit_markserv "$CODE_ROOT" "$MS_PORT" "$MS_BIN" "$MS_UNIT_PATH" >"$UNIT_DIR/airlock-markserv.service"
   render_markwand_unit_filebrowser "$CODE_ROOT" "$FB_PORT" "$FB_BIN" "$FB_DB" >"$UNIT_DIR/airlock-filebrowser.service"
 fi
 
