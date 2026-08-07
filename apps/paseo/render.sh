@@ -101,7 +101,20 @@ MemoryHigh=${MEMHIGH}
 # Agent trees fork wide (a CLI plus its children per session, times N sessions).
 # 1024 was a real ceiling on a busy box: pids.events 'max' climbs, fork() starts
 # failing, and it surfaces as unrelated-looking tool errors rather than as a
-# resource limit. This is a backstop, not a reservation, so it is cheap to raise.
+# resource limit. 24576 was the next guess, chosen on one box.
+#
+# Owner decision (2026-08-07): the default is the most this box can give, not a
+# number picked somewhere else. `infinity` is not "unbounded" for a --user unit —
+# it is enclosed by user-<uid>.slice, whose pids.max is the real ceiling (339389
+# on the box this was measured on; systemd's DefaultTasksMax is 15% of
+# kernel.threads-max elsewhere). Deferring to that is the only spelling of
+# "maximum" that stays true when the box changes; a number derived here would
+# bake one kernel's limits into a golden, which is the mistake the memory block
+# above already had to unlearn.
+#
+# What it costs, stated plainly: this unit no longer carries a pids backstop of
+# its own, so `pids.events` on the unit will never show `max` climbing — the
+# slice's will instead. AIRLOCK_PASEO_TASKS_MAX puts a finite one back.
 TasksMax=${TASKSMAX}
 NoNewPrivileges=yes
 

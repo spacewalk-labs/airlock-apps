@@ -85,7 +85,11 @@ _cap_gib=$(( _cap / 1024 / 1024 / 1024 ))
 _reserve_gib=$(( (_cap_gib * 15 + 99) / 100 ))
 [ "$_reserve_gib" -lt 4 ] && _reserve_gib=4
 _memmax_gib=$(( _cap_gib - _reserve_gib ))
-PASEO_TASKSMAX=24576
+# The pids backstop defaults to the box maximum (owner decision, 2026-08-07):
+# `infinity` on the unit defers to the enclosing user slice, which is the real
+# ceiling and differs per box. A finite value here puts a unit-level backstop
+# back — see the comment above TasksMax in render.sh for what that trades.
+PASEO_TASKSMAX="${AIRLOCK_PASEO_TASKS_MAX:-infinity}"
 # Below the reserve there is nothing left to back off to, and the derivation
 # inverts: at 4 GiB the reserve is the whole box and `usable` is 0. This used to
 # be papered over with `[ "$_memmax_gib" -lt 2 ] && _memmax_gib=2`, which handed
@@ -93,13 +97,16 @@ PASEO_TASKSMAX=24576
 # as a limit and is not one. Owner decision (2026-08-06): say why and refuse,
 # and let an operator who means it override explicitly. The override renders
 # `infinity` rather than a flattering figure, because "no memory backstop" is
-# what is true; TasksMax is unaffected — the pids backstop still holds.
+# what is true. TasksMax is unaffected by the memory decision, but note that it
+# now defaults to infinity too, so an overridden box has no unit-level backstop
+# of either kind — only the enclosing user slice.
 _min_memmax_gib=2
 if [ "$_memmax_gib" -lt "$_min_memmax_gib" ]; then
   if [ "${AIRLOCK_PASEO_ALLOW_UNBACKED_MEM:-0}" = 1 ]; then
     log "WARNING: paseo memory backstop disabled by explicit override AIRLOCK_PASEO_ALLOW_UNBACKED_MEM=1 \
 — this unit gets no memory limit at all: cap=${_cap} bytes (${_cap_gib} GiB), reserve=${_reserve_gib} GiB, \
-usable=${_memmax_gib} GiB; rendering MemoryMax=infinity and MemoryHigh=infinity. TasksMax=${PASEO_TASKSMAX} remains active."
+usable=${_memmax_gib} GiB; rendering MemoryMax=infinity and MemoryHigh=infinity. TasksMax=${PASEO_TASKSMAX} \
+— with the default that leaves the enclosing user slice as the only limit of any kind on this unit."
     PASEO_MEMMAX=infinity
     PASEO_MEMHIGH=infinity
   else
