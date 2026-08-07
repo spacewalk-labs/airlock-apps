@@ -198,8 +198,10 @@ else
   log "npm i -g ${PASEO_PKG}@${PASEO_VER} (prefix=$PASEO_PREFIX)"
   # npm_config_prefix overrides the box default (e.g. /usr = non-root fails) so we
   # always land in the fixed user prefix.
-  npm_config_prefix="$PASEO_PREFIX" npm i -g "${PASEO_PKG}@${PASEO_VER}" >/dev/null 2>&1 \
-    || die "npm install failed: ${PASEO_PKG}@${PASEO_VER} (prefix=$PASEO_PREFIX)"
+  # Both streams used to go to /dev/null, so this die() named the package and
+  # nothing else — the operator got a fatal error with no cause. See install/lib.sh.
+  airlock_quiet env npm_config_prefix="$PASEO_PREFIX" npm i -g "${PASEO_PKG}@${PASEO_VER}" \
+    || die "npm install failed: ${PASEO_PKG}@${PASEO_VER} (prefix=$PASEO_PREFIX) — npm output above"
   [ -x "$PASEO_BIN" ] || die "paseo binary missing after install: $PASEO_BIN"
   [ "$("$PASEO_BIN" --version 2>/dev/null || true)" = "$PASEO_VER" ] \
     || die "paseo version mismatch (want ${PASEO_VER}, got $("$PASEO_BIN" --version 2>/dev/null))"

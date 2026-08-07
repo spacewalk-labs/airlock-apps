@@ -99,7 +99,9 @@ airlock_run mkdir -p "$CODE_ROOT"
 # an actual HTTP 200 from markserv after install. Vendoring the resolved tree
 # is the recorded longer-term fix.
 markserv_npm_install() {
-  npm install -g --ignore-scripts --prefix "$HOME/.local" "markserv@${MS_VER}" >/dev/null
+  # airlock_quiet, not `>/dev/null`: npm is deafening on success and the only run
+  # anyone needs to read is the one that failed. See install/lib.sh.
+  airlock_quiet npm install -g --ignore-scripts --prefix "$HOME/.local" "markserv@${MS_VER}"
 }
 provision_markserv() {
   if [ -x "$MS_BIN" ] && "$MS_BIN" --version 2>/dev/null | grep -q "$MS_VER"; then
