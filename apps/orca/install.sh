@@ -103,20 +103,44 @@ XDISP=59
 # package -> distro-independent. sudo apt; skipped when already satisfied.
 ORCA_DEPS="xvfb libgtk-3-0t64 libgbm1 libnss3 libasound2t64 libnotify4 libxtst6 libxss1 libatspi2.0-0t64 libsecret-1-0"
 provision_runtime_deps() {
-  if command -v Xvfb >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -q 'libgtk-3\.so\.0'; then
+  # Capture, then match with a bash glob — NOT `ldconfig -p | grep -q`. The pipe
+  # form is a race that fails precisely when the library IS there: grep -q exits at
+  # the match and closes the pipe, ldconfig (whose -p output is far larger than the
+  # 64 KB pipe buffer) takes SIGPIPE, and `set -o pipefail` reports the pipeline as
+  # failed. Measured 2026-08-07 on a box where libgtk-3-0t64 was installed and in
+  # the cache: this guard said "missing", the reinstall was a no-op, and the check
+  # below said "libgtk-3 install failed". apps/markwand/smoke.sh:39 hit the same
+  # race on a ~64 KB HTTP body and wrote it down; it did not reach here.
+  local _libs; _libs="$(ldconfig -p 2>/dev/null || true)"
+  if command -v Xvfb >/dev/null 2>&1 && [[ "$_libs" == *"libgtk-3.so.0"* ]]; then
     log "Electron runtime deps present (Xvfb + GTK)"; return
   fi
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
     log "[dry] sudo apt-get install Electron runtime deps: $ORCA_DEPS"; return
   fi
-  sudo apt-get update -qq >/dev/null 2>&1 || true
-  local p
+  # Every apt call here used to end in `>/dev/null 2>&1 || true`, so ten package
+  # installs could all fail without a word and the only output was the die() below
+  # naming a library. Measured 2026-08-07: this died with "libgtk-3 install failed"
+  # on a box where libgtk-3-0t64 was installed and in the ldconfig cache, and the
+  # reason is not knowable from that run — the ten apt transcripts were discarded.
+  # airlock_quiet keeps them for exactly the run that needs them (install/lib.sh).
+  airlock_quiet sudo apt-get update -qq \
+    || log "apt-get update failed (output above) — continuing against the cached lists"
+  local p missing=""
   for p in $ORCA_DEPS; do
-    sudo apt-get install -y "$p" >/dev/null 2>&1 \
-      || sudo apt-get install -y "${p%t64}" >/dev/null 2>&1 || true
+    # noble renamed several of these to the t64 ABI; fall back to the old name.
+    airlock_quiet sudo apt-get install -y "$p" \
+      || airlock_quiet sudo apt-get install -y "${p%t64}" \
+      || missing="$missing $p"
   done
-  command -v Xvfb >/dev/null 2>&1 || die "Xvfb install failed"
-  ldconfig -p 2>/dev/null | grep -q 'libgtk-3\.so\.0' || die "libgtk-3 install failed — Electron cannot run"
+  [ -z "$missing" ] || log "apt could not install:$missing (output above)"
+  command -v Xvfb >/dev/null 2>&1 || die "Xvfb install failed — apt output above; apt could not install:${missing:- (nothing reported)}"
+  # Blame the right thing: without ldconfig the next line proves nothing about GTK.
+  command -v ldconfig >/dev/null 2>&1 \
+    || die "ldconfig is not on PATH, so the Electron runtime libs cannot be verified (PATH=$PATH)"
+  _libs="$(ldconfig -p 2>/dev/null || true)"
+  [[ "$_libs" == *"libgtk-3.so.0"* ]] \
+    || die "libgtk-3 is not in the ldconfig cache — Electron cannot run. apt output above; apt could not install:${missing:- (nothing reported)}"
 }
 provision_runtime_deps
 
