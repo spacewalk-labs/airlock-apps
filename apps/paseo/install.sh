@@ -136,6 +136,62 @@ require_cmd node npm systemctl tailscale python3 ss sudo
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
 [ "${NODE_MAJOR:-0}" -ge 20 ] 2>/dev/null \
   || die "paseo needs node >= 20 (found $(node --version 2>/dev/null)). Upgrade node on this box, then re-run."
+
+# --- snap-wrapped node vs NoNewPrivileges (owner decision, 2026-08-07) ---
+#
+# /snap/bin/node is a symlink to /usr/bin/snap, which re-executes the real
+# interpreter through the setuid-root snap-confine. `NoNewPrivileges=yes` neuters
+# setuid; snap swallows the failure. The unit then dies with status=1 and writes
+# nothing at all — 4,242 restarts of airlock-paseo on 2026-08-07 with a journal
+# containing only the restart lines. #77 did not cause this, it revealed it:
+# before /snap/bin was on the unit PATH the same unit died at exit 127 instead.
+#
+# So: detect it, refuse, and say what was measured rather than what was assumed.
+# The escape hatch turns the directive off FOR THIS UNIT and renders why, in the
+# unit, where the next person to read it will be. It does not weaken code-server
+# or orca, which never see this variable.
+#
+# Placed here and not in install/preflight.sh on purpose: packaged paseo's
+# preflight deliberately does not load nvm and leaves runtime selection to this
+# script (install/preflight.sh:193-199), so a central check would fire on boxes
+# where nvm supplies a perfectly good native node. This runs after
+# airlock_load_nvm and the version gate, and before the first npm call, file
+# write or systemctl — the same position, and the same shape, as the memory
+# refusal above.
+PASEO_NNP_BLOCK="NoNewPrivileges=yes"
+_node_found="$(command -v node 2>/dev/null || true)"
+_node_real="$(readlink -f -- "$_node_found" 2>/dev/null || true)"
+_node_runtime="$(node -p 'process.execPath' 2>/dev/null || true)"
+_snap_probes="$(airlock_snap_probe "$_node_found" "$_node_real" "$_node_runtime")" || true
+if [ -n "$_snap_probes" ]; then
+  _snap_detail="probes=[${_snap_probes}] found=${_node_found:-<none>} \
+resolved=${_node_real:-<none>} runtime=${_node_runtime:-<unreadable>}"
+  if [ "${AIRLOCK_ALLOW_SNAP_NODE:-0}" = 1 ]; then
+    log "WARNING: paseo is being installed against a snap-wrapped node by explicit override \
+AIRLOCK_ALLOW_SNAP_NODE=1 — ${_snap_detail}. NoNewPrivileges is being turned OFF for the \
+airlock-paseo unit only, because snap's setuid-root re-exec cannot survive it. Nothing else \
+on this box changes; code-server and orca keep the directive."
+    # printf -v, not a heredoc: this text ends up inside apps/paseo/render.sh's
+    # UNITEOF body, which is unquoted. Assembling it there would put a shell
+    # command in prose back where command substitution happens. A variable's
+    # value is not re-scanned, so built here it arrives literally.
+    printf -v PASEO_NNP_BLOCK '%s\n%s\n%s\n%s\n%s' \
+      "# NoNewPrivileges is deliberately OFF for this unit." \
+      "# node on this box is behind a snap wrapper (${_snap_detail})." \
+      "# snap re-executes through the setuid-root snap-confine, which NoNewPrivileges" \
+      "# neuters; the unit then fails with status=1 and no output at all." \
+      "NoNewPrivileges=no"
+  else
+    die "paseo install refused: node on this box is behind a snap wrapper, and this unit \
+sets NoNewPrivileges=yes. ${_snap_detail}. snap re-executes the real interpreter through the \
+setuid-root snap-confine, which NoNewPrivileges neuters, and snap reports nothing — the unit \
+crash-loops with status=1 and an empty journal (measured 2026-08-07, 4,242 restarts). \
+Install node from a non-snap source (nvm, or the NodeSource apt repository) and re-run. \
+To install anyway with NoNewPrivileges turned off for the airlock-paseo unit only, set \
+AIRLOCK_ALLOW_SNAP_NODE=1."
+  fi
+fi
+
 # Every directory node can be found through — see airlock_cmd_dirs in
 # install/lib.sh for why the resolved path alone is not enough (snap).
 NODE_DIRS="$(airlock_cmd_dirs node)"
@@ -458,7 +514,7 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
 else
   install -d "$UNIT_DIR"
   if render_paseo_unit "$UNIT_PATH" "$HOME" "$FQDN" "$HTTPS_PORT" "$PASEO_BIN" "$BACKEND_PORT" \
-       "$PY" "$STALE_PID_GUARD" "$PASEO_MEMMAX" "$PASEO_MEMHIGH" "$PASEO_TASKSMAX" \
+       "$PY" "$STALE_PID_GUARD" "$PASEO_MEMMAX" "$PASEO_MEMHIGH" "$PASEO_TASKSMAX" "$PASEO_NNP_BLOCK" \
      | write_if_changed "$UNIT"
   then need_restart=1; fi
 fi

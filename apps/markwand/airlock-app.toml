@@ -15,15 +15,15 @@ filebrowser_port = 18801
 command = "node"
 predicate = "present"
 expected = "-"
-fix = "sudo apt-get install -y snapd && sudo snap install node --classic --channel=20"
-note = "Markserv runtime"
+fix = "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+note = "Markserv runtime - same non-snap node as paseo (one command, one fix: preflight rejects conflicting fixes)"
 
 [[prerequisites]]
 command = "npm"
 predicate = "present"
 expected = "-"
-fix = "sudo apt-get install -y snapd && sudo snap install node --classic --channel=20"
-note = "Markserv package manager"
+fix = "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+note = "Markserv package manager - ships with the same non-snap node"
 
 [[prerequisites]]
 command = "curl"

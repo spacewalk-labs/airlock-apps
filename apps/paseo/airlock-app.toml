@@ -18,15 +18,15 @@ version = ""
 command = "node"
 predicate = "major-gte"
 expected = "20"
-fix = "sudo apt-get install -y snapd && sudo snap install node --classic --channel=20"
-note = "Paseo runtime"
+fix = "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+note = "Paseo runtime - NOT snap: snap re-execs through setuid snap-confine, which the unit's NoNewPrivileges neuters"
 
 [[prerequisites]]
 command = "npm"
 predicate = "present"
 expected = "-"
-fix = "sudo apt-get install -y snapd && sudo snap install node --classic --channel=20"
-note = "Package manager"
+fix = "curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+note = "Package manager - ships with the same non-snap node"
 
 [[prerequisites]]
 command = "systemctl"

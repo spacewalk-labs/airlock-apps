@@ -11,7 +11,7 @@
 # original assembly is several heredocs plus shell logic, not one heredoc.
 
 # render_paseo_unit UNIT_PATH HOME FQDN HTTPS_PORT PASEO_BIN BACKEND_PORT PY PID_GUARD \
-#                   MEMMAX MEMHIGH TASKSMAX
+#                   MEMMAX MEMHIGH TASKSMAX NNP_BLOCK
 # HOME is a local (shadows $HOME for this function only — pops on return) so
 # the heredoc body below can reference ${HOME} exactly as the source does.
 # PY/PID_GUARD: interpreter + apps/paseo/paseo-clear-stale-pid.py path, spliced
@@ -20,9 +20,18 @@
 # MEMMAX/MEMHIGH/TASKSMAX: resource backstop, sized from the box's RAM by the
 # caller (install.sh). Passed in rather than computed here so the rendered text
 # stays a pure function of its arguments — the golden-render tests depend on it.
+# NNP_BLOCK: normally the single line `NoNewPrivileges=yes`. When the installer
+# has been told to proceed on a snap-wrapped node it is that line turned off plus
+# the comment saying why — assembled by the caller and passed as ONE argument, on
+# purpose. This heredoc is unquoted, and the reason text quotes a shell command;
+# a value substituted into a heredoc is not re-scanned for substitution, so the
+# text arrives literally no matter what it contains. Building it here instead
+# would put operator-facing prose back inside the heredoc, which is exactly the
+# shape that deleted three words from this unit on 2026-08-07.
 render_paseo_unit() {
   local UNIT_PATH="$1" HOME="$2" FQDN="$3" HTTPS_PORT="$4" PASEO_BIN="$5" BACKEND_PORT="$6" \
-        PY="$7" PID_GUARD="$8" MEMMAX="$9" MEMHIGH="${10}" TASKSMAX="${11}"
+        PY="$7" PID_GUARD="$8" MEMMAX="$9" MEMHIGH="${10}" TASKSMAX="${11}" \
+        NNP_BLOCK="${12:-NoNewPrivileges=yes}"
   cat <<UNITEOF
 [Unit]
 Description=airlock-paseo — Paseo daemon (coding-agent orchestration + web UI) behind the owner gate
@@ -116,7 +125,7 @@ MemoryHigh=${MEMHIGH}
 # its own, so 'pids.events' on the unit will never show 'max' climbing — the
 # slice's will instead. AIRLOCK_PASEO_TASKS_MAX puts a finite one back.
 TasksMax=${TASKSMAX}
-NoNewPrivileges=yes
+${NNP_BLOCK}
 
 [Install]
 WantedBy=default.target
