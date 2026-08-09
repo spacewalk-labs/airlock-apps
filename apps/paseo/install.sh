@@ -492,6 +492,68 @@ else
   fi
 fi
 
+# --- 2g. credential key preservation (idempotent) ---
+# The quota fetchers refresh the OAuth token when the usage API answers 401/403 and
+# write it back through a zod z.object — which STRIPS unknown keys at every level. So
+# the write-back does not update the credential file, it replaces it with the four
+# fields the schema names. ~/.claude/.credentials.json loses claudeAiOauth.expiresAt /
+# refreshTokenExpiresAt / scopes and the top-level _meta block (email/org/kind) our
+# account switcher reads; ~/.codex/auth.json loses tokens.id_token and the top-level
+# auth_mode / OPENAI_API_KEY / last_refresh (the field that says whether a green Codex
+# panel is backed by a live token). Both write paths sit inside a bare `catch {}`, so
+# the loss is silent — the next reader just finds a record with holes in it.
+# The patch merges the refreshed token fields into the object parsed from disk instead
+# of into zod's output. Data preservation only: refresh timing is untouched.
+CREDPRESERVE_PATCHER="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/credential-key-preservation.mjs"
+CREDPRESERVE_TEST="$(cd "$(dirname "${BASH_SOURCE[0]}")/patches" 2>/dev/null && pwd || true)/credential-key-preservation.test.mjs"
+QUOTA_PROVIDERS="$NPM_ROOT/${PASEO_PKG}/node_modules/@getpaseo/server/dist/server/services/quota-fetcher/providers"
+apply_cred_preserve() {  # <mode> <target-js>
+  local mode="$1" target="$2" cp_rc=0 cp_out cp_tmp
+  if [ ! -f "$target" ]; then
+    log "warning: $mode quota provider not found ($target) — credential key preservation skipped"
+    return 0
+  fi
+  cp_out="$(node "$CREDPRESERVE_PATCHER" "$mode" "$target")" || cp_rc=$?
+  case "$cp_rc" in
+    10) log "credential key preservation already applied ($mode)" ;;
+    20) log "credential key preservation anchors missing or ambiguous for $mode (paseo version drift) — skipped" ;;
+    0)
+      cp_tmp="${target}.paseo-new.mjs"
+      if node --check "$cp_tmp"; then
+        mv "$cp_tmp" "$target" || die "credential key preservation mv failed ($mode)"
+        need_restart=1   # bundle changed -> restart so the daemon runs the patched fetcher
+        log "credential key preservation applied ($mode)"
+      else
+        rm -f "$cp_tmp"
+        die "credential key preservation produced invalid JS ($mode) — not applied"
+      fi
+      ;;
+    *) die "credential key preservation patcher error ($mode rc=$cp_rc): $cp_out" ;;
+  esac
+}
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] apply credential key preservation to $QUOTA_PROVIDERS/{claude,codex}.js"
+elif [ ! -f "$CREDPRESERVE_PATCHER" ]; then
+  log "warning: credential key preservation patcher not found ($CREDPRESERVE_PATCHER) — skipped"
+else
+  apply_cred_preserve claude "$QUOTA_PROVIDERS/claude.js"
+  apply_cred_preserve codex  "$QUOTA_PROVIDERS/codex.js"
+  # Syntax-valid is not the same as key-preserving. This check slices each save method
+  # back out of the installed bundle and drives it against an in-memory fs and invented
+  # credential fixtures, so a patch that applied but reassembled wrongly fails the install
+  # instead of quietly shipping a writer that still eats fields. It never reads a real
+  # credential file.
+  if [ -f "$CREDPRESERVE_TEST" ]; then
+    for cp_mode in claude codex; do
+      if grep -q 'paseo-cred-preserve' "$QUOTA_PROVIDERS/${cp_mode}.js" 2>/dev/null; then
+        node "$CREDPRESERVE_TEST" "$cp_mode" "$QUOTA_PROVIDERS/${cp_mode}.js" >/dev/null 2>&1 \
+          || die "credential key preservation behaviour check failed ($cp_mode) — the patched bundle still drops fields"
+        log "credential key preservation behaviour check passed ($cp_mode)"
+      fi
+    done
+  fi
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).

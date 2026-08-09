@@ -53,6 +53,16 @@
       ]
     },
     {
+      "id": "credential-key-preservation",
+      "source": "apps/paseo/patches/credential-key-preservation.mjs",
+      "anchors": [
+        "    async saveClaudeCredentials(credPath, oauth) {",
+        "            const existing = ClaudeCredentialsSchema.parse(JSON.parse(await fs.readFile(credPath, \"utf8\")));",
+        "    async saveCodexAuth(authPath, original, refreshed) {",
+        "                    ...original.tokens,"
+      ]
+    },
+    {
       "id": "patch-web-ui",
       "source": "apps/paseo/browse-host/bin/patch-web-ui.js",
       "anchors": [

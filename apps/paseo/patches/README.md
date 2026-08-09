@@ -80,6 +80,30 @@ the MIT license that covers the rest of Airlock.
   half-fix). The behaviour check spawns real detached processes and asserts the shipped
   sweep reaps a survivor, because this is the half that signals other processes.
 
+- **`credential-key-preservation.mjs`** (+ `credential-key-preservation-{claude,codex}.patch`,
+  the reference copies) — paseo's quota fetchers refresh the OAuth token when the usage
+  API answers 401/403, and they write it back through a zod `z.object`, which **strips
+  unknown keys at every level**. So the write-back does not update the credential file,
+  it replaces it with the four fields the schema happens to name.
+  `~/.claude/.credentials.json` loses `claudeAiOauth.expiresAt`, `refreshTokenExpiresAt`
+  and `scopes` — and the whole top-level `_meta` block (email/org/kind) our account
+  switcher reads. `~/.codex/auth.json` loses `tokens.id_token` and the top-level
+  `auth_mode` / `OPENAI_API_KEY` / `last_refresh` (the field that says whether a green
+  Codex panel is backed by a token that is actually alive). Both write paths sit inside
+  a bare `catch {}`, so the loss is silent. The patch merges the refreshed token fields
+  into the object **parsed from disk** instead of into zod's output, and gives the claude
+  side's swallowed catch a `logger.warn` (the codex provider is constructed without a
+  logger). Data preservation only: refresh timing and the 401/403 trigger are untouched,
+  and the stale `expiresAt` is preserved rather than recomputed — a past expiry makes
+  Claude Code refresh on its own next call, an absent one leaves its state ambiguous.
+  Two independent targets, one invocation each (`claude` / `codex`); anchors must be
+  present **and** unique or it exits 20. `credential-key-preservation.test.mjs` is the
+  behaviour check — it slices each save method back out of the installed bundle and drives
+  it against an in-memory fs and invented fixtures, because "what survives a write-back"
+  is precisely what a text anchor cannot assert. It never reads a real credential file.
+  Verify after install:
+  `node credential-key-preservation.test.mjs claude <installed>/quota-fetcher/providers/claude.js`.
+
 - **`anchor-manifest.json`** — records the pinned Paseo/web-ui version, web-ui SHA, every
   patcher's representative bundle anchors, and the guard-before-group dependency. The
   offline drift test checks that the manifest still agrees with the installer and patcher
