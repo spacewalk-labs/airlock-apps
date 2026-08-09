@@ -90,7 +90,7 @@ a half-configured install is visible to a script and not only in the boot log.
 ### Tests
 
 ```
-python3 backend/test_devmon.py     # 135 offline checks, no install required
+python3 backend/test_devmon.py     # 141 offline checks, no install required
 ```
 
 Covers validation, dedup, coalescing, crash recovery, urgency promotion, read≠notified,
