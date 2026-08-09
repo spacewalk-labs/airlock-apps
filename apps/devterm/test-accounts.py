@@ -36,6 +36,12 @@ check("5h warn", g._acct_alert_level(TH["warn5"], 0, None) == ("warn", "usage"))
 check("5h crit", g._acct_alert_level(TH["crit5"], 0, None) == ("crit", "usage"))
 check("5h spent does not mute 7d crit",
       g._acct_alert_level(100, TH["crit7"], None) == ("crit", "usage"))
+# The case the old grader got wrong: it skipped the 5h axis entirely once the window was
+# spent, so a fully exhausted account with a quiet 7d window graded "none" — healthy.
+# 100 is worse than crit5, never exempt from it.
+check("5h spent alone is crit", g._acct_alert_level(100, 0, None) == ("crit", "usage"))
+check("5h spent is crit even with 7d at zero and no login warning",
+      g._acct_alert_level(100, 0, 30) == ("crit", "usage"))
 check("login warn beats usage warn at equal severity",
       g._acct_alert_level(TH["warn5"], 0, 3) == ("warn", "login"))
 check("usage crit beats login warn",

@@ -13,8 +13,8 @@ window.initAccounts = function initAccounts(deps) {
 
 // ---- Claude account switch (claude-switch) — click the top square icon ----
 // usage color rule: 5h and 7d have different thresholds; the row color is the worse of
-// the two (OR). 5h at the lock threshold suppresses only its own axis (it is already
-// spent; the 7d grade still stands on its own).
+// the two (OR). Neither axis is ever suppressed — a spent 5h window is the strongest
+// reason this list has to say "not this one".
 // The threshold NUMBERS are deliberately not here — the backend's USAGE_TH is the only
 // source and ships them in /accounts and /acct-alert as `thresholds`. devterm's icon,
 // these rows and the Airlock return widget (a different origin) all grade against the
@@ -34,11 +34,14 @@ function usageLevel(kind, p) {   // 0=ok 1=warn 2=critical
 }
 function levelColor(lv) { return lv === 2 ? C_RED : lv === 1 ? C_AMBER : C_GREEN; }
 
-// row color = OR (the worse of the two). The lock threshold mutes the 5h axis only.
+// row color = OR (the worse of the two). Nothing mutes an axis: this list answers
+// "which account can I use right now", and a 5h window at 100% is the one state where
+// the answer is certainly no. It used to drop the 5h axis once the window was spent,
+// which painted a fully exhausted account GREEN — measured 2026-08-09 on a row reading
+// `5h 100% / 7d 15%`, sitting green next to accounts that were merely at 95%.
 function usageColor(u5, u7) {
   if (!TH) return C_GRAY;                 // thresholds unknown = neutral; green and red would both be a lie
-  const lv5 = u5 != null && u5 >= TH.lock5 ? 0 : usageLevel('5h', u5);
-  return levelColor(Math.max(lv5, usageLevel('7d', u7)));
+  return levelColor(Math.max(usageLevel('5h', u5), usageLevel('7d', u7)));
 }
 
 // reset-time formatting — like a statusline (5h = time only / 7d = date + time). ISO(UTC) -> local.

@@ -88,9 +88,13 @@ ORCA_SHIM = os.path.expanduser(os.environ.get("DEVTERM_ORCA_SHIM", ""))
 # These numbers live here and nowhere else. /accounts ships them to the frontend as
 # `thresholds` and /acct-alert ships the *verdict*; if a frontend kept its own copy,
 # the row colour and the widget ring would disagree the moment one of them changed.
-#   warn5/crit5 = 5h window %, warn7/crit7 = 7d window %, lock5 = 5h treated as spent,
+#   warn5/crit5 = 5h window %, warn7/crit7 = 7d window %,
 #   rtWarnDays  = warn when the refresh token expires within this many days.
-USAGE_TH = {"warn5": 78, "crit5": 88, "warn7": 88, "crit7": 93, "lock5": 100, "rtWarnDays": 5}
+# There is deliberately no "spent" threshold above crit5. One existed (lock5 = 100) and
+# both graders read it as "stop looking at the 5h axis", so a window at 100% scored
+# healthy — the exhausted account rendered green while a 95% one rendered red. 100 is
+# already >= crit5; a separate number for it only bought a way to exempt it.
+USAGE_TH = {"warn5": 78, "crit5": 88, "warn7": 88, "crit7": 93, "rtWarnDays": 5}
 ACCT_ALERT_TTL = 30          # /acct-alert response cache (s): N tabs polling every 30s
                              # still costs one claude-switch call per window.
 LIVE_USAGE_TTL = 60          # cache for the live account's own usage probe (s) — used
@@ -1680,8 +1684,10 @@ def _acct_alert_level(u5, u7, rt_days, codex_u7=None, codex_err=None):
     Reason priority is login=3 > usage=2 > codex=1: at equal severity a looming login
     expiry is the more actionable message, and codex is the newest axis so it never
     displaces the two that were there before.
-    A spent 5h window does not mute the 7d axis — "5h exhausted" and "7d critical" are
-    separate facts and collapsing them hides the one that lasts longer.
+    A spent 5h window mutes nothing, including itself. "5h exhausted" and "7d critical"
+    are separate facts and collapsing them hides the one that lasts longer — and a 5h
+    window at 100% is not a quiet state, it is the account being unusable right now.
+    Grading it as anything but crit reported an exhausted account as healthy.
     codex_err="auth" (claude-status's verdict that the stored Codex credential was
     revoked) is graded as crit on the codex axis: the panel still shows a healthy
     email + plan, so without this the first report is an agent failing mid-run."""
@@ -1690,7 +1696,7 @@ def _acct_alert_level(u5, u7, rt_days, codex_u7=None, codex_err=None):
     rt_days = _finite_number(rt_days)
     codex_u7 = _finite_number(codex_u7)
     candidates = []
-    if u5 is not None and u5 < USAGE_TH["lock5"]:
+    if u5 is not None:
         if u5 >= USAGE_TH["crit5"]:
             candidates.append((2, 2, "crit", "usage"))
         elif u5 >= USAGE_TH["warn5"]:
