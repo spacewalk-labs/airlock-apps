@@ -17,6 +17,17 @@ slack_webhook_env = ""
 exec_cwd_root = ""
 exec_session = "devmon-exec"
 skill_allow = ""
+# Credential freshness. Off by default: the check reads files under the operator's home
+# that belong to other tools, so looking at them at all is an opt-in. On, the dashboard
+# grows a card and /api/tokens answers; the periodic half is a separate explicit act
+# (apps/dev-monitor/install-token-timer.sh), because a standing timer is not something a
+# config default should switch on.
+token_freshness = false
+# Claude: warn once the refresh-token deadline is this close.
+token_freshness_warn_hours = 24
+# Codex: warn once tokens.last_refresh is this old. There is no expiry field to read, so
+# age is the only evidence the session is still alive.
+token_freshness_stale_hours = 24
 
 # Transcribed from install/prerequisites.tsv's four dev-monitor rows (F11).
 [[prerequisites]]

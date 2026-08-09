@@ -32,6 +32,27 @@ fail=0
 [ "$c_deny" = 403 ] || { echo "FAIL other identity not denied (GATE HOLE)"; fail=1; }
 [ "$c_no"   = 403 ] || { echo "FAIL missing header not denied (GATE HOLE)"; fail=1; }
 
+# --- credential freshness ---
+# Same shape as the console check below: `state` is what the backend actually managed to
+# start, not what the config asked for, so a requested-but-broken feature reads as off
+# here and is caught. The route is asserted both ways round — with the feature off it must
+# 404 rather than answer an empty provider list, which would render as "nothing wrong".
+tok_state=$(curl -s --max-time 6 "http://127.0.0.1:${BACKEND}/api/health" \
+        | python3 -c 'import sys,json; print(json.load(sys.stdin).get("token_freshness","?"))' 2>/dev/null || echo '?')
+tok_want="${AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS:-false}"
+c_tok=$(code -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/monitor/api/tokens")
+echo "[dev-monitor smoke] token freshness: configured=${tok_want} running=${tok_state} route=${c_tok}"
+if [ "$tok_want" = true ]; then
+  [ "$tok_state" = on ] || { echo "FAIL token_freshness = true but the checker did not load (see journalctl --user -u airlock-dev-monitor)"; fail=1; }
+  [ "$c_tok" = 200 ] || { echo "FAIL token_freshness is on but /monitor/api/tokens answered ${c_tok}"; fail=1; }
+  # The card is on; the CHECKING is separate. A card that only ever shows a live reading
+  # looks identical whether the timer ran this morning or was never installed.
+  systemctl --user list-timers airlock-token-freshness.timer --no-pager --no-legend 2>/dev/null | grep -q . \
+    || echo "WARN token_freshness is on but no airlock-token-freshness.timer is wired — the card shows a live reading and nothing checks on a schedule (bash apps/dev-monitor/install-token-timer.sh)"
+else
+  [ "$c_tok" = 404 ] || { echo "FAIL token freshness is off but its route answered ${c_tok}"; fail=1; }
+fi
+
 # --- message/action console ---
 # `messages` here is what the backend actually managed to start, not what the config
 # asked for; a requested-but-unconfigured install reports "off" and is caught below.

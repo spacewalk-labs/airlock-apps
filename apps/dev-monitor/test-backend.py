@@ -538,5 +538,318 @@ class OwnerRouteTest(unittest.TestCase):
         self.assertEqual(status, 403)
 
 
+import devmon_tokens as TOK  # noqa: E402  (imported here to sit with its own tests)
+
+# Every credential fixture below carries this string where the real file carries a token.
+# Nothing the checker returns may contain it — see NoTokenLeakTest, which is the reason
+# the sentinel is a single constant rather than a different literal per fixture.
+SENTINEL = 'sk-ant-FAKE-DO-NOT-LEAK-0123456789'
+
+
+def _ms(dt):
+    return int(dt.timestamp() * 1000)
+
+
+class TokenFixtureMixin:
+    """Writes FAKE credential files into a scratch dir. Never reads a real one."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.now = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
+
+    def _write(self, name, payload):
+        path = os.path.join(self.tmp.name, name)
+        with open(path, 'w') as f:
+            f.write(payload if isinstance(payload, str) else json.dumps(payload))
+        return path
+
+    def _claude(self, **oauth):
+        base = {'accessToken': SENTINEL, 'refreshToken': SENTINEL,
+                'scopes': ['user:inference'], 'subscriptionType': 'max'}
+        base.update(oauth)
+        return self._write('.credentials.json', {'claudeAiOauth': base})
+
+    def _codex(self, last_refresh, auth_mode='chatgpt', nested=False):
+        """The REAL layout: last_refresh sits at the top level, NOT inside `tokens`.
+
+        Transcribed from an actual ~/.codex/auth.json rather than from where the field
+        looks like it belongs. The first version of this fixture invented the nested
+        shape, the checker was written to match the fixture, and the whole suite passed
+        green against a checker that would have reported `unknown` on every real box.
+        `nested=True` covers the fallback path only.
+        """
+        payload = {'OPENAI_API_KEY': None, 'auth_mode': auth_mode,
+                   'tokens': {'id_token': SENTINEL, 'access_token': SENTINEL,
+                              'refresh_token': SENTINEL, 'account_id': SENTINEL}}
+        if nested:
+            payload['tokens']['last_refresh'] = last_refresh
+        else:
+            payload['last_refresh'] = last_refresh
+        return self._write('auth.json', payload)
+
+
+class ClaudeFreshnessTest(TokenFixtureMixin, unittest.TestCase):
+
+    def test_plenty_of_time_is_ok(self):
+        path = self._claude(expiresAt=_ms(self.now + timedelta(hours=6)),
+                            refreshTokenExpiresAt=_ms(self.now + timedelta(days=20)))
+        v = TOK.check_claude(path, self.now, warn_hours=24)
+        self.assertEqual(v['status'], TOK.OK)
+        # The access token turning over in six hours is normal and must NOT warn; the
+        # refresh deadline is what a person has to act on.
+        self.assertEqual(v['deadline_field'], 'refreshTokenExpiresAt')
+
+    def test_refresh_deadline_inside_the_window_is_expiring_soon(self):
+        path = self._claude(expiresAt=_ms(self.now + timedelta(hours=3)),
+                            refreshTokenExpiresAt=_ms(self.now + timedelta(hours=10)))
+        v = TOK.check_claude(path, self.now, warn_hours=24)
+        self.assertEqual(v['status'], TOK.EXPIRING)
+        self.assertEqual(v['seconds_remaining'], 10 * 3600)
+
+    def test_past_deadline_is_expired(self):
+        path = self._claude(expiresAt=_ms(self.now - timedelta(days=2)),
+                            refreshTokenExpiresAt=_ms(self.now - timedelta(hours=1)))
+        v = TOK.check_claude(path, self.now, warn_hours=24)
+        self.assertEqual(v['status'], TOK.EXPIRED)
+        self.assertLess(v['seconds_remaining'], 0)
+
+    def test_no_refresh_field_falls_back_to_the_access_deadline(self):
+        path = self._claude(expiresAt=_ms(self.now + timedelta(hours=2)))
+        v = TOK.check_claude(path, self.now, warn_hours=24)
+        self.assertEqual((v['status'], v['deadline_field']), (TOK.EXPIRING, 'expiresAt'))
+
+    def test_a_missing_file_is_unknown_and_never_ok(self):
+        v = TOK.check_claude(os.path.join(self.tmp.name, 'nope.json'), self.now)
+        self.assertEqual(v['status'], TOK.UNKNOWN)
+        self.assertEqual(v['reason'], 'missing')
+        self.assertNotEqual(v['status'], TOK.OK)
+
+    def test_malformed_json_is_unknown_not_a_crash(self):
+        path = self._write('.credentials.json', '{"claudeAiOauth": {"expiresAt":')
+        v = TOK.check_claude(path, self.now)
+        self.assertEqual((v['status'], v['reason']), (TOK.UNKNOWN, 'malformed JSON'))
+
+    def test_a_present_file_with_no_expiry_field_is_unknown(self):
+        path = self._claude()      # tokens but no timestamps at all
+        v = TOK.check_claude(path, self.now)
+        self.assertEqual(v['status'], TOK.UNKNOWN)
+
+    def test_a_boolean_is_not_a_timestamp(self):
+        # json.loads turns `true` into a Python bool, which is an int. Read as epoch ms it
+        # would be 1970 — i.e. a token that reads as long expired for the wrong reason.
+        path = self._claude(expiresAt=True)
+        self.assertEqual(TOK.check_claude(path, self.now)['status'], TOK.UNKNOWN)
+
+
+class CodexFreshnessTest(TokenFixtureMixin, unittest.TestCase):
+
+    def test_a_recent_refresh_is_ok(self):
+        path = self._codex((self.now - timedelta(hours=2)).isoformat())
+        v = TOK.check_codex(path, self.now, stale_hours=24)
+        self.assertEqual(v['status'], TOK.OK)
+        # Pinned, because reading the wrong one of these two is invisible: it produces a
+        # permanent `unknown` that looks exactly like "codex is not set up here".
+        self.assertEqual(v['last_refresh_field'], 'last_refresh')
+
+    def test_the_nested_layout_is_still_accepted(self):
+        path = self._codex((self.now - timedelta(hours=2)).isoformat(), nested=True)
+        v = TOK.check_codex(path, self.now, stale_hours=24)
+        self.assertEqual((v['status'], v['last_refresh_field']),
+                         (TOK.OK, 'tokens.last_refresh'))
+
+    def test_a_file_with_tokens_but_no_last_refresh_is_unknown(self):
+        # The exact shape the field-name bug produced on every real box.
+        path = self._write('auth.json', {'auth_mode': 'chatgpt',
+                                         'tokens': {'access_token': SENTINEL}})
+        self.assertEqual(TOK.check_codex(path, self.now)['status'], TOK.UNKNOWN)
+
+    def test_a_stale_refresh_warns(self):
+        path = self._codex((self.now - timedelta(days=4)).isoformat())
+        v = TOK.check_codex(path, self.now, stale_hours=24)
+        self.assertEqual(v['status'], TOK.EXPIRING)
+
+    def test_staleness_never_claims_expired(self):
+        # last_refresh cannot prove death, only silence. Claiming `expired` from it would
+        # be a verdict the data does not support.
+        path = self._codex((self.now - timedelta(days=400)).isoformat())
+        self.assertEqual(TOK.check_codex(path, self.now)['status'], TOK.EXPIRING)
+
+    def test_api_key_mode_has_no_clock_to_age(self):
+        path = self._codex((self.now - timedelta(days=400)).isoformat(), auth_mode='apikey')
+        v = TOK.check_codex(path, self.now, stale_hours=24)
+        self.assertEqual(v['status'], TOK.OK)
+        self.assertIn('api-key', v['detail'])
+
+    def test_a_missing_file_is_unknown(self):
+        v = TOK.check_codex(os.path.join(self.tmp.name, 'nope.json'), self.now)
+        self.assertEqual((v['status'], v['reason']), (TOK.UNKNOWN, 'missing'))
+
+    def test_malformed_json_is_unknown(self):
+        path = self._write('auth.json', 'not json at all')
+        self.assertEqual(TOK.check_codex(path, self.now)['status'], TOK.UNKNOWN)
+
+    def test_a_future_refresh_is_unknown_not_freshest_possible(self):
+        path = self._codex((self.now + timedelta(hours=3)).isoformat())
+        self.assertEqual(TOK.check_codex(path, self.now)['status'], TOK.UNKNOWN)
+
+
+class WorstStatusTest(unittest.TestCase):
+
+    def test_unknown_outranks_ok(self):
+        self.assertEqual(TOK.worst_status([{'status': TOK.OK}, {'status': TOK.UNKNOWN}]),
+                         TOK.UNKNOWN)
+
+    def test_expired_outranks_everything(self):
+        self.assertEqual(
+            TOK.worst_status([{'status': TOK.UNKNOWN}, {'status': TOK.EXPIRED},
+                              {'status': TOK.EXPIRING}]), TOK.EXPIRED)
+
+
+class NoTokenLeakTest(TokenFixtureMixin, unittest.TestCase):
+    """The rule the whole module is built around, asserted rather than assumed.
+
+    Not a review checklist item: a future contributor adding a 'raw' field for debugging
+    would put a live credential into a JSON route, a dashboard card and a spool payload
+    in one commit. This test is what stops that.
+    """
+
+    def test_no_credential_value_reaches_the_verdict(self):
+        claude = self._claude(expiresAt=_ms(self.now + timedelta(hours=1)),
+                              refreshTokenExpiresAt=_ms(self.now + timedelta(hours=2)))
+        codex = self._codex((self.now - timedelta(days=9)).isoformat())
+        snap = TOK.check_all(now=self.now, claude_path=claude, codex_path=codex)
+        blob = json.dumps(snap)
+        self.assertNotIn(SENTINEL, blob)
+        # Not just the sentinel: no field whose NAME says token may carry a value either.
+        for provider in snap['providers']:
+            for key, value in provider.items():
+                if 'token' in key.lower():
+                    self.assertNotIsInstance(value, str, key)
+
+    def test_the_snapshot_written_to_disk_carries_no_credential(self):
+        claude = self._claude(expiresAt=_ms(self.now - timedelta(hours=1)))
+        snap = TOK.check_all(now=self.now, claude_path=claude,
+                             codex_path=self._codex('nonsense'))
+        path = os.path.join(self.tmp.name, 'state', 'token-freshness.json')
+        TOK.write_snapshot(path, snap)
+        with open(path) as f:
+            self.assertNotIn(SENTINEL, f.read())
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
+
+class SnapshotTest(TokenFixtureMixin, unittest.TestCase):
+
+    def test_a_never_written_snapshot_reads_as_none(self):
+        self.assertIsNone(TOK.read_snapshot(os.path.join(self.tmp.name, 'absent.json')))
+
+    def test_age_is_reported_so_a_dead_checker_shows_as_stale(self):
+        path = os.path.join(self.tmp.name, 'snap.json')
+        old = TOK.now_utc() - timedelta(hours=30)
+        TOK.write_snapshot(path, {'checked_at': TOK.iso(old), 'providers': []})
+        got = TOK.read_snapshot(path)
+        self.assertGreater(got['age_seconds'], 29 * 3600)
+
+
+class TokenRouteTest(TokenFixtureMixin, unittest.TestCase):
+    """The route's gate, exercised through the handler's own dispatch decision."""
+
+    def test_state_is_off_unless_configured(self):
+        saved = DM.TOKEN_FRESHNESS
+        try:
+            DM.TOKEN_FRESHNESS = False
+            self.assertEqual(DM._token_state(), 'off')
+            DM.TOKEN_FRESHNESS = True
+            self.assertEqual(DM._token_state(), 'on' if DM.TOKENS else 'unavailable')
+        finally:
+            DM.TOKEN_FRESHNESS = saved
+
+    def test_requested_but_unimportable_is_unavailable_not_on(self):
+        saved_flag, saved_mod = DM.TOKEN_FRESHNESS, DM.TOKENS
+        try:
+            DM.TOKEN_FRESHNESS, DM.TOKENS = True, None
+            self.assertEqual(DM._token_state(), 'unavailable')
+        finally:
+            DM.TOKEN_FRESHNESS, DM.TOKENS = saved_flag, saved_mod
+
+    def test_a_bad_threshold_falls_back_instead_of_taking_the_route_down(self):
+        os.environ['AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_WARN_HOURS'] = 'soon-ish'
+        self.addCleanup(os.environ.pop, 'AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_WARN_HOURS', None)
+        self.assertEqual(
+            DM._token_hours('AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_WARN_HOURS', 24), 24)
+
+
+class TokenTimerCliTest(TokenFixtureMixin, unittest.TestCase):
+    """The periodic half: what it writes, and what it publishes."""
+
+    def _runner(self):
+        spec = importlib.util.spec_from_file_location(
+            'token_freshness_cli', os.path.join(HERE, 'token-freshness.py'))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def _spool(self):
+        spool = os.path.join(self.tmp.name, 'spool')
+        for d in ('tmp', 'new', 'processing', 'bad'):
+            os.makedirs(os.path.join(spool, d), mode=0o700)
+        return spool
+
+    def test_it_writes_a_snapshot_and_publishes_only_what_needs_attention(self):
+        cli = self._runner()
+        spool = self._spool()
+        snapshot = os.path.join(self.tmp.name, 'snap.json')
+        claude = self._claude(refreshTokenExpiresAt=_ms(TOK.now_utc() - timedelta(hours=2)))
+        codex = self._codex(TOK.iso(TOK.now_utc()))
+        rc = cli.main(['--snapshot', snapshot, '--spool', spool, '--quiet',
+                       '--claude-credentials', claude, '--codex-auth', codex])
+        self.assertEqual(rc, 0)
+        published = os.listdir(os.path.join(spool, 'new'))
+        # One card: claude is expired, codex was refreshed a moment ago.
+        self.assertEqual(len(published), 1, published)
+        with open(os.path.join(spool, 'new', published[0])) as f:
+            card = json.load(f)
+        MSG.validate_payload(card)          # the collector must accept what we publish
+        self.assertEqual(card['urgency'], 'urgent')
+        self.assertNotIn(SENTINEL, json.dumps(card))
+        with open(snapshot) as f:
+            self.assertEqual(json.load(f)['worst'], TOK.EXPIRED)
+
+    def test_a_healthy_box_publishes_nothing_but_still_records_the_check(self):
+        cli = self._runner()
+        spool = self._spool()
+        snapshot = os.path.join(self.tmp.name, 'snap.json')
+        claude = self._claude(refreshTokenExpiresAt=_ms(TOK.now_utc() + timedelta(days=30)))
+        codex = self._codex(TOK.iso(TOK.now_utc()))
+        self.assertEqual(0, cli.main(['--snapshot', snapshot, '--spool', spool, '--quiet',
+                                      '--claude-credentials', claude, '--codex-auth', codex]))
+        self.assertEqual(os.listdir(os.path.join(spool, 'new')), [])
+        self.assertTrue(os.path.exists(snapshot))
+
+    def test_an_absent_credentials_file_does_not_generate_a_daily_card(self):
+        # It is still `unknown` in the snapshot — it just does not push. A provider that
+        # was never set up on this box must not train the reader to ignore the channel.
+        cli = self._runner()
+        spool = self._spool()
+        snapshot = os.path.join(self.tmp.name, 'snap.json')
+        missing = os.path.join(self.tmp.name, 'absent.json')
+        self.assertEqual(0, cli.main(['--snapshot', snapshot, '--spool', spool, '--quiet',
+                                      '--claude-credentials', missing,
+                                      '--codex-auth', missing]))
+        self.assertEqual(os.listdir(os.path.join(spool, 'new')), [])
+        with open(snapshot) as f:
+            self.assertEqual(json.load(f)['worst'], TOK.UNKNOWN)
+
+    def test_an_unreadable_file_does_publish(self):
+        cli = self._runner()
+        spool = self._spool()
+        broken = self._write('.credentials.json', '{oops')
+        self.assertEqual(0, cli.main(['--snapshot', os.path.join(self.tmp.name, 's.json'),
+                                      '--spool', spool, '--quiet',
+                                      '--claude-credentials', broken,
+                                      '--codex-auth', os.path.join(self.tmp.name, 'absent.json')]))
+        self.assertEqual(len(os.listdir(os.path.join(spool, 'new'))), 1)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=1)

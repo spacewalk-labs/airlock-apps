@@ -40,11 +40,34 @@ except ImportError:
     action_runner = None
     _MESSAGES_AVAILABLE = False
 
+# Credential freshness is imported on its own, not with the bundle above: it needs none
+# of those modules and must keep working on an install that has no message console.
+try:
+    import devmon_tokens as TOKENS
+except ImportError:
+    TOKENS = None
+
 PORT = int(os.environ.get('AIRLOCK_DEV_MONITOR_BACKEND_PORT', '18804'))
 IDENTITY_HEADER = os.environ.get('AIRLOCK_IDENTITY_HEADER', 'Tailscale-User-Login')
 # Whether the optional message/action console was requested in configuration.
 MESSAGES_REQUESTED = os.environ.get(
     'AIRLOCK_DEV_MONITOR_MESSAGES', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+TOKEN_FRESHNESS = os.environ.get(
+    'AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS', 'false').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def _token_hours(name, default):
+    """A bad threshold must not take the route down — it falls back and says so."""
+    raw = os.environ.get(name, '').strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
+TOKEN_WARN_HOURS = _token_hours('AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_WARN_HOURS', 24)
+TOKEN_STALE_HOURS = _token_hours('AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_STALE_HOURS', 24)
 HOME = os.path.expanduser('~')
 # Origins that count as "this box, another port" for the unread badge. The installer
 # measures the tailnet FQDN and passes it; without it we still know our own hostname,
@@ -595,6 +618,36 @@ def recent_logs(unit='airlock-dev-monitor', n=10):
     return lines
 
 
+# ---- credential freshness ----
+def token_freshness_info():
+    """Live verdicts, plus how old the TIMER's last verdict is.
+
+    Two clocks on purpose. The live half answers "how long is left" the moment the page
+    is opened; `last_check` answers "is anything actually watching". A card that showed
+    only the live half would look identical whether the timer had run this morning or
+    died in March, and a card that showed only the snapshot would go stale silently.
+    """
+    snapshot_path = TOKENS.snapshot_path()
+    last = TOKENS.read_snapshot(snapshot_path)
+    live = TOKENS.check_all(warn_hours=TOKEN_WARN_HOURS, stale_hours=TOKEN_STALE_HOURS)
+    live['last_check'] = {
+        'path': snapshot_path,
+        # None both times, and they mean different things: never = the timer has never
+        # run here, which is not the same as a run whose age we know.
+        'checked_at': last.get('checked_at') if last else None,
+        'age_seconds': last.get('age_seconds') if last else None,
+        'ever': last is not None,
+    }
+    return live
+
+
+def _token_state():
+    """What the health endpoint admits to: what was ASKED FOR is not what is RUNNING."""
+    if not TOKEN_FRESHNESS:
+        return 'off'
+    return 'on' if TOKENS is not None else 'unavailable'
+
+
 # ---- HTTP handler ----
 class Handler(BaseHTTPRequestHandler):
     def _cors_origin(self):
@@ -681,6 +734,16 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/storage', '/storage'):
             self._json(200, {'items': storage_info()})
             return
+        if path in ('/api/tokens', '/tokens'):
+            # 404 rather than an empty answer when the feature is off: an empty provider
+            # list would render as "nothing wrong here", which is the one thing this
+            # feature must never say by accident.
+            if _token_state() != 'on':
+                self._json(404, {'ok': False, 'error': 'token freshness not enabled',
+                                 'state': _token_state()})
+                return
+            self._json(200, token_freshness_info())
+            return
         if path in ('/api/history', '/history'):
             self._json(200, history_summary())
             return
@@ -709,7 +772,8 @@ class Handler(BaseHTTPRequestHandler):
             # afterwards — smoke.sh included.
             self._json(200, {'ok': True, 'service': 'airlock-dev-monitor', 'port': PORT,
                              'messages': _messages_state(),
-                             'messages_requested': MESSAGES_REQUESTED})
+                             'messages_requested': MESSAGES_REQUESTED,
+                             'token_freshness': _token_state()})
             return
         self._json(404, {'ok': False, 'error': f'unknown path: {path}'})
 

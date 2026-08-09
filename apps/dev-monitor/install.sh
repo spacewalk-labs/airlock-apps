@@ -32,6 +32,9 @@ SLACK_WEBHOOK_ENV="${AIRLOCK_DEV_MONITOR_SLACK_WEBHOOK_ENV:-}"
 EXEC_CWD_ROOT="${AIRLOCK_DEV_MONITOR_EXEC_CWD_ROOT:-}"
 EXEC_SESSION="${AIRLOCK_DEV_MONITOR_EXEC_SESSION:-devmon-exec}"
 SKILL_ALLOW="${AIRLOCK_DEV_MONITOR_SKILL_ALLOW:-}"
+TOKEN_FRESHNESS="${AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS:-false}"
+TOKEN_WARN_HOURS="${AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_WARN_HOURS:-24}"
+TOKEN_STALE_HOURS="${AIRLOCK_DEV_MONITOR_TOKEN_FRESHNESS_STALE_HOURS:-24}"
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
 IDENTITY_HEADER="${AIRLOCK_IDENTITY_HEADER:?}"
@@ -173,7 +176,14 @@ if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
 else
   install -d "$UNIT_DIR"
   render_dev_monitor_unit "$BACKEND_PORT" "$MESSAGES" "$IDENTITY_HEADER" "$cors_hosts" "$DEVMON_ENV" \
+    "$TOKEN_FRESHNESS" "$TOKEN_WARN_HOURS" "$TOKEN_STALE_HOURS" \
     >"$UNIT_DIR/airlock-dev-monitor.service"
+fi
+# The card is on; the CHECKING is not. Said once at install time, because "the feature is
+# enabled" and "something is looking at your tokens on a schedule" are different facts and
+# the dashboard cannot tell them apart until the first snapshot exists.
+if [ "$TOKEN_FRESHNESS" = true ] && [ ! -f "$HOME/.config/systemd/user/airlock-token-freshness.timer" ]; then
+  log "NOTE: token_freshness is on, so the dashboard card and /api/tokens are live — but nothing checks on a schedule yet. Wire the timer with: bash $HERE/install-token-timer.sh"
 fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-dev-monitor.service

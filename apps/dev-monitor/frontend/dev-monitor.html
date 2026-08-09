@@ -306,6 +306,15 @@
     </div>
   </div>
 
+  <!-- Credential freshness — hidden entirely until /api/tokens answers, because the
+       feature is off by default and an empty panel reads as "nothing to report". -->
+  <div class="section" id="tokens-section" hidden>
+    <h2><svg class="ic"><use href="#ic-host"/></svg> Credentials <span class="hint" id="tokens-hint">— provider token expiry · last checked</span></h2>
+    <div class="cards" id="token-cards">
+      <div class="card"><div class="h"><span>Providers</span></div><div class="v">…</div></div>
+    </div>
+  </div>
+
   <!-- CPU -->
   <div class="section">
     <h2><svg class="ic"><use href="#ic-cpu"/></svg> CPU <span class="hint">— now · 1h/1d average · top consumers</span></h2>
@@ -598,7 +607,70 @@
 
   document.getElementById('log-unit').addEventListener('change', function (ev) { loadLogs(ev.target.value); });
 
+  // ---- credential freshness ----
+  // Severity, not tidiness: `unknown` is styled as a warning, never as a neutral card.
+  // A missing credentials file rendering as calm grey is the exact failure the backend
+  // refuses to produce, and the UI must not reintroduce it.
+  function tokenClass(status) {
+    return status === 'expired' ? 'danger' : (status === 'ok' ? '' : 'warn');
+  }
+  function humanDur(seconds) {
+    if (seconds == null) return '—';
+    var past = seconds < 0, s = Math.abs(Math.round(seconds));
+    var d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+    var t = d ? (d + 'd ' + h + 'h') : (h ? (h + 'h ' + m + 'm') : (m + 'm'));
+    return past ? (t + ' ago') : ('in ' + t);
+  }
+  function loadTokens() {
+    return fetch(API + '/tokens', { cache: 'no-store' }).then(function (r) {
+      if (r.status === 404) { document.getElementById('tokens-section').hidden = true; return null; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (d) {
+      if (!d) return;
+      document.getElementById('tokens-section').hidden = false;
+      var html = '';
+      (d.providers || []).forEach(function (p) {
+        html += '<div class="card ' + tokenClass(p.status) + '">' +
+          '<div class="h"><span>' + escHTML(p.provider) + '</span></div>' +
+          '<div class="v" style="font-size:1.05rem">' + escHTML(p.status) + '</div>' +
+          '<div class="sub">' + escHTML(p.detail || '') + '</div></div>';
+      });
+      // The last-check card is part of the panel, not a footnote: a checker that stopped
+      // running is the failure mode, and it has to be as visible as an expiry.
+      var lc = d.last_check || {};
+      // Three states, not two. A snapshot that exists but whose timestamp cannot be
+      // parsed has age_seconds === null, and treating that as `|| 0` would print
+      // "in 0m" in a neutral card — an unknown state shown as the healthiest possible
+      // one, which is the single thing this panel must never do.
+      var age = lc.ever ? lc.age_seconds : undefined;
+      var unreadable = lc.ever && age == null;
+      var stale = !lc.ever || unreadable || age > 48 * 3600;
+      html += '<div class="card ' + (stale ? 'warn' : '') + '">' +
+        '<div class="h"><span>Last check</span></div>' +
+        '<div class="v" style="font-size:1.05rem">' +
+          (!lc.ever ? 'never' : (unreadable ? 'unknown' : escHTML(humanDur(-age)))) + '</div>' +
+        '<div class="sub">' + (!lc.ever
+          ? 'no scheduled check has run — install-token-timer.sh'
+          : (unreadable ? 'the snapshot carries no readable timestamp'
+                        : escHTML(lc.checked_at || ''))) + '</div></div>';
+      document.getElementById('token-cards').innerHTML = html;
+      document.getElementById('tokens-hint').textContent =
+        '— warn at ' + d.warn_hours + 'h · codex stale at ' + d.stale_hours + 'h';
+    }).catch(function (e) {
+      // Reachable-but-broken is its own state. Hiding the panel here would turn a
+      // backend error into "no credentials to worry about".
+      document.getElementById('tokens-section').hidden = false;
+      document.getElementById('token-cards').innerHTML =
+        '<div class="card danger"><div class="h"><span>Credentials</span></div>' +
+        '<div class="v" style="font-size:14px">check unavailable</div>' +
+        '<div class="sub">' + escHTML(e.message) + '</div></div>';
+    });
+  }
+
   // ---- initial load + auto-refresh ----
+  loadTokens();
+  setInterval(loadTokens, 60000);
   loadOverview();
   loadTop();
   loadServices();
