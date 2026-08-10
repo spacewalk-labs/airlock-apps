@@ -154,6 +154,16 @@ PREFS_DIR = os.path.expanduser("~/.config/airlock-devterm")
 PREFS_PATH = os.path.join(PREFS_DIR, "tabs.json")
 PREFS_MAX = 256 * 1024
 
+# ---- last known Codex usage, kept across restarts ----
+# The in-memory cache dies with the process, and the reading costs an app-server spawn
+# that takes up to CODEX_USAGE_WAIT seconds. So every gate restart used to open the panel
+# on a blank Codex row and hold it there while the probe ran. The number is a few minutes
+# old at worst and the row already has a vocabulary for that ("(last value)"), so showing
+# the remembered one immediately and correcting it when the probe lands beats showing
+# nothing. State, not config — it is derived and disposable.
+CODEX_USAGE_STATE_DIR = os.path.expanduser("~/.local/state/airlock/devterm")
+CODEX_USAGE_STATE = os.path.join(CODEX_USAGE_STATE_DIR, "codex-usage.json")
+
 _CTYPES = {
     ".html": b"text/html; charset=utf-8", ".js": b"text/javascript; charset=utf-8",
     ".css": b"text/css; charset=utf-8", ".json": b"application/json; charset=utf-8",
@@ -2087,6 +2097,65 @@ def _codex_has_usage_value(result):
                     for key in ("use5h", "use7d")))
 
 
+def _codex_usage_state_save():
+    """Remember the last good reading. Best effort — this is a cache, and failing to
+    write one must never disturb the request that produced it."""
+    payload = _codex_usage_cache.get("payload")
+    value_at = _codex_usage_cache.get("valueAt", 0.0)
+    if not _codex_has_usage_value(payload) or value_at <= 0:
+        return False
+    record = {"payload": payload, "valueAt": value_at,
+              "authMtime": _codex_usage_cache.get("authMtime")}
+    try:
+        os.makedirs(CODEX_USAGE_STATE_DIR, exist_ok=True)
+        tmp = CODEX_USAGE_STATE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(record, f)
+        os.replace(tmp, CODEX_USAGE_STATE)
+        return True
+    except OSError:
+        return False
+
+
+def _codex_usage_state_drop():
+    try:
+        os.remove(CODEX_USAGE_STATE)
+    except OSError:
+        pass
+
+
+def _codex_usage_state_load():
+    """Seed the cache from the remembered reading. Called once, before serving.
+
+    Refused when it belongs to a different login: auth.json's mtime is stored with the
+    numbers, and after a login or logout the previous account's usage is not this
+    account's — the same rule the live cache already applies, applied to the file.
+    Restored as stale when it is older than the value TTL, so the row says
+    '(last value)' instead of presenting a remembered number as a fresh observation."""
+    try:
+        with open(CODEX_USAGE_STATE, encoding="utf-8") as f:
+            record = json.load(f)
+    except (OSError, ValueError):
+        return False
+    if not isinstance(record, dict):
+        return False
+    payload = record.get("payload")
+    value_at = _finite_number(record.get("valueAt"))
+    if not _codex_has_usage_value(payload) or value_at is None or value_at <= 0:
+        return False
+    auth_mtime = _codex_auth_mtime()
+    if record.get("authMtime") != auth_mtime:
+        _codex_usage_state_drop()     # a different login wrote it; its numbers are void
+        return False
+    payload = dict(payload)
+    payload["stale"] = time.time() - value_at > CODEX_USAGE_TTL
+    # lastTryAt stays 0 so a value past its TTL is refreshed on the first request rather
+    # than riding the retry backoff of a probe this process never made.
+    _codex_usage_cache.update(valueAt=value_at, lastTryAt=0.0, payload=payload,
+                              authMtime=auth_mtime, task=None)
+    return True
+
+
 def _invalidate_codex_usage_cache():
     task = _codex_usage_cache.get("task")
     if task is not None and not task.done():
@@ -2094,6 +2163,9 @@ def _invalidate_codex_usage_cache():
     _acct_alert_cache.update(at=0.0, payload=None)
     _codex_usage_cache.update(valueAt=0.0, lastTryAt=0.0, payload=None,
                               authMtime=_codex_auth_mtime(), task=None)
+    # The file outlives the process, so leaving it here would resurrect the numbers of
+    # the account we just invalidated at the next restart.
+    _codex_usage_state_drop()
 
 
 def _invalidate_acct_caches():
@@ -2144,6 +2216,7 @@ async def _codex_usage_refresh(auth_mtime):
             else:
                 payload.pop("lastErr", None)
             _codex_usage_cache.update(valueAt=now, lastTryAt=now, payload=payload)
+            _codex_usage_state_save()   # so the next restart opens on this, not on blank
             _acct_alert_cache.update(at=0.0, payload=None)
         elif _codex_usage_cache.get("payload") is not None:
             # Keep the last good value, marked stale — better than blanking the UI.
@@ -2513,6 +2586,12 @@ async def main():
     # The TTL is this task, not a promise in the docs: expired secrets are removed even
     # if nobody ever calls an endpoint again.
     asyncio.create_task(_secret_sweep_loop())
+    # Before the first request, so the first panel opened after a restart shows the last
+    # known Codex numbers instead of waiting out a probe on a blank row.
+    if _codex_usage_state_load():
+        print("devterm-gate: restored last known Codex usage "
+              f"({'stale' if _codex_usage_cache['payload'].get('stale') else 'fresh'})",
+              flush=True)
     server = await asyncio.start_server(handle, LISTEN_HOST, LISTEN_PORT)
     where = ", ".join(str(s.getsockname()) for s in server.sockets)
     print(f"devterm-gate on {where} -> ttyd {TTYD_HOST}:{TTYD_PORT}; web={WEB_ROOT}; "

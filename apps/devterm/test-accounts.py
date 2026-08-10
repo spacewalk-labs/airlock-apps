@@ -14,7 +14,7 @@ What it pins down, because these are the parts that fail quietly:
     graded crit instead of passing for a healthy login;
   - that no identity ever appears in the alert payload.
 """
-import asyncio, importlib.machinery, importlib.util, os, sys, types
+import asyncio, importlib.machinery, importlib.util, os, shutil, sys, time, types
 os.environ.setdefault("AIRLOCK_OWNER", "owner@example.com")
 spec = importlib.util.spec_from_file_location("gate", "apps/devterm/backend/devterm-gate.py")
 g = importlib.util.module_from_spec(spec); spec.loader.exec_module(g)
@@ -96,6 +96,57 @@ pend = g._codex_pending_payload()
 check("pending payload keeps the success keys", set(succ) <= set(pend))
 check("has_usage_value false on empty", not g._codex_has_usage_value({"use5h": None, "use7d": None}))
 check("has_usage_value true on one axis", g._codex_has_usage_value({"use5h": 0, "use7d": None}))
+
+# codex usage survives a restart. The in-memory cache dies with the process and the
+# reading costs an app-server spawn, so the panel used to open blank and stay blank
+# while the probe ran. What must NOT survive: another account's numbers, and the claim
+# that a remembered value is a fresh observation.
+import tempfile
+_codex_state_tmp = tempfile.mkdtemp(prefix="devterm-codex-state-")
+g.CODEX_USAGE_STATE_DIR = _codex_state_tmp
+g.CODEX_USAGE_STATE = os.path.join(_codex_state_tmp, "codex-usage.json")
+
+
+def _codex_state_case(value_age, auth_mtime_at_load, payload=None):
+    """Save a reading, wipe the memory cache, then load as a fresh process would."""
+    g._codex_usage_state_drop()
+    now = time.time()
+    g._codex_usage_cache.update(valueAt=now - value_age, lastTryAt=now, task=None,
+                                authMtime="login-A",
+                                payload=payload or {"use5h": 4, "use7d": 5, "stale": False})
+    saved = g._codex_usage_state_save()
+    g._codex_usage_cache.update(valueAt=0.0, lastTryAt=0.0, payload=None,
+                                authMtime=None, task=None)
+    g._codex_auth_mtime = lambda: auth_mtime_at_load
+    return saved, g._codex_usage_state_load(), g._codex_usage_cache.get("payload")
+
+
+_real_auth_mtime = g._codex_auth_mtime
+saved, loaded, payload = _codex_state_case(0, "login-A")
+check("a fresh reading is saved and restored", saved and loaded and payload["use7d"] == 5)
+check("a reading inside the TTL is restored as fresh", payload.get("stale") is False)
+
+_, loaded, payload = _codex_state_case(g.CODEX_USAGE_TTL + 60, "login-A")
+check("a reading past the TTL is restored as stale (the row says 'last value')",
+      loaded and payload.get("stale") is True)
+
+_, loaded, payload = _codex_state_case(0, "login-B")
+check("another login's numbers are refused", not loaded and payload is None)
+check("and the file holding them is dropped", not os.path.exists(g.CODEX_USAGE_STATE))
+
+saved, _, _ = _codex_state_case(0, "login-A", payload={"use5h": None, "use7d": None})
+check("a value-less payload is not saved", not saved)
+
+g._codex_auth_mtime = lambda: "login-A"
+g._codex_usage_cache.update(valueAt=time.time(), payload={"use5h": 1, "use7d": 2},
+                            authMtime="login-A")
+g._codex_usage_state_save()
+g._invalidate_codex_usage_cache()
+check("login/logout drops the file, so a restart cannot resurrect it",
+      not os.path.exists(g.CODEX_USAGE_STATE))
+
+g._codex_auth_mtime = _real_auth_mtime
+shutil.rmtree(_codex_state_tmp, ignore_errors=True)
 
 # /acct-alert falls back to the live probe when the shared store has nothing,
 # and never invents a level out of nothing.
