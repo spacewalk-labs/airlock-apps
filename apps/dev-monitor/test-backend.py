@@ -148,7 +148,6 @@ class _ExecBase(unittest.TestCase):
         self._saved_exec, self._saved_owner = DM.EXEC_CONFIG, DM.OWNER_CONFIG
         DM.EXEC_CONFIG = {
             'cwd_root': root,
-            'skill_allow': None,
             'session': 'devmon-test',
             'runner': os.path.join(BACKEND, 'action_runner.py'),
             'plan_dir': os.path.join(root, 'plans'),
@@ -462,7 +461,7 @@ class OwnerRouteTest(unittest.TestCase):
         DM.OWNER_CONFIG = {'owner': 'me@example.test', 'secret': 's3cr3t',
                            'spool': root, 'db': os.path.join(root, 'messages.db')}
         DM.EXEC_CONFIG = {
-            'cwd_root': root, 'skill_allow': None, 'session': 'devmon-test',
+            'cwd_root': root, 'session': 'devmon-test',
             'runner': os.path.join(BACKEND, 'action_runner.py'),
             'plan_dir': os.path.join(root, 'plans'), 'sentinel_dir': os.path.join(root, 'sentinels'),
         }

@@ -354,7 +354,7 @@ class TestSweep(unittest.TestCase):
     def test_purge_also_clears_runs_approvals_deliveries(self):
         # #7: the 180-day purge also clears the new tables (approvals/runs/deliveries)
         tmp = tempfile.mkdtemp()
-        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}  # tmp is below the root (strict-under)
+        cfg = {'cwd_root': os.path.dirname(tmp)}  # tmp is below the root (strict-under)
         p = {'schema_version': 1, 'event_id': 'a1', 'group_key': 'g', 'source': 's',
              'kind': 'action', 'urgency': 'urgent', 'title': 'T',
              'created_at': MSG.iso(MSG.now_utc()),
@@ -373,7 +373,7 @@ class TestSweep(unittest.TestCase):
     def test_purge_skips_card_with_active_run(self):
         # #7 regression guard: a card with an active run (run_id) is not deleted after 180 days (prevents tmux orphans)
         tmp = tempfile.mkdtemp()
-        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}  # tmp is below the root (strict-under)
+        cfg = {'cwd_root': os.path.dirname(tmp)}  # tmp is below the root (strict-under)
         p = {'schema_version': 1, 'event_id': 'a1', 'group_key': 'g', 'source': 's',
              'kind': 'action', 'urgency': 'normal', 'title': 'T',
              'created_at': MSG.iso(MSG.now_utc()),
@@ -391,7 +391,7 @@ class TestSweep(unittest.TestCase):
         # A kept window may outlive the normal card retention, so its run record must not be
         # purged while the reaper still needs the Keep exemption.
         tmp = tempfile.mkdtemp()
-        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}
+        cfg = {'cwd_root': os.path.dirname(tmp)}
         p = {'schema_version': 1, 'event_id': 'kept', 'group_key': 'kept', 'source': 's',
              'kind': 'action', 'urgency': 'normal', 'title': 'T',
              'created_at': MSG.iso(MSG.now_utc()),
@@ -413,7 +413,7 @@ class TestSweep(unittest.TestCase):
         # If the monitor was down when the 24h reaper should have run, retain the target record
         # so a later sweep can still kill the correct generation instead of orphaning the pane.
         tmp = tempfile.mkdtemp()
-        cfg = {'cwd_root': os.path.dirname(tmp), 'skill_allow': None}
+        cfg = {'cwd_root': os.path.dirname(tmp)}
         p = {'schema_version': 1, 'event_id': 'targeted', 'group_key': 'targeted', 'source': 's',
              'kind': 'action', 'urgency': 'normal', 'title': 'T',
              'created_at': MSG.iso(MSG.now_utc()),
@@ -545,7 +545,7 @@ class TestExec(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.proj = os.path.join(self.tmp, 'proj')      # project below root (=tmp) — strict-under
         os.makedirs(self.proj, exist_ok=True)
-        self.cfg = {'cwd_root': self.tmp, 'skill_allow': None}
+        self.cfg = {'cwd_root': self.tmp}
 
     def _action(self, cwd=None, skill=None, prompt='Clean this up', exec_argv=None, event_id='a1', group_key='g'):
         p = {'schema_version': 1, 'event_id': event_id, 'group_key': group_key,
@@ -675,14 +675,6 @@ class TestExec(unittest.TestCase):
         cid = self._action(cwd=sub)
         res = MSG.issue_approval(cid, self.cfg)
         self.assertTrue(res['ok'])
-
-    def test_skill_allowlist_enforced(self):
-        cid = self._action(skill='harness-gardener', prompt=None)
-        cfg = {'cwd_root': self.tmp, 'skill_allow': {'other-skill'}}
-        res = MSG.issue_approval(cid, cfg)
-        self.assertEqual(res['error'], 'not_executable')
-        cfg2 = {'cwd_root': self.tmp, 'skill_allow': {'harness-gardener'}}
-        self.assertTrue(MSG.issue_approval(cid, cfg2)['ok'])
 
     def test_run_active_blocks_second_plan(self):
         cid = self._action()
@@ -979,12 +971,19 @@ class TestExec(unittest.TestCase):
         self.assertEqual(res['error'], 'not_executable')
 
     def test_skill_drift_invalidates_nonce(self):
-        # if the plan changes after approval (here, a reduced skill allowlist), a re-derived SHA mismatch → plan_stale
+        # the card's own action changes after approval → the re-derived SHA disagrees → plan_stale.
+        # Drifting the card (not the config) is the case that matters: what the owner read and
+        # clicked is no longer what would run.
         cid = self._action(skill='harness-gardener')
-        appr = MSG.issue_approval(cid, {'cwd_root': self.tmp, 'skill_allow': {'harness-gardener'}})
-        res = MSG.redeem_approval(cid, appr['nonce'],
-                                  {'cwd_root': self.tmp, 'skill_allow': {'other-skill'}})
-        self.assertIn(res['error'], ('plan_stale', 'not_executable'))
+        appr = MSG.issue_approval(cid, self.cfg)
+        row = MSG._conn().execute('SELECT action_json FROM cards WHERE card_id=?', (cid,)).fetchone()
+        action = json.loads(row['action_json'])
+        action['skill'] = 'other-skill'
+        with MSG._conn() as conn:
+            conn.execute('UPDATE cards SET action_json=? WHERE card_id=?',
+                         (json.dumps(action), cid))
+        res = MSG.redeem_approval(cid, appr['nonce'], self.cfg)
+        self.assertEqual(res['error'], 'plan_stale')
 
 
 class TestSlack(unittest.TestCase):

@@ -60,7 +60,6 @@ messages     = true
 # slack_webhook_env = "AIRLOCK_DEVMON_SLACK_WEBHOOK"   # NAME of the env var, not the URL
 # exec_cwd_root     = ""                                # empty = $HOME
 # exec_session      = "devmon-exec"
-# skill_allow       = ""                                # filters the `skill` field only
 ```
 
 The installer creates the spool and database (`0700`), mints a fresh nginx→backend proxy
@@ -148,7 +147,7 @@ a half-configured install is visible to a script and not only in the boot log.
 ### Tests
 
 ```
-python3 backend/test_devmon.py                     # 141 offline checks, no install required
+python3 backend/test_devmon.py                     # 140 offline checks, no install required
 python3 test-backend.py                            # the backend's own half, incl. credential freshness
 bash ../../install/test-token-freshness-timer.sh   # the timer templates, substitution and installer refusals
 ```

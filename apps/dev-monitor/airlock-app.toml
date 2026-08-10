@@ -16,7 +16,6 @@ messages = false
 slack_webhook_env = ""
 exec_cwd_root = ""
 exec_session = "devmon-exec"
-skill_allow = ""
 # Credential freshness. Off by default: the check reads files under the operator's home
 # that belong to other tools, so looking at them at all is an opt-in. On, the dashboard
 # grows a card and /api/tokens answers; the periodic half is a separate explicit act

@@ -612,7 +612,7 @@ RUN_KEEPABLE = RUN_ACTIVE + RUN_TERMINAL
 
 def canonical_plan(card_row, exec_cfg):
     """Derive the canonical execution plan plus sha256 from a card's current recommended_action.
-    Invalid cases (not action, dismissed, cwd missing/outside, skill disallowed) return None and
+    Invalid cases (not action, dismissed, cwd missing/outside, bad skill syntax) return None and
     are treated as drift/rejection. plan = {cwd(realpath), skill|prompt, explain}."""
     if card_row is None or card_row['kind'] != 'action' or card_row['dismissed_at'] is not None:
         return None
@@ -654,9 +654,6 @@ def canonical_plan(card_row, exec_cfg):
     elif skill:
         skill = skill.strip()
         if not SKILL_RE.match(skill):
-            return None
-        allow = exec_cfg.get('skill_allow')               # None = syntax only; set = membership enforced
-        if allow is not None and skill not in allow:
             return None
         plan['skill'] = skill
     else:

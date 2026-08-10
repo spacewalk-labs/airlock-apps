@@ -1321,14 +1321,10 @@ def _build_exec_config():
             os.chmod(directory, 0o700)
         except OSError:
             pass
-    allow_env = os.environ.get('DEV_MONITOR_SKILL_ALLOW', '').strip()
-    skill_allow = set(item.strip() for item in allow_env.split(',') if item.strip()) \
-        if allow_env else None
     return {
         # `or HOME`, not a default= — a systemd EnvironmentFile writes an empty value for
         # an unset key, and canonical_plan reads a falsy root as 'no bound at all'.
         'cwd_root': os.environ.get('DEV_MONITOR_CWD_ROOT') or HOME,
-        'skill_allow': skill_allow,
         'session': os.environ.get('DEV_MONITOR_EXEC_SESSION', 'devmon-exec'),
         'runner': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'action_runner.py'),
         'plan_dir': plan_dir,
