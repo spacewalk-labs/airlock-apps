@@ -40,6 +40,22 @@ CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token"
 USAGE_ENDPOINT = "https://api.anthropic.com/api/oauth/usage"
 
+# Shared binary discovery. This tool is installed to ~/.local/bin as a standalone
+# file, so bin_discovery cannot be a plain sibling import: it is looked for in the
+# repo checkout first (running straight from apps/devterm/bin) and then where the
+# installer stages it. Absence is a broken install, not a condition to degrade
+# around — the whole point of the module is that "not found" gets a reason.
+LIB_DIRS = (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"),
+            os.path.join(HOME, ".local", "share", "airlock-devterm", "lib"))
+for _d in LIB_DIRS:
+    if os.path.isfile(os.path.join(_d, "bin_discovery.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    raise SystemExit("claude-status: bin_discovery.py not found (looked in %s) — "
+                     "reinstall the devterm app" % ", ".join(LIB_DIRS))
+import bin_discovery  # noqa: E402
+
 
 def _get(url, token, timeout=8):
     """Read-only GET (costs no quota). Returns (json|None, err); err='auth' means the
@@ -244,17 +260,14 @@ def _codex_bin():
     `which` alone is not enough: a systemd --user unit's PATH usually has neither
     ~/.local/bin nor ~/.npm-global/bin, so usage collection worked from a login shell
     and reported "no-bin" as a service. Install location also differs per box (npm
-    global prefix vs a local bin), and probing only one of them fails *silently* with a
-    perfectly valid auth.json — which reads as "not logged in" instead of "cannot find
-    the binary". Check every candidate."""
-    path = shutil.which("codex")
-    if path:
-        return path
-    for candidate in ("~/.local/bin/codex", "~/.npm-global/bin/codex"):
-        resolved = os.path.expanduser(candidate)
-        if os.path.isfile(resolved) and os.access(resolved, os.X_OK):
-            return resolved
-    return None
+    global prefix, a local bin, or a node version manager's own tree), and probing
+    only one of them fails *silently* with a perfectly valid auth.json — which reads
+    as "not logged in" instead of "cannot find the binary".
+
+    The three candidates this used to carry missed every version-manager layout, so
+    the candidate list now comes from the shared module rather than from here: one
+    contract, three repos, one corpus (bin-discovery-cases.json)."""
+    return bin_discovery.find_bin("codex")[0]
 
 
 def _codex_empty(err=None):

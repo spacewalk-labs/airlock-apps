@@ -60,6 +60,14 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+# The shared binary-discovery module, vendored byte-identically next to this file
+# (bin_discovery.py + bin-discovery-cases.json + test_bin_discovery.py). Imported by
+# path, not as a package: this file is started as a bare script by the unit AND loaded
+# by absolute path from the offline suites, so neither run has backend/ on sys.path by
+# construction.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bin_discovery  # noqa: E402
+
 ALLOW = {s.strip().lower() for s in os.environ.get("AIRLOCK_OWNER", "").split(",") if s.strip()}
 # ssh hosts whose tmux sessions are also surfaced as tabs (comma-separated).
 # Empty = local sessions only. Fully inert when unset.
@@ -1608,12 +1616,29 @@ def _accounts_enabled():
 
 
 def _codex_bin():
-    return shutil.which("codex") or os.path.expanduser("~/.npm-global/bin/codex")
+    """Absolute path to the codex executable, or None when this box has none.
+
+    This used to be `which("codex") or ~/.npm-global/bin/codex`. Both halves were
+    wrong for the same reason: a systemd --user unit's PATH carries none of the
+    directories node CLIs actually land in, so `which` reports a working install as
+    missing — and the hardcoded fallback then named one innocent path as if it were
+    the cause, on a box whose codex lives under a version manager. The candidate
+    list, the trust rules and the not-found contract are the shared ones
+    (bin_discovery, vendored next to this file). Never returns an unverified path."""
+    return bin_discovery.find_bin("codex")[0]
 
 
 def _codex_available():
-    b = _codex_bin()
-    return bool(b) and (os.path.isfile(b) or shutil.which("codex") is not None)
+    return _codex_bin() is not None
+
+
+def _codex_missing_error():
+    """The `error` string the codex endpoints answer with when there is no binary.
+
+    "codex not available" said nothing about why, so the only way to find out was to
+    ssh in. This names what was searched and what to do about it — same JSON key,
+    longer value."""
+    return bin_discovery.not_found_message("codex", bin_discovery.find_bin("codex")[1])
 
 
 async def _acct_list_with_usage():
@@ -1842,8 +1867,12 @@ async def _serve_codex_login_start(cw):
     device-auth needs no port-forward/callback — the user opens the link in any
     browser and enters the code. codex login wipes auth.json immediately, so we back
     it up first and restore via /codex-login-cancel if the flow is abandoned."""
-    if not _codex_available():
-        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "codex not available"})
+    # Resolved once and passed to exec below: _codex_bin() can now return None, and a
+    # separate availability check followed by a second lookup is a race with an
+    # uninstall that would reach create_subprocess_exec with None.
+    binary = _codex_bin()
+    if binary is None:
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": _codex_missing_error()})
         return
     _invalidate_codex_usage_cache()   # login wipes auth.json: cached numbers are void
     try:
@@ -1865,7 +1894,7 @@ async def _serve_codex_login_start(cw):
     try:
         outf = open(CODEX_LOGIN_OUT, "w")
         await asyncio.create_subprocess_exec(
-            _codex_bin(), "login", "--device-auth",
+            binary, "login", "--device-auth",
             stdout=outf, stderr=asyncio.subprocess.STDOUT,
             stdin=asyncio.subprocess.DEVNULL, start_new_session=True,
             env={**os.environ, "BROWSER": "true"})
@@ -1900,7 +1929,7 @@ async def _serve_codex_login_cancel(cw):
     """Codex re-login cancel — stop the pending device-auth and restore the backed-up
     auth.json. Re-login logs out immediately, so this undoes an abandoned attempt."""
     if not _codex_available():
-        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "codex not available"})
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": _codex_missing_error()})
         return
     try:
         k = await asyncio.create_subprocess_exec(
@@ -1924,12 +1953,13 @@ async def _serve_codex_login_cancel(cw):
 async def _serve_codex_logout(cw):
     """Codex logout — `codex logout` removes auth.json. Codex is single-account, so
     this is 'remove account'; the re-login button reconnects."""
-    if not _codex_available():
-        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": "codex not available"})
+    binary = _codex_bin()          # resolved once — see _serve_codex_login_start
+    if binary is None:
+        await _send_json(cw, b"400 Bad Request", {"ok": False, "error": _codex_missing_error()})
         return
     try:
         proc = await asyncio.create_subprocess_exec(
-            _codex_bin(), "logout",
+            binary, "logout",
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         out, err = await asyncio.wait_for(proc.communicate(), timeout=20)
         ok = proc.returncode == 0

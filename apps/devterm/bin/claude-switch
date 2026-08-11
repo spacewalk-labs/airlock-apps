@@ -29,6 +29,19 @@ LIVE = os.path.join(HOME, ".claude", ".credentials.json")
 POOL = os.path.join(HOME, ".claude-accounts")
 ACTIVE = os.path.join(POOL, ".active")
 
+# Shared binary discovery — same two-location lookup as claude-status; see the
+# comment there for why a standalone tool in ~/.local/bin cannot sibling-import it.
+LIB_DIRS = (os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "backend"),
+            os.path.join(HOME, ".local", "share", "airlock-devterm", "lib"))
+for _d in LIB_DIRS:
+    if os.path.isfile(os.path.join(_d, "bin_discovery.py")):
+        sys.path.insert(0, _d)
+        break
+else:
+    raise SystemExit("claude-switch: bin_discovery.py not found (looked in %s) — "
+                     "reinstall the devterm app" % ", ".join(LIB_DIRS))
+import bin_discovery  # noqa: E402
+
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 TOKEN_ENDPOINTS = [
     "https://platform.claude.com/v1/oauth/token",
@@ -51,6 +64,20 @@ REFRESH_IF_WITHIN_SEC = 30 * 60   # pre-refresh on switch if the token expires t
 def die(msg, code=1):
     print(f"  ERROR: {msg}", file=sys.stderr)
     sys.exit(code)
+
+
+def _claude_bin():
+    """Absolute path to the `claude` CLI, or die saying where we looked.
+
+    The two places this is used spawned "claude" by name and left resolution to
+    PATH. From a login shell that works; from anything the gate spawns it does not,
+    because a systemd --user unit's PATH has none of the directories a node CLI
+    installs into — and execvp's own failure is a bare "No such file or directory"
+    that reads as a missing conversation rather than a missing binary."""
+    path, diag = bin_discovery.find_bin("claude")
+    if path is None:
+        die(bin_discovery.not_found_message("claude", diag))
+    return path
 
 
 def _ensure_pool():
@@ -340,7 +367,7 @@ def cmd_login(name=None, extra=()):
         print("    2. /exit (or Ctrl+C) when logged in")
         print("    -> it is stored in the pool under the id you logged in as.\n")
         env = {**os.environ, "CLAUDE_CONFIG_DIR": tmp}
-        subprocess.run(["claude", *extra], env=env)     # inherits the tty
+        subprocess.run([_claude_bin(), *extra], env=env)   # inherits the tty
         src = os.path.join(tmp, ".credentials.json")
         if not os.path.isfile(src):
             die("login did not complete (no credentials). Try `claude-switch login` again.")
@@ -638,7 +665,7 @@ def cmd_to(name, extra):
     """Switch, then resume the same conversation with `claude --continue`."""
     _switch_core(name)
     print("  continuing with claude --continue…\n")
-    os.execvp("claude", ["claude", "--continue", *extra])
+    os.execv(_claude_bin(), ["claude", "--continue", *extra])
 
 
 def cmd_swap(name):

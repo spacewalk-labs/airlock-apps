@@ -148,6 +148,60 @@ check("login/logout drops the file, so a restart cannot resurrect it",
 g._codex_auth_mtime = _real_auth_mtime
 shutil.rmtree(_codex_state_tmp, ignore_errors=True)
 
+# --- codex binary discovery (the whole Codex line went dark on version-manager boxes) --
+# _codex_bin() was `which("codex") or ~/.npm-global/bin/codex`. A systemd --user unit
+# and a remote `su - <user> -c` both get a PATH with none of the directories a node CLI
+# installs into, so `which` came back empty on a box where codex ran fine from a shell;
+# the hardcoded fallback then put one innocent path into the error message. Everything
+# below runs with an EMPTY PATH, because that is the shape of the environment the gate
+# is actually started in. The candidate list itself is pinned by the shared corpus
+# (backend/test_bin_discovery.py); these checks pin the two call sites onto it.
+def _mkbin(path, mode=0o755):
+    """Create an executable at `path`, pinning every directory made to 0755. Without
+    that, a permissive umask makes the FIXTURE world-writable and bin_discovery's trust
+    rules reject it — a red test for a reason that has nothing to do with discovery."""
+    parts = os.path.dirname(path)
+    os.makedirs(parts, exist_ok=True)
+    while len(parts) > len(_disc_home):
+        os.chmod(parts, 0o755)
+        parts = os.path.dirname(parts)
+    with open(path, "w") as f:
+        f.write("#!/bin/sh\nexit 0\n")
+    os.chmod(path, mode)
+
+
+_disc_home = tempfile.mkdtemp(prefix="devterm-bindisc-")
+os.chmod(_disc_home, 0o755)
+_disc_saved = dict(os.environ)
+try:
+    os.environ.update(HOME=_disc_home, PATH="")
+    os.environ.pop("CODEX_BIN", None)
+    os.environ.pop("CODEX_EXTRA_BIN_DIRS", None)
+    check("no codex anywhere -> None, never a path that was not verified",
+          g._codex_bin() is None)
+    check("...so the feature reports itself unavailable", g._codex_available() is False)
+    _msg = g._codex_missing_error()
+    check("the refusal names the command", "codex" in _msg)
+    check("the refusal says where it looked", "searched" in _msg and "PATH(" in _msg)
+    # The old text was the bare string "codex not available", which sent every
+    # investigation to the box. A path may still appear now, but only in the rejected
+    # list with the reason attached — never as a verdict about where codex should be.
+    check("the refusal replaces the opaque wording",
+          "not available" not in _msg and "not found" in _msg)
+    check("the refusal says what to do next", "fix:" in _msg)
+    # The outage shape: installed, working, and invisible to `which`.
+    _fnm = os.path.join(_disc_home, ".local/share/fnm/aliases/default/bin/codex")
+    _mkbin(_fnm)
+    check("codex under a node version manager is found with an empty PATH",
+          g._codex_bin() == _fnm)
+    check("...and what is returned is really executable", os.access(g._codex_bin(), os.X_OK))
+    check("...so the endpoints stop refusing", g._codex_available() is True)
+    check("claude-status resolves the same binary as the gate (one contract, one module)",
+          cs._codex_bin() == _fnm)
+finally:
+    os.environ.clear(); os.environ.update(_disc_saved)
+    shutil.rmtree(_disc_home, ignore_errors=True)
+
 # /acct-alert falls back to the live probe when the shared store has nothing,
 # and never invents a level out of nothing.
 async def alert_with(list_payload, live_payload, codex_payload):

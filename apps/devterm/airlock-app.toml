@@ -75,7 +75,11 @@ note = "Privileged ingress setup"
 # wrapper + the account-switch tools (claude-switch/claude-status — only
 # actually installed when accounts=true, same "declared unconditionally so
 # the ledger can reclaim it if it exists" reasoning as publish's mode-gated
-# fragment) + the web client's staged share dir. Deliberately NOT declared
+# fragment) + the web client's staged share dir. That share dir also holds
+# lib/bin_discovery.py, the shared binary-lookup module the two account tools
+# import — they are installed to ~/.local/bin as standalone files and cannot
+# reach the copy in the repo, so it is staged inside the directory the ledger
+# already owns rather than declared as a fourth entry. Deliberately NOT declared
 # (retained operator data): ~/.config/airlock-devterm/tabs.json (user tabs).
 # serve_ports/[serve.https]: devterm is the one owner app of the four with a
 # PLAINTEXT redirect too (public_port -> redirect_port, 301 only, no

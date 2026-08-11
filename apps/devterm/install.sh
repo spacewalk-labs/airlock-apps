@@ -49,6 +49,11 @@ FLEET_STORE_URL="${AIRLOCK_DEVTERM_FLEET_STORE_URL:-}"
 ORCA_SHIM_CFG="${AIRLOCK_DEVTERM_ORCA_SHIM:-}"
 CODE_ROOT="${AIRLOCK_CODE_ROOT:-}"
 WEB_ROOT="$HOME/.local/share/airlock-devterm/web"
+# claude-switch/claude-status are installed as standalone files in ~/.local/bin, so
+# the shared bin_discovery module they import cannot stay a repo sibling — it is
+# staged here. Inside the already-declared ~/.local/share/airlock-devterm/ artifact,
+# so the ledger reclaims it with the rest.
+LIB_ROOT="$HOME/.local/share/airlock-devterm/lib"
 GATE_PY="$HERE/backend/devterm-gate.py"
 UNIT_DIR="$HOME/.config/systemd/user"
 # AIRLOCK_RENDER_DIR: harness-only destination-root override (highest
@@ -131,6 +136,10 @@ airlock_run install -D -m755 "$HERE/bin/devterm-shell" "$HOME/.local/bin/devterm
 if [ "$ACCOUNTS" = true ]; then
   airlock_run install -D -m755 "$HERE/bin/claude-switch" "$HOME/.local/bin/claude-switch"
   airlock_run install -D -m755 "$HERE/bin/claude-status" "$HOME/.local/bin/claude-status"
+  # Both tools import this; it is the only file they need beyond themselves. They
+  # refuse to start without it rather than falling back to a PATH-only lookup, so it
+  # is installed in the same step, not lazily.
+  airlock_run install -D -m644 "$HERE/backend/bin_discovery.py" "$LIB_ROOT/bin_discovery.py"
   [ -n "$CLAUDE_SWITCH" ] || CLAUDE_SWITCH="$HOME/.local/bin/claude-switch"
   [ -n "$CLAUDE_STATUS" ] || CLAUDE_STATUS="$HOME/.local/bin/claude-status"
 fi
@@ -175,12 +184,38 @@ fi
 # gate unit: serves the custom client + API, proxies /ws,/token to ttyd. A content
 # revision (hash of gate + web) is embedded so write_if_changed triggers a restart when
 # the code changes — and NOT on a no-op re-run.
-REV="$(cat "$GATE_PY" "$HERE"/web/app.js "$HERE"/web/accounts.js "$HERE"/web/ui.js \
+REV="$(cat "$GATE_PY" "$HERE"/backend/bin_discovery.py \
+        "$HERE"/web/app.js "$HERE"/web/accounts.js "$HERE"/web/ui.js \
         "$HERE"/web/secretdrop.js "$HERE"/web/popup.css "$HERE"/web/panel.html \
         "$HERE"/web/index.html 2>/dev/null | sha256sum | cut -c1-12)"
+
+# Unit PATH. This unit was the only one of the four that shipped without one, and it
+# is the one that spawns the most: codex, claude-switch/claude-status, and through
+# them `claude`. A systemd --user unit inherits a PATH with none of the directories a
+# node CLI installs into, so every `which` in the gate came back empty and the whole
+# Codex feature reported itself unavailable on a box where codex worked fine from a
+# shell. The gate now resolves those binaries itself (backend/bin_discovery.py), but
+# resolving is not enough: `codex` and `claude` are `#!/usr/bin/env node` scripts, so
+# node has to be findable through PATH or the exec fails after a successful lookup.
+#
+# Same shape as apps/paseo/install.sh: entries are added whether or not they exist
+# yet (the agent CLIs normally arrive after Airlock, and a non-existent PATH entry
+# costs nothing), and the node directories come from airlock_cmd_dirs — the FOUND
+# directory, not just the resolved one, because a snap wrapper resolves to /usr/bin
+# and would take node off the unit's PATH entirely (see install/lib.sh).
+NODE_DIRS="$(airlock_cmd_dirs node)"
+UNIT_PATH=""
+# shellcheck disable=SC2086  # NODE_DIRS is newline-separated and deliberately split
+for d in "$HOME/.local/bin" "$HOME/.npm-global/bin" $NODE_DIRS; do
+  case ":${UNIT_PATH}:" in *":${d}:"*) continue ;; esac   # de-dupe
+  UNIT_PATH="${UNIT_PATH}${d}:"
+done
+UNIT_PATH="${UNIT_PATH}/usr/local/bin:/usr/bin:/bin"
+
 gate_env=""
 add_env() { gate_env="${gate_env}Environment=$1=$2
 "; }
+add_env PATH "$UNIT_PATH"
 add_env DEVTERM_REV "$REV"
 add_env DEVTERM_LISTEN_HOST 127.0.0.1
 add_env DEVTERM_LISTEN_PORT "$BACKEND_PORT"
