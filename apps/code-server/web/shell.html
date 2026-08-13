@@ -4,8 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>code-server</title>
-<!-- Tab-bar shell favicon: a code glyph (inline SVG data-URI, self-contained single file). -->
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2032%2032%22%3E%3Crect%20width=%2232%22%20height=%2232%22%20rx=%227%22%20fill=%22%23007acc%22/%3E%3Cpath%20d=%22M12%2010.5%206.8%2016%2012%2021.5%22%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22/%3E%3Cpath%20d=%22M20%2010.5%2025.2%2016%2020%2021.5%22%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22/%3E%3Cpath%20d=%22M18.4%209.6%2013.6%2022.4%22%20fill=%22none%22%20stroke=%22%23fff%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<meta name="apple-mobile-web-app-title" content="code-server">
+<!-- Tab-bar shell favicon, generated from the launcher tile by bin/gen-app-icons.py
+     (SoT hub/index.html) — do not hand-edit the URI below; re-run the generator.
+     It stays an inline data URI because this gate serves shell.html as one static
+     file and 204s /favicon.ico: there is no second request to answer, which is also
+     why the shell has no apple-touch-icon (iOS needs a real PNG URL).
+     [branding] icon_ring re-wraps this exact URI at install time. -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2024%2024%22%20style=%22--app-tile:%2316181f%22%3E%3Crect%20width=%2224%22%20height=%2224%22%20rx=%226%22%20fill=%22%2316181f%22/%3E%3Cg%20transform=%22translate%284.8%204.8%29%20scale%280.6%29%22%20style=%22color:%236aac32%22%3E%3Cpath%20d=%22M9%207.5%204%2012l5%204.5M15%207.5%2020%2012l-5%204.5%22%20fill=%22none%22%20stroke=%22currentColor%22%20stroke-width=%222%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22/%3E%3C/g%3E%3C/svg%3E">
 <style>
   :root {
     color-scheme: dark;

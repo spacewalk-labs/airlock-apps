@@ -14,8 +14,13 @@ window.__DEVTERM = %%DEVTERM_CONFIG%%;
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="DevTerm">
 <title>DevTerm</title>
+<!-- Icons are generated from the launcher tile — bin/gen-app-icons.py, SoT hub/index.html.
+     Relative, not /assets/: this page is served by the devterm gate on its own port,
+     where the hub's webroot is a different origin. The gate serves this web root, and
+     [branding] icon_ring rewrites favicon.svg in place at install time.
+     apple-touch-icon is a PNG because iOS ignores an SVG here. -->
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
-<link rel="apple-touch-icon" href="favicon.svg">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="stylesheet" href="vendor/xterm.css">
 <link rel="stylesheet" href="popup.css"><!-- account popup surface, shared with panel.html -->
 <style>

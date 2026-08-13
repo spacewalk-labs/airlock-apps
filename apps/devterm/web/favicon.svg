@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#181b24"/>
-  <path d="M9 11l5 5-5 5" fill="none" stroke="#6aac32" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="16.5" y="20.4" width="7.5" height="2.6" rx="1.3" fill="#6aac32"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="--app-tile:#16181f"><rect width="24" height="24" rx="6" fill="#16181f"/><g transform="translate(4.8 4.8) scale(0.6)" style="color:#6aac32"><rect x="2.6" y="4" width="18.8" height="16" rx="2.6" fill="currentColor"/><path d="M6.6 9.4l3.1 2.6-3.1 2.6" fill="none" stroke="var(--app-tile,#fff)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><rect x="11.6" y="14" width="6" height="1.7" rx=".85" fill="var(--app-tile,#fff)"/></g></svg>

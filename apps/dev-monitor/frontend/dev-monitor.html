@@ -3,8 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Monitor</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%3E%3Crect%20x='2.5'%20y='4'%20width='19'%20height='13'%20rx='2'%20fill='none'%20stroke='%230066cc'%20stroke-width='2'/%3E%3Cpath%20d='M8%2020.5h8'%20stroke='%230066cc'%20stroke-width='2'%20stroke-linecap='round'/%3E%3Cpath%20d='M6%2011l3-2.5%203%203%204-4'%20fill='none'%20stroke='%230066cc'%20stroke-width='2'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E">
+  <title>Dev Monitor</title>
+  <meta name="apple-mobile-web-app-title" content="Dev Monitor">
+  <!-- Icons are generated from the launcher tile — bin/gen-app-icons.py, SoT hub/index.html.
+       Same-origin subpath app: /assets/ is the hub's, copied there by the installer. -->
+  <link rel="icon" type="image/svg+xml" href="/assets/app-icons/dev-monitor.svg">
+  <link rel="apple-touch-icon" href="/assets/app-icons/dev-monitor.png">
   <style>
     :root {
       --bg: #f5f5f7; --surface: #fff; --text: #1d1d1f; --muted: #6e6e73;
@@ -272,7 +276,7 @@
 <div class="shell">
 
   <div class="topbar">
-    <span class="title"><svg class="ic"><use href="#ic-monitor"/></svg> Monitor</span>
+    <span class="title"><svg class="ic"><use href="#ic-monitor"/></svg> Dev Monitor</span>
     <span class="meta" id="ms-meta">loading…</span>
     <div class="theme-group" role="group" aria-label="Theme">
       <button data-theme-btn="system" aria-pressed="true" title="System">Auto</button>
