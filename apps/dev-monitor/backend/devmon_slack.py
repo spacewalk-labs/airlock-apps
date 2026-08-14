@@ -64,12 +64,15 @@ def run_worker(webhook, stop_event, console_url=''):
     """The outbox worker: one thread, one pass every 5 seconds."""
     while not stop_event.is_set():
         try:
-            for d in MSG.claim_due_deliveries(10):
+            batch = MSG.claim_due_deliveries('slack-urgent', 10)
+            for index, d in enumerate(batch):
+                if index and stop_event.wait(1):
+                    break
                 ok, err = send(webhook, format_text(d, console_url))
                 if ok:
-                    MSG.delivery_sent(d['id'], d['card_id'])
+                    MSG.delivery_sent(d['id'], d['card_id'], d['claimed_by'])
                 else:
-                    MSG.delivery_retry(d['id'], d['attempts'], err)
+                    MSG.delivery_retry(d['id'], d['claimed_by'], err)
         except Exception as e:                      # noqa: BLE001 — the worker must not die
             sys.stderr.write('[slack] worker err: %s\n' % type(e).__name__)
         stop_event.wait(5)

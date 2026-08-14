@@ -181,6 +181,7 @@ def init_db(path):
         try:
             _ensure_run_lifecycle_columns(conn)
             _ensure_lane_columns_and_indexes(conn)
+            _recover_claimed_deliveries(conn)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -255,6 +256,25 @@ def _ensure_lane_columns_and_indexes(conn):
         "ON deliveries(channel, sent_at) WHERE status='sent'")
     conn.execute(
         'CREATE INDEX IF NOT EXISTS idx_cards_probe ON cards(group_key, created_at)')
+
+
+def _delivery_backoff_seconds(attempts):
+    """Deterministic retry ladder; attempts is the post-claim value."""
+    return min(3600, 30 * (2 ** max(0, attempts - 1)))
+
+
+def _recover_claimed_deliveries(conn):
+    """Return this process's interrupted batches to pending during single-process startup."""
+    # This is safe only because init_db runs once before this process starts worker
+    # threads. A second dev-monitor process would make a blanket claim sweep unsafe.
+    now = now_utc()
+    rows = conn.execute(
+        "SELECT id, attempts FROM deliveries WHERE status='claimed'").fetchall()
+    for row in rows:
+        conn.execute(
+            "UPDATE deliveries SET status='pending', claimed_by=NULL, lease_until=NULL, "
+            "next_attempt_at=? WHERE id=? AND status='claimed'",
+            (iso(now + timedelta(seconds=_delivery_backoff_seconds(row[1]))), row[0]))
 
 
 def _conn():
@@ -1133,50 +1153,119 @@ def active_run_targets():
 # orthogonal to read state.
 # ============================================================
 MAX_DELIVERY_ATTEMPTS = 6
+DELIVERY_LEASE_SECONDS = 120
 
 
-def claim_due_deliveries(limit=10):
-    """Join pending deliveries whose next_attempt_at has arrived with card information. Used by
-    the worker."""
-    now = iso(now_utc())
-    rows = _conn().execute(
-        'SELECT d.id AS id, d.card_id AS card_id, d.channel AS channel, d.attempts AS attempts, '
-        'c.title AS title, c.urgency AS urgency, c.source AS source, c.kind AS kind, '
-        'c.occurrence_count AS occurrence_count '
-        'FROM deliveries d JOIN cards c ON c.card_id=d.card_id '
-        "WHERE d.status='pending' AND (d.next_attempt_at IS NULL OR d.next_attempt_at<=?) "
-        'ORDER BY d.id LIMIT ?', (now, limit)).fetchall()
-    return [dict(r) for r in rows]
+def claim_due_deliveries(channel, limit=10):
+    """Atomically claim one lane's due rows and return their card projection."""
+    conn = _conn()
+    now_dt = now_utc()
+    now = iso(now_dt)
+    lease_until = iso(now_dt + timedelta(seconds=DELIVERY_LEASE_SECONDS))
+    worker = f"{channel}:{os.getpid()}:{secrets.token_hex(4)}"
+    with conn:
+        conn.execute('BEGIN IMMEDIATE')
+        retired = conn.execute(
+            "UPDATE deliveries SET status='failed', last_error='attempt budget exhausted', "
+            "last_error_at=?, claimed_by=NULL, lease_until=NULL "
+            "WHERE channel=? AND attempts>=? "
+            "AND (status='pending' OR (status='claimed' AND lease_until<=?))",
+            (now, channel, MAX_DELIVERY_ATTEMPTS, now))
+        if retired.rowcount:
+            _audit(conn, 'slack_failed', None, None,
+                   'lane=%s retired=%d reason=attempt budget exhausted' %
+                   (channel, retired.rowcount))
+            sys.stderr.write(
+                '[devmon_messages] retired exhausted deliveries '
+                'lane=%s count=%d\n' % (channel, retired.rowcount))
+
+        claimed = conn.execute(
+            "UPDATE deliveries SET status='claimed', claimed_by=?, lease_until=?, "
+            "attempts=attempts+1 WHERE id IN ("
+            "SELECT id FROM deliveries WHERE channel=? AND attempts<? AND ("
+            "(status='pending' AND (next_attempt_at IS NULL OR next_attempt_at<=?)) OR "
+            "(status='claimed' AND lease_until<=?)) ORDER BY id LIMIT ?) RETURNING id",
+            (worker, lease_until, channel, MAX_DELIVERY_ATTEMPTS, now, now, limit)).fetchall()
+        ids = sorted(row[0] for row in claimed)
+        if not ids:
+            return []
+        placeholders = ','.join('?' for _ in ids)
+        rows = conn.execute(
+            'SELECT d.id AS id, d.card_id AS card_id, d.channel AS channel, '
+            'd.attempts AS attempts, d.claimed_by AS claimed_by, '
+            'd.lease_until AS lease_until, c.title AS title, c.body AS body, '
+            'c.action_json AS action_json, c.urgency AS urgency, c.source AS source, '
+            'c.kind AS kind, c.occurrence_count AS occurrence_count '
+            'FROM deliveries d JOIN cards c ON c.card_id=d.card_id '
+            'WHERE d.id IN (%s) ORDER BY d.id' % placeholders,
+            ids).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            action = json.loads(item.pop('action_json')) if item['action_json'] else None
+            item['action'] = action
+            item['action_line'] = action.get('explain') if action else None
+            result.append(item)
+        return result
 
 
-def delivery_sent(delivery_id, card_id):
+def delivery_sent(delivery_id, card_id, worker):
     """Delivery succeeded -> mark sent and set the card's slack_sent_at (first time only).
     Does not touch read state; the two axes are orthogonal."""
     conn = _conn()
     now = iso(now_utc())
     with conn:
         conn.execute('BEGIN IMMEDIATE')
-        conn.execute("UPDATE deliveries SET status='sent', sent_at=? WHERE id=?", (now, delivery_id))
+        cur = conn.execute(
+            "UPDATE deliveries SET status='sent', sent_at=?, next_attempt_at=NULL, "
+            "claimed_by=NULL, lease_until=NULL WHERE id=? AND status='claimed' "
+            "AND claimed_by=?", (now, delivery_id, worker))
+        if cur.rowcount != 1:
+            return False
         conn.execute('UPDATE cards SET slack_sent_at=? WHERE card_id=? AND slack_sent_at IS NULL',
                     (now, card_id))
         _audit(conn, 'slack_sent', None, card_id, 'delivery=%s' % delivery_id)
+        return True
 
 
-def delivery_retry(delivery_id, attempts, error):
-    """Delivery failed -> attempts + 1 and reschedule with exponential backoff. On the cap, mark
-    it failed rather than silently swallowing it: leave an audit trail."""
+def delivery_retry(delivery_id, worker, error):
+    """Record a claimed attempt's failure without accepting a stale claimant's outcome."""
     conn = _conn()
     now = now_utc()
-    new_attempts = attempts + 1
+    now_text = iso(now)
+    short_error = (error or '')[:300]
     with conn:
         conn.execute('BEGIN IMMEDIATE')
-        if new_attempts >= MAX_DELIVERY_ATTEMPTS:
-            conn.execute("UPDATE deliveries SET status='failed', attempts=?, last_error=? WHERE id=?",
-                        (new_attempts, (error or '')[:300], delivery_id))
-            _audit(conn, 'slack_failed', None, None,
-                   'delivery=%s attempts=%d' % (delivery_id, new_attempts))
+        row = conn.execute(
+            'SELECT card_id, attempts FROM deliveries WHERE id=?', (delivery_id,)).fetchone()
+        if row is None:
+            return False
+        attempts = row['attempts']
+        if attempts >= MAX_DELIVERY_ATTEMPTS:
+            cur = conn.execute(
+                "UPDATE deliveries SET status='failed', next_attempt_at=NULL, last_error=?, "
+                "last_error_at=?, claimed_by=NULL, lease_until=NULL "
+                "WHERE id=? AND status='claimed' AND claimed_by=?",
+                (short_error, now_text, delivery_id, worker))
+            if cur.rowcount == 1:
+                _audit(conn, 'slack_failed', None, row['card_id'],
+                       'delivery=%s attempts=%d' % (delivery_id, attempts))
+                return True
         else:
-            backoff = min(3600, 30 * (2 ** attempts))
-            conn.execute('UPDATE deliveries SET attempts=?, next_attempt_at=?, last_error=? WHERE id=?',
-                        (new_attempts, iso(now + timedelta(seconds=backoff)),
-                         (error or '')[:300], delivery_id))
+            backoff = _delivery_backoff_seconds(attempts)
+            cur = conn.execute(
+                "UPDATE deliveries SET status='pending', next_attempt_at=?, last_error=?, "
+                "last_error_at=?, claimed_by=NULL, lease_until=NULL "
+                "WHERE id=? AND status='claimed' AND claimed_by=?",
+                (iso(now + timedelta(seconds=backoff)), short_error, now_text,
+                 delivery_id, worker))
+            if cur.rowcount == 1:
+                return True
+
+        # A claim pass may have retired this expired at-cap row before its stale POST
+        # returned. Keep the actionable HTTP reason while still rejecting the stale CAS.
+        conn.execute(
+            "UPDATE deliveries SET last_error=?, last_error_at=? WHERE id=? "
+            "AND status='failed' AND last_error='attempt budget exhausted'",
+            (short_error, now_text, delivery_id))
+        return False

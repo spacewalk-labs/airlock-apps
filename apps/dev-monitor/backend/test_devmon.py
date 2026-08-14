@@ -1164,37 +1164,255 @@ class TestSlack(unittest.TestCase):
 
     def test_urgent_enqueues_worker_sends(self):
         MSG.ingest(msg(urgency='urgent'))
-        due = MSG.claim_due_deliveries()
+        due = MSG.claim_due_deliveries('slack-urgent')
         self.assertEqual(len(due), 1)
         self.assertEqual(due[0]['title'], 'Disk 92%')
-        MSG.delivery_sent(due[0]['id'], due[0]['card_id'])
+        self.assertEqual(due[0]['body'], 'Clean up?')
+        self.assertEqual(due[0]['action_line'], 'What and why')
+        self.assertEqual(due[0]['action']['prompt'], 'Clean this up')
+        self.assertRegex(due[0]['claimed_by'], r'^slack-urgent:\d+:[0-9a-f]{8}$')
+        self.assertEqual(due[0]['attempts'], 1)
+        self.assertTrue(MSG.delivery_sent(
+            due[0]['id'], due[0]['card_id'], due[0]['claimed_by']))
         c = MSG._conn().execute('SELECT slack_sent_at, read_at FROM cards').fetchone()
         self.assertIsNotNone(c['slack_sent_at'])
         self.assertIsNone(c['read_at'])                  # Slack ≠ read (orthogonal)
-        self.assertEqual(len(MSG.claim_due_deliveries()), 0)   # no longer due
+        self.assertEqual(len(MSG.claim_due_deliveries('slack-urgent')), 0)   # no longer due
 
     def test_normal_not_enqueued(self):
         MSG.ingest(msg(urgency='normal'))
-        self.assertEqual(len(MSG.claim_due_deliveries()), 0)
+        self.assertEqual(len(MSG.claim_due_deliveries('slack-urgent')), 0)
 
-    def test_retry_until_failed(self):
+    def test_retry_until_failed_keeps_real_reason(self):
         MSG.ingest(msg(urgency='urgent'))
-        for _ in range(MSG.MAX_DELIVERY_ATTEMPTS + 1):
-            d = MSG._conn().execute('SELECT id, attempts, status FROM deliveries').fetchone()
-            if d['status'] != 'pending':
-                break
-            MSG.delivery_retry(d['id'], d['attempts'], 'boom')
-        st = MSG._conn().execute('SELECT status FROM deliveries').fetchone()['status']
-        self.assertEqual(st, 'failed')
+        for attempt in range(1, MSG.MAX_DELIVERY_ATTEMPTS + 1):
+            due = MSG.claim_due_deliveries('slack-urgent')
+            self.assertEqual(len(due), 1)
+            self.assertEqual(due[0]['attempts'], attempt)
+            before_retry = MSG.now_utc()
+            self.assertTrue(MSG.delivery_retry(
+                due[0]['id'], due[0]['claimed_by'], 'http 500'))
+            if attempt < MSG.MAX_DELIVERY_ATTEMPTS:
+                scheduled = MSG.parse_rfc3339(MSG._conn().execute(
+                    'SELECT next_attempt_at FROM deliveries WHERE id=?',
+                    (due[0]['id'],)).fetchone()['next_attempt_at'])
+                delay = (scheduled - before_retry).total_seconds()
+                expected = 30 * (2 ** (attempt - 1))
+                self.assertGreaterEqual(delay, expected - 1)
+                self.assertLessEqual(delay, expected + 1)
+                MSG._conn().execute(
+                    'UPDATE deliveries SET next_attempt_at=? WHERE id=?',
+                    (MSG.iso(MSG.now_utc() - timedelta(seconds=1)), due[0]['id']))
+                MSG._conn().commit()
+        row = MSG._conn().execute(
+            'SELECT status, attempts, last_error FROM deliveries').fetchone()
+        self.assertEqual((row['status'], row['attempts'], row['last_error']),
+                         ('failed', MSG.MAX_DELIVERY_ATTEMPTS, 'http 500'))
 
     def test_retry_then_success_clears(self):
         MSG.ingest(msg(urgency='urgent'))
-        d = MSG._conn().execute('SELECT id, attempts, card_id FROM deliveries').fetchone()
-        MSG.delivery_retry(d['id'], d['attempts'], 'boom')     # one failure → backoff
-        self.assertEqual(len(MSG.claim_due_deliveries()), 0)   # during backoff = not due
-        MSG.delivery_sent(d['id'], d['card_id'])               # subsequent success
+        first = MSG.claim_due_deliveries('slack-urgent')[0]
+        MSG.delivery_retry(first['id'], first['claimed_by'], 'boom')
+        self.assertEqual(len(MSG.claim_due_deliveries('slack-urgent')), 0)
+        MSG._conn().execute(
+            'UPDATE deliveries SET next_attempt_at=? WHERE id=?',
+            (MSG.iso(MSG.now_utc() - timedelta(seconds=1)), first['id']))
+        MSG._conn().commit()
+        second = MSG.claim_due_deliveries('slack-urgent')[0]
+        self.assertTrue(MSG.delivery_sent(
+            second['id'], second['card_id'], second['claimed_by']))
         self.assertEqual(MSG._conn().execute(
             'SELECT status FROM deliveries').fetchone()['status'], 'sent')
+
+    def test_lane_filter_wrong_lane_empty_then_urgent_gets_all(self):
+        for i in range(3):
+            MSG.ingest(msg(event_id='lane-%d' % i, group_key='lane-%d' % i,
+                           urgency='urgent'))
+        self.assertEqual(MSG.claim_due_deliveries('slack-routine'), [])
+        urgent = MSG.claim_due_deliveries('slack-urgent')
+        self.assertEqual(len(urgent), 3)
+        self.assertTrue(all(d['channel'] == 'slack-urgent' for d in urgent))
+
+    def test_two_threads_claim_disjoint_nonempty_batches(self):
+        for i in range(20):
+            MSG.ingest(msg(event_id='concurrent-%d' % i,
+                           group_key='concurrent-%d' % i, urgency='urgent'))
+        barrier = threading.Barrier(3)
+        results = []
+        errors = []
+
+        def claim():
+            try:
+                barrier.wait()
+                results.append(MSG.claim_due_deliveries('slack-urgent', 10))
+            except Exception as exc:
+                errors.append(exc)
+
+        threads = [threading.Thread(target=claim) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        barrier.wait()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        self.assertEqual(len(results), 2)
+        claimed = [{d['id'] for d in batch} for batch in results]
+        self.assertTrue(claimed[0])
+        self.assertTrue(claimed[1])
+        self.assertEqual(claimed[0] & claimed[1], set())
+        self.assertEqual(len(claimed[0] | claimed[1]), 20)
+        self.assertNotEqual(results[0][0]['claimed_by'], results[1][0]['claimed_by'])
+
+    def test_live_lease_blocks_then_expired_lease_reclaims_with_cas(self):
+        MSG.ingest(msg(urgency='urgent'))
+        original = MSG.claim_due_deliveries('slack-urgent')[0]
+        self.assertEqual(MSG.claim_due_deliveries('slack-urgent'), [])
+        MSG._conn().execute(
+            'UPDATE deliveries SET lease_until=? WHERE id=?',
+            (MSG.iso(MSG.now_utc() - timedelta(seconds=1)), original['id']))
+        MSG._conn().commit()
+        reclaimed = MSG.claim_due_deliveries('slack-urgent')[0]
+        self.assertEqual(reclaimed['id'], original['id'])
+        self.assertEqual(reclaimed['attempts'], 2)
+        self.assertNotEqual(reclaimed['claimed_by'], original['claimed_by'])
+        self.assertFalse(MSG.delivery_sent(
+            original['id'], original['card_id'], original['claimed_by']))
+        self.assertTrue(MSG.delivery_sent(
+            reclaimed['id'], reclaimed['card_id'], reclaimed['claimed_by']))
+
+    def test_startup_sweep_clears_claim_and_stamps_backoff(self):
+        path = MSG._DB_PATH
+        MSG.ingest(msg(urgency='urgent'))
+        claimed = MSG.claim_due_deliveries('slack-urgent')[0]
+        before = MSG.now_utc()
+        MSG._local.conn.close()
+        MSG._local = threading.local()
+        MSG.init_db(path)
+        row = MSG._conn().execute(
+            'SELECT status, claimed_by, lease_until, attempts, next_attempt_at '
+            'FROM deliveries WHERE id=?', (claimed['id'],)).fetchone()
+        self.assertEqual(row['status'], 'pending')
+        self.assertIsNone(row['claimed_by'])
+        self.assertIsNone(row['lease_until'])
+        self.assertEqual(row['attempts'], 1)
+        delay = (MSG.parse_rfc3339(row['next_attempt_at']) - before).total_seconds()
+        self.assertGreaterEqual(delay, 29)
+        self.assertLessEqual(delay, 31)
+        self.assertEqual(MSG.claim_due_deliveries('slack-urgent'), [])
+
+    def test_abandoned_at_cap_is_retired_audited_and_slot_freed(self):
+        MSG.ingest(msg(urgency='urgent'))
+        conn = MSG._conn()
+        delivery = conn.execute('SELECT id, card_id FROM deliveries').fetchone()
+        MSG.ingest(msg(event_id='pending-cap', group_key='pending-cap', urgency='urgent'))
+        pending_id = conn.execute(
+            "SELECT id FROM deliveries WHERE status='pending' AND id<>?",
+            (delivery['id'],)).fetchone()['id']
+        conn.execute(
+            "UPDATE deliveries SET status='claimed', attempts=?, claimed_by='dead', "
+            'lease_until=? WHERE id=?',
+            (MSG.MAX_DELIVERY_ATTEMPTS,
+             MSG.iso(MSG.now_utc() - timedelta(seconds=1)), delivery['id']))
+        conn.execute(
+            "UPDATE deliveries SET attempts=? WHERE id=?",
+            (MSG.MAX_DELIVERY_ATTEMPTS, pending_id))
+        conn.commit()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(MSG.claim_due_deliveries('slack-urgent'), [])
+        row = conn.execute(
+            'SELECT status, last_error, claimed_by, lease_until FROM deliveries '
+            'WHERE id=?', (delivery['id'],)).fetchone()
+        self.assertEqual((row['status'], row['last_error']),
+                         ('failed', 'attempt budget exhausted'))
+        self.assertIsNone(row['claimed_by'])
+        self.assertIsNone(row['lease_until'])
+        self.assertIn('retired exhausted deliveries', stderr.getvalue())
+        self.assertEqual(conn.execute(
+            "SELECT COUNT(*) FROM events WHERE kind='slack_failed'").fetchone()[0], 1)
+        self.assertEqual(conn.execute(
+            'SELECT status FROM deliveries WHERE id=?',
+            (pending_id,)).fetchone()['status'], 'failed')
+        with conn:
+            MSG._enqueue_slack(conn, delivery['card_id'], 'slack-urgent')
+        fresh = conn.execute(
+            "SELECT attempts, status FROM deliveries WHERE card_id=? ORDER BY id DESC LIMIT 1",
+            (delivery['card_id'],)).fetchone()
+        self.assertEqual((fresh['attempts'], fresh['status']), (0, 'pending'))
+
+    def test_broken_lane_does_not_stall_healthy_lane(self):
+        MSG.ingest(msg(urgency='urgent'))
+        conn = MSG._conn()
+        card_id = conn.execute('SELECT card_id FROM cards').fetchone()['card_id']
+        with conn:
+            MSG._enqueue_slack(conn, card_id, 'slack-routine')
+
+        broken = MSG.claim_due_deliveries('slack-routine')[0]
+        self.assertTrue(MSG.delivery_retry(
+            broken['id'], broken['claimed_by'], 'http 500'))
+        healthy = MSG.claim_due_deliveries('slack-urgent')[0]
+        self.assertTrue(MSG.delivery_sent(
+            healthy['id'], healthy['card_id'], healthy['claimed_by']))
+
+        for _ in range(1, MSG.MAX_DELIVERY_ATTEMPTS):
+            conn.execute(
+                'UPDATE deliveries SET next_attempt_at=? WHERE id=?',
+                (MSG.iso(MSG.now_utc() - timedelta(seconds=1)), broken['id']))
+            conn.commit()
+            retry = MSG.claim_due_deliveries('slack-routine')[0]
+            MSG.delivery_retry(retry['id'], retry['claimed_by'], 'http 500')
+        rows = {row['channel']: (row['status'], row['last_error']) for row in conn.execute(
+            'SELECT channel, status, last_error FROM deliveries')}
+        self.assertEqual(rows['slack-urgent'][0], 'sent')
+        self.assertEqual(rows['slack-routine'], ('failed', 'http 500'))
+
+    def test_stale_retry_replaces_generic_retirement_reason_only(self):
+        MSG.ingest(msg(urgency='urgent'))
+        conn = MSG._conn()
+        delivery = conn.execute('SELECT id FROM deliveries').fetchone()
+        conn.execute(
+            "UPDATE deliveries SET status='claimed', attempts=?, claimed_by='old-worker', "
+            'lease_until=? WHERE id=?',
+            (MSG.MAX_DELIVERY_ATTEMPTS,
+             MSG.iso(MSG.now_utc() - timedelta(seconds=1)), delivery['id']))
+        conn.commit()
+        with contextlib.redirect_stderr(io.StringIO()):
+            MSG.claim_due_deliveries('slack-urgent')
+        self.assertFalse(MSG.delivery_retry(delivery['id'], 'old-worker', 'http 500'))
+        self.assertEqual(conn.execute(
+            'SELECT last_error FROM deliveries WHERE id=?',
+            (delivery['id'],)).fetchone()['last_error'], 'http 500')
+
+    def test_batch_lease_covers_pacing_and_timeout_budget(self):
+        for i in range(10):
+            MSG.ingest(msg(event_id='lease-%d' % i, group_key='lease-%d' % i,
+                           urgency='urgent'))
+        before = MSG.now_utc()
+        batch = MSG.claim_due_deliveries('slack-urgent', 10)
+        self.assertEqual(len(batch), 10)
+        lease = min(MSG.parse_rfc3339(d['lease_until']) for d in batch)
+        self.assertGreaterEqual((lease - before).total_seconds(), 119)
+        self.assertGreater(MSG.DELIVERY_LEASE_SECONDS, 10 * 8 + 9 * 1)
+
+    def test_worker_names_lane_and_paces_between_sends(self):
+        batch = [
+            {'id': 1, 'card_id': 'c1', 'claimed_by': 'w', 'title': 'one'},
+            {'id': 2, 'card_id': 'c2', 'claimed_by': 'w', 'title': 'two'},
+        ]
+        stop = unittest.mock.Mock()
+        stop.is_set.side_effect = [False, True]
+        stop.wait.return_value = False
+        with unittest.mock.patch.object(
+                devmon_slack.MSG, 'claim_due_deliveries', return_value=batch) as claim, \
+                unittest.mock.patch.object(
+                    devmon_slack, 'send', return_value=(True, 'http 200')), \
+                unittest.mock.patch.object(
+                    devmon_slack.MSG, 'delivery_sent') as sent:
+            devmon_slack.run_worker('secret-webhook', stop)
+        claim.assert_called_once_with('slack-urgent', 10)
+        self.assertEqual(sent.call_count, 2)
+        self.assertEqual(stop.wait.call_args_list,
+                         [unittest.mock.call(1), unittest.mock.call(5)])
 
     def test_format_text_has_title_no_url_leak(self):
         card = {'title': 'TUrgent', 'source': 's', 'kind': 'action',
@@ -1217,7 +1435,7 @@ class TestSlack(unittest.TestCase):
         for i in range(MSG.FLOOD_THRESHOLD):
             MSG.ingest(msg(event_id='f%d' % i, group_key='noisy', urgency='normal'))
         # the synthetic flood card is also urgent → it enters deliveries
-        titles = [d['title'] for d in MSG.claim_due_deliveries()]
+        titles = [d['title'] for d in MSG.claim_due_deliveries('slack-urgent')]
         self.assertTrue(any('flood' in t for t in titles))
 
 
