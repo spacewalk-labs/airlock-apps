@@ -7,6 +7,9 @@ Covers review §10: validation, deduplication, coalescing, crash recovery, urgen
 Run: python3 test_devmon.py
 """
 import json
+import contextlib
+import importlib.util
+import io
 import os
 import re
 import stat
@@ -52,6 +55,43 @@ def msg(event_id='resource-1', group_key='resource:disk', kind='action',
         p.update(outcome='o', why_it_matters='w', followup='none')
     p.update(extra)
     return p
+
+
+def old_lane_db(deliveries=()):
+    """Build the exact cards/deliveries shape from before the lane migration."""
+    fd, path = tempfile.mkstemp(suffix='.db')
+    os.close(fd)
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE cards (
+          card_id TEXT PRIMARY KEY, group_key TEXT NOT NULL, source TEXT NOT NULL,
+          kind TEXT NOT NULL, urgency TEXT NOT NULL, title TEXT NOT NULL, body TEXT,
+          action_json TEXT, link_json TEXT, action_digest TEXT, created_at TEXT NOT NULL,
+          received_at TEXT NOT NULL, read_at TEXT, slack_sent_at TEXT,
+          pinned INTEGER NOT NULL DEFAULT 0, archived_at TEXT, dismissed_at TEXT,
+          occurrence_count INTEGER NOT NULL DEFAULT 1, last_seen TEXT NOT NULL,
+          run_id TEXT
+        );
+        CREATE TABLE deliveries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, card_id TEXT NOT NULL,
+          channel TEXT NOT NULL, status TEXT NOT NULL,
+          attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT,
+          sent_at TEXT, last_error TEXT
+        );
+    """)
+    now = MSG.iso(MSG.now_utc())
+    conn.execute(
+        'INSERT INTO cards(card_id, group_key, source, kind, urgency, title, '
+        'created_at, received_at, last_seen) VALUES(?,?,?,?,?,?,?,?,?)',
+        ('legacy-card', 'legacy-group', 'resource', 'info', 'urgent', 'Legacy',
+         now, now, now))
+    for channel, status in deliveries:
+        conn.execute(
+            'INSERT INTO deliveries(card_id, channel, status, next_attempt_at) '
+            'VALUES(?,?,?,?)', ('legacy-card', channel, status, now))
+    conn.commit()
+    conn.close()
+    return path
 
 
 class TestValidation(unittest.TestCase):
@@ -279,6 +319,138 @@ class TestIngest(unittest.TestCase):
     def test_normal_no_slack(self):
         MSG.ingest(msg(urgency='normal'))
         self.assertEqual(self._count('deliveries'), 0)
+
+
+class TestLaneSchemaMigration(unittest.TestCase):
+    def test_additive_migration_backfill_indexes_and_old_inserts(self):
+        path = old_lane_db([('slack', 'pending')])
+        MSG._local = threading.local()
+        MSG.init_db(path)
+        conn = MSG._conn()
+
+        card_columns = {r[1] for r in conn.execute('PRAGMA table_info(cards)')}
+        self.assertTrue({
+            'severity', 'owner', 'needs_action', 'task_state', 'snoozed_until', 'runbook'
+        } <= card_columns)
+        delivery_columns = {r[1] for r in conn.execute('PRAGMA table_info(deliveries)')}
+        self.assertTrue({
+            'claimed_by', 'lease_until', 'created_at', 'last_error_at'
+        } <= delivery_columns)
+        indexes = {r[1] for r in conn.execute(
+            "SELECT type, name FROM sqlite_master WHERE type='index'")}
+        self.assertTrue({
+            'idx_deliveries_claim', 'ux_deliveries_open',
+            'idx_deliveries_sent', 'idx_cards_probe'
+        } <= indexes)
+        self.assertEqual(conn.execute(
+            'SELECT channel FROM deliveries WHERE card_id=?',
+            ('legacy-card',)).fetchone()['channel'], 'slack-urgent')
+
+        # Column-naming inserts from the pre-migration backend remain valid because all
+        # ten additions are nullable.
+        now = MSG.iso(MSG.now_utc())
+        conn.execute(
+            'INSERT INTO cards(card_id, group_key, source, kind, urgency, title, '
+            'created_at, received_at, last_seen) VALUES(?,?,?,?,?,?,?,?,?)',
+            ('old-writer-card', 'old-writer-group', 'resource', 'info', 'normal',
+             'Old writer', now, now, now))
+        conn.execute(
+            'INSERT INTO deliveries(card_id, channel, status, next_attempt_at) '
+            'VALUES(?,?,?,?)', ('old-writer-card', 'slack-routine', 'pending', now))
+        conn.commit()
+
+        self.assertEqual(MSG.ingest(msg(
+            event_id='post-migration', group_key='post-migration', kind='info')),
+            'inserted')
+        self.assertEqual(conn.execute(
+            "SELECT title FROM cards WHERE group_key='post-migration'").fetchone()['title'],
+            'Disk 92%')
+
+    def test_new_urgent_enqueue_uses_lane_and_created_timestamp(self):
+        fresh_db()
+        MSG.ingest(msg(event_id='urgent-lane', urgency='urgent'))
+        row = MSG._conn().execute(
+            'SELECT channel, created_at FROM deliveries').fetchone()
+        self.assertEqual(row['channel'], 'slack-urgent')
+        self.assertIsNotNone(row['created_at'])
+
+    def test_open_duplicate_is_suppressed_and_logged_but_sent_can_repeat(self):
+        fresh_db()
+        MSG.ingest(msg(event_id='dup-open', urgency='urgent'))
+        conn = MSG._conn()
+        card_id = conn.execute('SELECT card_id FROM cards').fetchone()['card_id']
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), conn:
+            MSG._enqueue_slack(conn, card_id)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM deliveries').fetchone()[0], 1)
+        self.assertIn(card_id, stderr.getvalue())
+        self.assertIn('duplicate delivery suppressed', stderr.getvalue())
+
+        conn.execute(
+            "UPDATE deliveries SET status='sent', sent_at=? WHERE card_id=?",
+            (MSG.iso(MSG.now_utc()), card_id))
+        conn.commit()
+        with conn:
+            MSG._enqueue_slack(conn, card_id)
+        self.assertEqual(conn.execute(
+            'SELECT COUNT(*) FROM deliveries').fetchone()[0], 2)
+
+    def test_old_sqlite_refuses_before_schema_touch(self):
+        root = tempfile.mkdtemp()
+        path = os.path.join(root, 'not-created', 'messages.db')
+        with unittest.mock.patch.object(MSG.sqlite3, 'sqlite_version_info', (3, 34, 1)):
+            with self.assertRaisesRegex(RuntimeError, 'SQLite 3.35'):
+                MSG.init_db(path)
+        self.assertFalse(os.path.exists(os.path.dirname(path)))
+
+    def test_duplicate_migration_reports_named_schema_state_and_disables_routes(self):
+        path = old_lane_db([('slack', 'pending'), ('slack-urgent', 'claimed')])
+        backend_path = os.path.join(os.path.dirname(__file__), 'airlock-dev-monitor.py')
+        spec = importlib.util.spec_from_file_location('airlock_dev_monitor_lane_test', backend_path)
+        backend = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(backend)
+        backend.MESSAGES_REQUESTED = True
+        backend._MESSAGES_AVAILABLE = True
+        config = {'db': path, 'owner': 'owner', 'spool': '/unused'}
+        stderr = io.StringIO()
+        with unittest.mock.patch.object(backend.devmon_owner, 'load_config', return_value=config):
+            with contextlib.redirect_stderr(stderr):
+                backend._start_messages()
+        self.assertEqual(backend._messages_state(), 'off: schema')
+        self.assertIsNone(backend.OWNER_CONFIG)
+        self.assertIsNone(backend.EXEC_CONFIG)
+        self.assertIn('messages schema failed', stderr.getvalue())
+
+        # Exercise the production wiring, not only the state source.
+        handler = object.__new__(backend.Handler)
+        handler.path = '/api/health'
+        handler._json = unittest.mock.Mock()
+        handler.do_GET()
+        health_status, health_body = handler._json.call_args.args
+        self.assertEqual(health_status, 200)
+        self.assertEqual(health_body['messages'], 'off: schema')
+
+        handler.path = '/api/owner/messages'
+        handler._json.reset_mock()
+        handler.do_GET()
+        owner_status, owner_body = handler._json.call_args.args
+        self.assertEqual(owner_status, 404)
+        self.assertEqual(owner_body['error'], 'messages feature not enabled')
+
+        server = unittest.mock.MagicMock()
+        server.__enter__.return_value = server
+        server.serve_forever.side_effect = KeyboardInterrupt
+        stdout = io.StringIO()
+        with unittest.mock.patch.object(backend, '_start_messages'), \
+                unittest.mock.patch.object(backend, 'cpu_info'), \
+                unittest.mock.patch.object(backend, 'history_trim'), \
+                unittest.mock.patch.object(backend.threading, 'Thread'), \
+                unittest.mock.patch.object(
+                    backend, 'ThreadingHTTPServer', return_value=server), \
+                contextlib.redirect_stdout(stdout):
+            backend.main()
+        self.assertIn('messages=off: schema', stdout.getvalue())
 
 
 class TestStateAndCounts(unittest.TestCase):

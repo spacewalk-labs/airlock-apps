@@ -154,6 +154,13 @@ def validate_payload(payload):
 def init_db(path):
     """Call once before threads are created. Initialise the schema and WAL."""
     global _DB_PATH
+    # The lane-aware claimant introduced with this schema uses UPDATE ... RETURNING.
+    # Refuse the schema before creating even the state directory on an older runtime;
+    # otherwise a later binary would find a half-initialised database.
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        raise RuntimeError(
+            'dev-monitor messages require SQLite 3.35 or newer '
+            '(UPDATE RETURNING support)')
     _DB_PATH = path
     # 0700 explicitly, and re-applied: makedirs honours the umask, and exist_ok=True means
     # an existing directory keeps whatever mode it already had. The installer sets this up
@@ -170,8 +177,14 @@ def init_db(path):
         conn.execute('PRAGMA journal_mode=WAL')
         conn.execute('PRAGMA busy_timeout=5000')
         conn.executescript(_SCHEMA)
-        _ensure_run_lifecycle_columns(conn)
-        conn.commit()
+        conn.execute('BEGIN IMMEDIATE')
+        try:
+            _ensure_run_lifecycle_columns(conn)
+            _ensure_lane_columns_and_indexes(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     finally:
         conn.close()
     # DB file mode 0600 (collector only).
@@ -192,6 +205,56 @@ def _ensure_run_lifecycle_columns(conn):
     for name, definition in additions:
         if name not in columns:
             conn.execute('ALTER TABLE runs ADD COLUMN %s %s' % (name, definition))
+
+
+def _ensure_lane_columns_and_indexes(conn):
+    """Add the two-lane schema to databases created by the original outbox."""
+    card_columns = {row[1] for row in conn.execute('PRAGMA table_info(cards)').fetchall()}
+    for name, definition in (
+            ('severity', 'TEXT'),
+            ('owner', 'TEXT'),
+            ('needs_action', 'INTEGER'),
+            ('task_state', 'TEXT'),
+            ('snoozed_until', 'TEXT'),
+            ('runbook', 'TEXT')):
+        if name not in card_columns:
+            conn.execute('ALTER TABLE cards ADD COLUMN %s %s' % (name, definition))
+
+    delivery_columns = {
+        row[1] for row in conn.execute('PRAGMA table_info(deliveries)').fetchall()
+    }
+    for name, definition in (
+            ('claimed_by', 'TEXT'),
+            ('lease_until', 'TEXT'),
+            ('created_at', 'TEXT'),
+            ('last_error_at', 'TEXT')):
+        if name not in delivery_columns:
+            conn.execute('ALTER TABLE deliveries ADD COLUMN %s %s' % (name, definition))
+
+    # Every pre-lane Slack row represented today's urgent traffic. Do this before the
+    # duplicate audit because a mixed slack/slack-urgent database can collide only after
+    # the semantic values have converged.
+    conn.execute("UPDATE deliveries SET channel='slack-urgent' WHERE channel='slack'")
+    duplicate = conn.execute(
+        "SELECT card_id, channel, COUNT(*) AS n FROM deliveries "
+        "WHERE status IN ('pending','claimed') GROUP BY card_id, channel "
+        "HAVING COUNT(*) > 1 LIMIT 1").fetchone()
+    if duplicate is not None:
+        raise RuntimeError(
+            'delivery schema migration found duplicate open rows '
+            'for card=%s channel=%s' % (duplicate[0], duplicate[1]))
+
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_deliveries_claim '
+        'ON deliveries(channel, status, next_attempt_at)')
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_deliveries_open "
+        "ON deliveries(card_id, channel) WHERE status IN ('pending','claimed')")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deliveries_sent "
+        "ON deliveries(channel, sent_at) WHERE status='sent'")
+    conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_cards_probe ON cards(group_key, created_at)')
 
 
 def _conn():
@@ -238,7 +301,13 @@ CREATE TABLE IF NOT EXISTS cards (
   dismissed_at TEXT,
   occurrence_count INTEGER NOT NULL DEFAULT 1,
   last_seen   TEXT NOT NULL,
-  run_id      TEXT
+  run_id      TEXT,
+  severity    TEXT,
+  owner       TEXT,
+  needs_action INTEGER,
+  task_state  TEXT,
+  snoozed_until TEXT,
+  runbook     TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_card_group_open ON cards(group_key)
   WHERE dismissed_at IS NULL AND archived_at IS NULL;
@@ -280,7 +349,11 @@ CREATE TABLE IF NOT EXISTS deliveries (
   attempts    INTEGER NOT NULL DEFAULT 0,
   next_attempt_at TEXT,
   sent_at     TEXT,
-  last_error  TEXT
+  last_error  TEXT,
+  claimed_by  TEXT,
+  lease_until TEXT,
+  created_at  TEXT,
+  last_error_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -392,20 +465,26 @@ def ingest(payload):
             status = 'coalesced'
         # 3) Enqueue the Slack outbox at the first urgent transition (the P4 worker actually sends).
         if status == 'inserted' and payload['urgency'] == 'urgent':
-            _enqueue_slack(conn, card_id)
+            _enqueue_slack(conn, card_id, 'slack-urgent')
         elif status == 'coalesced' and promote:
-            _enqueue_slack(conn, card_id)
+            _enqueue_slack(conn, card_id, 'slack-urgent')
     # Outside the transaction: flood detection uses a separate transaction.
     _maybe_flood(group_key)
     return status
 
 
-def _enqueue_slack(conn, card_id, channel='slack'):
+def _enqueue_slack(conn, card_id, channel='slack-urgent'):
     # Enqueue the urgent card in the Slack outbox (P4 worker retries and sends, at least once).
     # The group_key guard in _maybe_flood excludes recursive flood notifications.
-    conn.execute(
-        'INSERT INTO deliveries(card_id, channel, status, next_attempt_at) VALUES(?,?,?,?)',
-        (card_id, channel, 'pending', iso(now_utc())))
+    created_at = iso(now_utc())
+    cur = conn.execute(
+        'INSERT INTO deliveries(card_id, channel, status, next_attempt_at, created_at) '
+        'VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING',
+        (card_id, channel, 'pending', created_at, created_at))
+    if cur.rowcount == 0:
+        sys.stderr.write(
+            '[devmon_messages] duplicate delivery suppressed '
+            'card=%s channel=%s\n' % (card_id, channel))
 
 
 # ---- flood detection (M8) ----
@@ -445,7 +524,7 @@ def _maybe_flood(group_key):
              '%d or more events arrived within 10 minutes. Check the producer.' % cnt,
              'flood-' + group_key, iso(now), iso(now), 1, cnt, iso(now)))
         _audit(conn, 'flood', None, card_id, 'count=%d gk=%s' % (cnt, group_key))
-        _enqueue_slack(conn, card_id)
+        _enqueue_slack(conn, card_id, 'slack-urgent')
 
 
 # ---- state transitions (conditional UPDATE + audit, one transaction) ----

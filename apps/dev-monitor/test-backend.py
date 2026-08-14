@@ -94,17 +94,26 @@ class MessagesStateTest(unittest.TestCase):
     """The banner and /api/health must report what started, never what was requested."""
 
     def setUp(self):
-        self._saved = DM.OWNER_CONFIG
+        self._saved_owner = DM.OWNER_CONFIG
+        self._saved_state = DM._MESSAGES_STATE
 
     def tearDown(self):
-        DM.OWNER_CONFIG = self._saved
+        DM.OWNER_CONFIG = self._saved_owner
+        DM._MESSAGES_STATE = self._saved_state
 
     def test_off_without_a_loaded_config(self):
         DM.OWNER_CONFIG = None
+        DM._MESSAGES_STATE = 'off'
         self.assertEqual(DM._messages_state(), 'off')
 
-    def test_on_once_the_config_is_loaded(self):
+    def test_loaded_config_alone_does_not_claim_startup_succeeded(self):
         DM.OWNER_CONFIG = {'owner': 'me@example.test', 'secret': 's', 'spool': '/x', 'db': '/y'}
+        DM._MESSAGES_STATE = 'off'
+        self.assertEqual(DM._messages_state(), 'off')
+
+    def test_on_once_startup_records_success(self):
+        DM.OWNER_CONFIG = {'owner': 'me@example.test', 'secret': 's', 'spool': '/x', 'db': '/y'}
+        DM._MESSAGES_STATE = 'on'
         self.assertEqual(DM._messages_state(), 'on')
 
 

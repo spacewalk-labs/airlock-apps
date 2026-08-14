@@ -83,6 +83,7 @@ CORS_HOSTS = frozenset(
 # unavailable without touching the optional modules.
 OWNER_CONFIG = None
 EXEC_CONFIG = None
+_MESSAGES_STATE = 'off'
 _TMUX_LOCK = threading.Lock()
 # How long a run may sit in 'starting' with no window of its own name before the
 # reaper calls it a failed launch. Only has to outlast one _launch_run under the lock.
@@ -1333,12 +1334,12 @@ def _build_exec_config():
 
 
 def _messages_state():
-    return 'on' if OWNER_CONFIG is not None else 'off'
+    return _MESSAGES_STATE
 
 
 def _start_messages():
     """Start the optional message/action console while preserving observability on failure."""
-    global OWNER_CONFIG, EXEC_CONFIG
+    global OWNER_CONFIG, EXEC_CONFIG, _MESSAGES_STATE
     if not MESSAGES_REQUESTED:
         return
     if not _MESSAGES_AVAILABLE:
@@ -1359,12 +1360,22 @@ def _start_messages():
               '(DEV_MONITOR_OWNER/PROXY_SECRET/SPOOL/DB all unset) — observability only',
               flush=True)
         return
-    # From here on, anything that fails is a failure of the OPTIONAL half: a corrupt or
-    # locked database, an unwritable state directory, a spool that is not there. None of
-    # it is a reason to take observability down, and systemd would restart-loop us if we
-    # let it out. Say what broke, leave OWNER_CONFIG unset so the routes 404, carry on.
+    # Schema failures need their own named state: they otherwise look exactly like a
+    # deliberately disabled optional console in health and the startup banner.
     try:
         MSG.init_db(OWNER_CONFIG['db'])
+    except Exception as exc:  # noqa: BLE001 — preserve observability, but name the axis
+        OWNER_CONFIG = None
+        EXEC_CONFIG = None
+        _MESSAGES_STATE = 'off: schema'
+        sys.stderr.write(
+            f'[airlock-dev-monitor] messages schema failed '
+            f'({exc.__class__.__name__}: {exc}) — observability only\n')
+        return
+    # From here on, anything that fails is a generic failure of the OPTIONAL half: an
+    # unwritable execution directory or a thread that cannot start. None of it is a
+    # reason to take observability down, and systemd would restart-loop us if it escaped.
+    try:
         EXEC_CONFIG = _build_exec_config()
         stop = threading.Event()
         threading.Thread(
@@ -1381,9 +1392,11 @@ def _start_messages():
     except Exception as exc:  # noqa: BLE001 — an optional feature must not kill the monitor
         OWNER_CONFIG = None
         EXEC_CONFIG = None
+        _MESSAGES_STATE = 'off'
         sys.stderr.write(f'[airlock-dev-monitor] messages failed to start ({exc.__class__.__name__}: '
                          f'{exc}) — observability only\n')
         return
+    _MESSAGES_STATE = 'on'
     webhook = os.environ.get('AIRLOCK_DEVMON_SLACK_WEBHOOK', '').strip()
     console_url = os.environ.get('AIRLOCK_DEVMON_CONSOLE_URL', '').strip()
     if webhook:
