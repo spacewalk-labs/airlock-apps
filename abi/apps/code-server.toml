@@ -1,0 +1,13 @@
+id = "code-server"
+state = "stateful"
+quiesce = "stop-units"
+snapshot = "copy-slots-extensions-config"
+forward = "pending-parity"
+write_capture = "pending-parity"
+reverse = "pending-parity"
+rpo = "0"
+paths = [
+  "~/.local/share/airlock-code-server/",
+  "~/.config/code-server/",
+]
+capabilities = []

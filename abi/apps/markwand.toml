@@ -1,0 +1,12 @@
+id = "markwand"
+state = "stateful"
+quiesce = "stop-units"
+snapshot = "copy-filebrowser-db"
+forward = "pending-parity"
+write_capture = "pending-parity"
+reverse = "pending-parity"
+rpo = "0"
+paths = [
+  "~/.config/filebrowser/fb.db",
+]
+capabilities = []

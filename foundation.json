@@ -1,0 +1,53 @@
+{
+  "milestone": "public-app-split/foundation",
+  "trust_independent": true,
+  "abi": {
+    "id": "public-app-split/v1",
+    "core_contract": [1],
+    "lifecycle_required_by": "airlock-apps-release-gate",
+    "digest": "eedb0517466ecdea13d8a8508dafbef4adc4deabb2eb289150b2200c264116d9"
+  },
+  "repository": {
+    "planned_name": "airlock-apps",
+    "status": "created",
+    "owner": "spacewalk-labs",
+    "visibility": "public",
+    "canonical_url": "https://github.com/spacewalk-labs/airlock-apps.git",
+    "protection": "required-status-checks",
+    "source_checkout": "spacewalk-labs/airlock-work",
+    "decisions": {
+      "D-REPO-NAME": "airlock-apps",
+      "D-REPO-VISIBILITY": "public org public",
+      "D-REPO-PROTECTION": "required-status-checks",
+      "board_comment": "f9b1d9d4"
+    }
+  },
+  "lock": {
+    "tag_role": "display-label",
+    "rebuild_input": ["source_sha", "tree_digest", "artifact_digest"],
+    "builder": "builder/build-release.py"
+  },
+  "history": {
+    "apps": [
+      "code-server",
+      "dev-monitor",
+      "devterm",
+      "feedback",
+      "markwand",
+      "notepad",
+      "orca",
+      "paseo",
+      "publish"
+    ],
+    "method": "git-fast-export-import",
+    "export_rev": "HEAD",
+    "rehearsal": "rehearsal/transfer-dry-run.sh",
+    "rehearsal_asserts": ["manifest-byte-identical", "commit-count-equal"],
+    "devterm_9900_census": "census/devterm-9900.md"
+  },
+  "does_not_require": [
+    "TRUST_CAPABILITY_GATE",
+    "package-promotion",
+    "airlock-apps-remote"
+  ]
+}

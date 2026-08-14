@@ -1,0 +1,10 @@
+id = "feedback"
+state = "stateless"
+quiesce = "none"
+snapshot = "none"
+forward = "none"
+write_capture = "none"
+reverse = "none"
+rpo = "none"
+paths = []
+capabilities = []

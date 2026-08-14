@@ -1,0 +1,24 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  foundation-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash test/foundation-boundary.sh
+  app-release-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash test/app-release-isolation.sh
+  no-core-mix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: refuse Airlock core paths
+        run: |
+          set -euo pipefail
+          if [ -e bin/airlock-config ] || [ -e install/airlock-install.sh ]; then
+            echo "::error::Airlock core paths must not land in airlock-apps"
+            exit 1
+          fi

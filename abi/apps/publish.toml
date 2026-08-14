@@ -1,0 +1,14 @@
+id = "publish"
+state = "stateful"
+quiesce = "stop-units"
+snapshot = "copy-share-uploads-state"
+forward = "pending-parity"
+write_capture = "pending-parity"
+reverse = "pending-parity"
+rpo = "0"
+paths = [
+  "/opt/airlock/share",
+  "~/uploads",
+  "~/.local/state/airlock/publish-public.json",
+]
+capabilities = []

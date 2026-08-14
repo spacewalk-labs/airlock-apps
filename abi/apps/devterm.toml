@@ -1,0 +1,12 @@
+id = "devterm"
+state = "stateful"
+quiesce = "stop-units"
+snapshot = "copy-tabs-and-usage"
+forward = "pending-parity"
+write_capture = "pending-parity"
+reverse = "pending-parity"
+rpo = "0"
+paths = [
+  "~/.config/airlock-devterm/tabs.json",
+]
+capabilities = ["plaintext-redirect"]

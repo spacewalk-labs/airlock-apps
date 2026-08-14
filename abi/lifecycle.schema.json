@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "public-app-split/v1/lifecycle",
+  "title": "App package data lifecycle declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "state", "quiesce", "snapshot", "forward", "write_capture", "reverse", "rpo", "paths", "capabilities"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "state": {
+      "enum": ["stateless", "stateful"]
+    },
+    "quiesce": { "type": "string", "minLength": 1 },
+    "snapshot": { "type": "string", "minLength": 1 },
+    "forward": { "type": "string", "minLength": 1 },
+    "write_capture": { "type": "string", "minLength": 1 },
+    "reverse": { "type": "string", "minLength": 1 },
+    "rpo": { "enum": ["none", "0"] },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": ["rooted-artifact", "system-unit", "plaintext-redirect"]
+      },
+      "uniqueItems": true
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "state": { "const": "stateless" } } },
+      "then": {
+        "properties": {
+          "quiesce": { "const": "none" },
+          "snapshot": { "const": "none" },
+          "forward": { "const": "none" },
+          "write_capture": { "const": "none" },
+          "reverse": { "const": "none" },
+          "rpo": { "const": "none" },
+          "paths": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "state": { "const": "stateful" } } },
+      "then": {
+        "properties": {
+          "rpo": { "const": "0" },
+          "paths": { "minItems": 1 }
+        },
+        "not": {
+          "properties": {
+            "quiesce": { "const": "none" },
+            "snapshot": { "const": "none" },
+            "forward": { "const": "none" },
+            "write_capture": { "const": "none" },
+            "reverse": { "const": "none" }
+          }
+        }
+      }
+    }
+  ]
+}
