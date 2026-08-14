@@ -1,0 +1,6 @@
+# False positives in inherited app history. Not credentials.
+# RFC 6455 §1.2 example WebSocket key ("the sample nonce").
+ba81297edd9e6b1819641d3746d4173bc5414df8:apps/code-server/smoke.sh:generic-api-key:36
+# Anthropic public OAuth client id shipped by the Claude CLI.
+eae7d3228b65fad5b39dbefa4306a0fc731433b2:apps/devterm/bin/claude-status:generic-api-key:30
+eae7d3228b65fad5b39dbefa4306a0fc731433b2:apps/devterm/bin/claude-switch:generic-api-key:32
