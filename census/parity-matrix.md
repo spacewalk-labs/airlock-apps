@@ -1,6 +1,6 @@
 # Public ↔ internal app behavior parity matrix
 
-Status: format sample — `devterm`, `dev-monitor`, `code-server` only (3/9 apps)
+Status: in progress — 6/9 apps inventoried
 
 This census records observable or operational differences only. It does not decide
 `keep`, `drop`, or `migrate`, and it does not add contracts or tests.
@@ -50,6 +50,49 @@ no match):
 
 - Z7 — public code-server legacy-copy implementation:
   `rg -n 'OLD_UDD|OLD_EXT|cp -an' apps/code-server`
+
+- Z8 — internal feedback implementation, registration, routes, units, and config:
+  `rg -n -i --glob '!**/__pycache__/**' --glob '!**/*.pyc' 'airlock-feedback|feedback/api|apps\.feedback|feedback\.service|AIRLOCK_FEEDBACK' /home/josh/workspace/swk-devhub/infra/dev-hub` and
+  `rg --files /home/josh/workspace/swk-devhub/infra/dev-hub | rg '(^|/)feedback(/|\.|$)|(^|/)[^/]*feedback[^/]*$'`
+
+- Z9 — internal notepad editor-text persistence:
+  `rg -n 'localStorage|airlock\.notepad\.text' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/frontend/notepad.html`
+
+- Z10 — internal notepad encoded-payload preflight:
+  `rg -n 'MAX_ENCODED|b64\.length|stripPrefix\(out\.upload\)' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/frontend/notepad.html`
+
+- Z11 — internal notepad file-sequence reset in the clear handler:
+  `rg -n "editor\.value = ''; imgMap\.clear\(\); fileMap\.clear\(\); viewMap\.clear\(\); fileSeq = 0" /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/frontend/notepad.html`
+
+- Z12 — public Markwand legacy `/edit` redirects:
+  `rg -n 'location[[:space:]]+(=|~)[[:space:]]+/edit|return 302 /markwand/edit' apps/markwand`
+
+- Z13 — public Markwand special `/markwand/split` route:
+  `rg -n 'location[[:space:]]+=[[:space:]]+/markwand/split' apps/markwand`
+
+- Z14 — internal Markwand editor-proxy read timeout:
+  `sed -n '1145,1159p' /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh | rg -n 'proxy_read_timeout'`
+
+- Z15 — public Markwand PWA manifest advertisement or asset:
+  `rg -n '<link rel="manifest"|markwand-manifest' apps/markwand`
+
+- Z16 — internal direct-file viewer Airlock return widget:
+  `sed -n '1161,1176p' /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh | rg -n 'airlock-return\.js'`
+
+- Z17 — public Markwand linger setup or validation:
+  `rg -n 'loginctl|enable-linger' apps/markwand`
+
+- Z18 — internal Markwand unit `PATH` injection:
+  `sed -n '195,211p' /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh | rg -n 'Environment=PATH'`
+
+- Z19 — public Markwand filebrowser branding color migration:
+  `rg -n 'branding\.color' apps/markwand`
+
+- Z20 — public Markwand served-root symlink creation or reconciliation:
+  `rg -n -g '!**/static/vendor/**' '(^|[;&|[:space:]])ln[[:space:]]+-s(fn|f|n)?|readlink|shopt' apps/markwand`
+
+- Z21 — public Markwand timestamped filebrowser DB backup:
+  `rg -n 'FB_DB\.bak|cp[[:space:]]+-a.*FB_DB' apps/markwand`
 
 ## devterm
 
@@ -124,13 +167,85 @@ trees, so none is claimed here.
 
 Sample count: **11 difference entries**.
 
-## Sample total
+## feedback
 
-The first three apps contain **44 evidence-backed difference entries**:
+Internal coverage note: none of the five internal box profiles registers feedback
+(I: `infra/dev-hub/roster.json:10-13`; I: `infra/dev-hub/roster.json:25-27`;
+I: `infra/dev-hub/roster.json:36-38`; I: `infra/dev-hub/roster.json:47-49`;
+I: `infra/dev-hub/roster.json:58-60`), and Z8 finds no implementation anywhere in
+the internal runtime tree. The public app says its suggestion-box UI lives in the
+platform hub, but that hub UI source is outside this app-artifact repository
+(P: `apps/feedback/render.sh:45-48`). Therefore no UI behavior is claimed without
+an implementation line in the specified public tree.
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| FB-R1 | route | public | The rendered hub fragment exposes `/feedback/api/` as a same-origin proxy to a loopback backend. Internal has no feedback route or implementation. Access-control behavior is not claimed because the public server-level gate implementation is outside the specified tree. | P: `apps/feedback/render.sh:41-53`; Z8 |
+| FB-A1 | API | public | `GET /feedback/api/health` (backend aliases `/api/health`, `/health`, and `/`) returns `{ok, service, port, enabled, intake, mail}`, making disabled or partially configured delivery visible. Internal has no feedback API. | P: `apps/feedback/backend/airlock-feedback.py:164-185`; Z8 |
+| FB-A2 | API | public | `POST /feedback/api/submit` accepts `{text}`, takes the submitter from the configured identity header while ignoring any client owner field, rejects empty or over-8,000-character text, and returns success/failure JSON with status `200`/`400`. | P: `apps/feedback/backend/airlock-feedback.py:65-66`; P: `apps/feedback/backend/airlock-feedback.py:119-128`; P: `apps/feedback/backend/airlock-feedback.py:171-195`; Z8 |
+| FB-A3 | API | public | Delivery can target an external intake, transactional mail, or both. Intake sends `{owner,text}` with a dedicated token header and returns `issue_url`; mail conditionally sets `reply_to`. When both are enabled, every target must succeed; mail-provider error bodies and API keys are not returned. | P: `apps/feedback/backend/airlock-feedback.py:74-116`; P: `apps/feedback/backend/airlock-feedback.py:119-142`; Z8 |
+| FB-N1 | unit | public | `airlock-feedback.service` is a user unit ordered after network, reads an optional private environment file, runs the loopback Python backend, restarts on failure, and is enabled/restarted by installation. Internal owns no feedback unit. | P: `apps/feedback/render.sh:8-38`; P: `apps/feedback/install.sh:60-74`; Z8 |
+| FB-C1 | config | public | App config exposes `backend_port`, external intake URL/token-env name, mail recipient/sender/API/key-env name, and the runtime token environment; no secret value is stored in the app manifest. | P: `apps/feedback/airlock-app.toml:10-24`; Z8 |
+| FB-C2 | config | public | Intake becomes active only with URL plus token; mail requires recipient, sender, and API key. With neither complete, submissions report not configured. Secret values are resolved through configured environment-variable names and the optional unit `EnvironmentFile`. | P: `apps/feedback/backend/airlock-feedback.py:41-63`; P: `apps/feedback/backend/airlock-feedback.py:119-127`; P: `apps/feedback/render.sh:20-31`; Z8 |
+
+Difference count: **7 entries**.
+
+## markwand
+
+Coverage note (not counted as a difference): internal's shared hub server owns
+`/__reset` and old Markwand/SilverBullet service-worker cleanup routes
+(I: `infra/dev-hub/bin/setup-md-notebook.sh:1097-1119`). The public hub source is
+outside this app-artifact repository, so the matrix cannot establish whether the
+public platform has an equivalent global route. The same boundary prevents a claim
+about the complete public hub allow-list. API calls used by the two split viewers
+have no evidenced request/response difference, so no API row is added.
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| MW-R1 | route | internal | `/edit`, `/edit/`, and `/edit/<path>` return compatibility redirects into `/markwand/edit/...`. The public app route renderer has no legacy `/edit` route. | I: `infra/dev-hub/bin/setup-md-notebook.sh:1127-1132`; P: `apps/markwand/render.sh:55-102`; Z12 |
+| MW-R2 | route | internal | `/markwand/split` directly serves the split viewer. Public special-cases only exact `/markwand/`; `/markwand/split` falls through the ordinary markserv prefix proxy. | I: `infra/dev-hub/bin/setup-md-notebook.sh:1134-1143`; P: `apps/markwand/render.sh:77-101`; Z13 |
+| MW-R3 | route | public | The filebrowser editor proxy sets `proxy_read_timeout 86400s`; the internal editor location has no read-timeout override. | P: `apps/markwand/render.sh:63-75`; I: `infra/dev-hub/bin/setup-md-notebook.sh:1145-1159`; Z14 |
+| MW-U1 | UI | internal | The split viewer advertises an installable PWA manifest whose name/start URL are `SWK Dev Hub` and `/`. Public supplies Markwand icon metadata but advertises no manifest, so it has no equivalent install-to-home contract in the app artifact. | I: `infra/dev-hub/markwand/static/markwand-split.html:7-18`; I: `infra/dev-hub/markwand/static/markwand-manifest.json:1-12`; P: `apps/markwand/static/markwand-split.html:6-22`; Z15 |
+| MW-U2 | UI | public | Direct `/markwand/<file>` markserv pages receive the shared Airlock return widget in addition to enhance/edit controls. Internal direct-file pages inject enhance/edit controls only; its split page's own Airlock button is a separate surface. | P: `apps/markwand/render.sh:88-100`; I: `infra/dev-hub/bin/setup-md-notebook.sh:1161-1176`; Z16 |
+| MW-N1 | unit | naming differs | Public owns `airlock-markserv.service` and `airlock-filebrowser.service`; internal owns `markserv.service` and `filebrowser.service`. | P: `apps/markwand/airlock-app.toml:64-70`; I: `infra/dev-hub/bin/setup-md-notebook.sh:109-113`; I: `infra/dev-hub/bin/setup-md-notebook.sh:195-231` |
+| MW-N2 | unit | internal | Installation checks user linger and enables it when absent, keeping user units alive after logout. The public Markwand installer neither sets nor validates linger. | I: `infra/dev-hub/bin/setup-md-notebook.sh:233-236`; P: `apps/markwand/install.sh:168-217`; Z17 |
+| MW-N3 | unit | public | The markserv unit receives an explicit `PATH` containing the discovered Node directory. Internal relies on the systemd default environment for markserv's `env node` launcher. | P: `apps/markwand/install.sh:84-96`; P: `apps/markwand/render.sh:19-26`; I: `infra/dev-hub/bin/setup-md-notebook.sh:195-211`; Z18 |
+| MW-C1 | config | public | Public pins markserv `1.17.4` and filebrowser `2.63.18` and verifies the filebrowser archive checksum. Internal retains any existing global markserv or installs it without a version and downloads filebrowser `latest` without checksum verification. | P: `apps/markwand/install.sh:67-68`; P: `apps/markwand/install.sh:115-166`; I: `infra/dev-hub/bin/setup-md-notebook.sh:176-193` |
+| MW-C2 | config | defaults differ | Public requires global `paths.code_root` to be a configured absolute path with no fallback. Internal accepts `ROOT_DIR` and defaults it to `$HOME/code`. The equal port defaults are not counted. | P: `apps/markwand/install.sh:49-61`; I: `infra/dev-hub/bin/setup-md-notebook.sh:104-108` |
+| MW-C3 | config | internal | Filebrowser DB migration writes `branding.color=#0f766e` as well as name/files. Public migrates only branding name/files. | I: `infra/dev-hub/bin/setup-md-notebook.sh:253-267`; P: `apps/markwand/install.sh:195-212`; Z19 |
+| MW-S1 | state | internal | Installation builds a served-root symlink farm from allowed non-hidden top-level home directories and removes stale links. Public only ensures the configured `CODE_ROOT` directory exists. | I: `infra/dev-hub/bin/setup-md-notebook.sh:146-174`; P: `apps/markwand/install.sh:98-100`; Z20 |
+| MW-S2 | state | internal | Installation additionally exposes hidden `~/.claude` and `~/.codex` as `${ROOT_DIR}/claude` and `${ROOT_DIR}/codex`. The public app installer creates no corresponding aliases. | I: `infra/dev-hub/bin/setup-md-notebook.sh:294-304`; Z20 |
+| MW-S3 | state | internal | Before changing filebrowser DB settings, internal creates a timestamped `fb.db.bak.YYYYMMDD-HHMM` copy. Public updates the same DB without a backup step. | I: `infra/dev-hub/bin/setup-md-notebook.sh:253-268`; P: `apps/markwand/install.sh:195-213`; Z21 |
+
+Difference count: **14 entries**.
+
+## notepad
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| NP-R1 | route | path differs | Public installs the UI as hub webroot `notepad/index.html` with canonical route `/notepad/`. Internal installs `/etc/nginx/notepad.html` and serves it through the hub's shared top-level `*.html` location as `/notepad.html`. | P: `apps/notepad/airlock-app.toml:27-38`; P: `apps/notepad/install.sh:33-42`; I: `infra/dev-hub/bin/setup-md-notebook.sh:649-652`; I: `infra/dev-hub/bin/setup-md-notebook.sh:1197-1201`; I: `infra/dev-hub/ownership.json:99-102` |
+| NP-A1 | API | request differs | Both call the shared publish image/file upload APIs, but public strips the Data URL prefix and sends base64 only in `image`/`data`; internal sends the complete Data URL. | P: `apps/notepad/frontend/notepad.html:181-184`; P: `apps/notepad/frontend/notepad.html:243-254`; P: `apps/notepad/frontend/notepad.html:270-275`; P: `apps/notepad/frontend/notepad.html:296-305`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:175-180`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:222-238` |
+| NP-U1 | UI | behavior differs | Public inserts `[imageN]` and `[fileN]`, then replaces recognized tokens with bare server paths when copying. Internal inserts Korean `[이미지N]` and `[파일N]` tokens and preserves each token while appending `(<path>)` to the copied text. | P: `apps/notepad/frontend/notepad.html:186-195`; P: `apps/notepad/frontend/notepad.html:243-264`; P: `apps/notepad/frontend/notepad.html:296-312`; P: `apps/notepad/frontend/notepad.html:401-405`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:144-154`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:175-185`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:195-203`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:231-244`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:329-334` |
+| NP-U2 | UI | defaults differ | Public uses one maximum-2,400-pixel JPEG at quality 0.9 for upload and the viewer/drawing source. Internal separately creates an upload JPEG at quality 0.8 and a maximum-2,048-pixel viewer source at quality 0.82. | P: `apps/notepad/frontend/notepad.html:159`; P: `apps/notepad/frontend/notepad.html:198-217`; P: `apps/notepad/frontend/notepad.html:260-264`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:105-108`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:120-137`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:175-185` |
+| NP-U3 | UI | public | Before upload, public rejects an encoded image payload over 12 MiB. Internal has no encoded-length preflight in its complete image/file upload frontend. | P: `apps/notepad/frontend/notepad.html:160`; P: `apps/notepad/frontend/notepad.html:243-253`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:98-304`; Z10 |
+| NP-U4 | UI | behavior differs | Clearing the page resets public's attachment sequence, so the next file is `[file1]`; internal clears the UI/maps but leaves `fileSeq` running for the rest of that page session. | P: `apps/notepad/frontend/notepad.html:412-420`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:341-347`; Z11 |
+| NP-N1 | unit | ownership differs | Public notepad declares no unit and explicitly depends on publish's three `airlock-publish*` user units. Internal packages publish and notepad together under the shared `publish-manager.service` plus cleanup service/timer. | P: `apps/notepad/airlock-app.toml:15-16`; P: `apps/notepad/airlock-app.toml:27-30`; P: `apps/publish/airlock-app.toml:79-85`; I: `infra/dev-hub/ownership.json:87-105`; I: `infra/dev-hub/bin/setup-md-notebook.sh:487-499`; I: `infra/dev-hub/bin/setup-md-notebook.sh:513-534` |
+| NP-C1 | config | lifecycle differs | Public declares a `publish` dependency, refuses a broken standalone install, and can independently reclaim only notepad's webroot when disabled. Internal has one publish/notepad package and cannot deactivate only one without source changes. | P: `apps/notepad/airlock-app.toml:15-16`; P: `apps/notepad/install.sh:26-30`; P: `apps/notepad/deactivate.sh:2-8`; I: `infra/dev-hub/ownership.json:87-130` |
+| NP-S1 | state | public | Public saves only editor text in `localStorage["airlock.notepad.text"]` and restores it after reload. Internal does not persist editor text in browser storage; upload maps remain session-only on both sides. | P: `apps/notepad/frontend/notepad.html:154-178`; I: `infra/dev-hub/publish-manager/frontend/notepad.html:98-347`; Z9 |
+
+Difference count: **9 entries**.
+
+## Progress total
+
+The first six apps contain **74 evidence-backed difference entries**:
 
 - `devterm`: 14
 - `dev-monitor`: 19
 - `code-server`: 11
+- `feedback`: 7
+- `markwand`: 14
+- `notepad`: 9
 
-The remaining six apps are intentionally not yet inventoried. This is the requested
-format checkpoint before expanding the census.
+The remaining three apps (`orca`, `paseo`, and `publish`) are intentionally not yet
+inventoried. This is the requested commit/push checkpoint after the first expansion
+batch.
