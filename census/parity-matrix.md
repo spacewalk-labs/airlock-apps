@@ -1,6 +1,6 @@
 # Public ↔ internal app behavior parity matrix
 
-Status: in progress — 6/9 apps inventoried
+Status: complete — 9/9 apps inventoried, 134 evidence-backed difference entries
 
 This census records observable or operational differences only. It does not decide
 `keep`, `drop`, or `migrate`, and it does not add contracts or tests.
@@ -93,6 +93,82 @@ no match):
 
 - Z21 — public Markwand timestamped filebrowser DB backup:
   `rg -n 'FB_DB\.bak|cp[[:space:]]+-a.*FB_DB' apps/markwand`
+
+- Z22 — public Orca app-specific owner setting:
+  `rg -n 'ORCA_ALLOW' apps/orca --glob '!web-bundle/dist/**'`
+
+- Z23 — internal Orca dry-run/render-destination controls:
+  `rg -n 'AIRLOCK_RENDER_DIR|AIRLOCK_DRY_RUN' /home/josh/workspace/swk-devhub/infra/dev-hub/orca`
+
+- Z24 — internal Orca inventory's rooted-artifact retirement declarations:
+  `sed -n '297,337p' /home/josh/workspace/swk-devhub/infra/dev-hub/ownership.json | rg -n 'rooted|orca-firewall\.nft|unit-file-rm'`
+
+- Z25 — public Orca partial-deployment drift recovery:
+  `rg -n 'NeedDaemonReload|ActiveEnterTimestamp|orca_stale_binary' apps/orca --glob '!web-bundle/dist/**'`
+
+- Z26 — public Orca live-instance-safe orphan reconciliation:
+  `rg -n 'scope_has_serve|고아 scope|reaped=.*app-orca' apps/orca --glob '!web-bundle/dist/**'`
+
+- Z27 — public Paseo send-timeout/response-buffering overrides:
+  `sed -n '141,177p' apps/paseo/render.sh | rg -n 'proxy_send_timeout|proxy_buffering'`
+
+- Z28 — internal Paseo stale-pid pre-start guard:
+  `rg -n 'ExecStartPre|clear-stale-pid|paseo\.pid' /home/josh/workspace/swk-devhub/infra/dev-hub/paseo`
+
+- Z29 — public Paseo stop timeout:
+  `rg -n 'TimeoutStopSec' apps/paseo`
+
+- Z30 — public Paseo linger setup or validation:
+  `rg -n 'enable-linger|Linger=yes' apps/paseo`
+
+- Z31 — public Paseo ambient `OPENAI_API_KEY` removal:
+  `rg -n 'UnsetEnvironment=OPENAI_API_KEY|codex-strip-ambient-openai-key|paseo-codex-strip-ambient-openai-key' apps/paseo`
+
+- Z32 — internal Paseo favicon-ring transformation:
+  `rg -n 'favicon-ring|AIRLOCK_ICON_RING|ring_icon_svg' /home/josh/workspace/swk-devhub/infra/dev-hub/paseo` and
+  `sed -n '770,830p' /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh | rg -n 'favicon|assets/assets/images'`
+
+- Z33 — internal Paseo orphan process guard/group patches:
+  `rg -n 'orphan-process-guard|paseo-orphan-guard|orphan-process-group|paseo-process-group' /home/josh/workspace/swk-devhub/infra/dev-hub/paseo`
+
+- Z34 — internal Paseo credential-key preservation patch:
+  `rg -n 'credential-key-preservation|paseo-cred-preserve' /home/josh/workspace/swk-devhub/infra/dev-hub/paseo`
+
+- Z35 — internal Publish local gated route:
+  `rg -n 'publish-gated|HTPASSWD|publish-gated-auth|Restricted document|location .*\^/g/' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh`
+
+- Z36 — public Publish bundle attachments:
+  `rg -n 'MAX_BUNDLE_ATTACHMENTS|attachment_bytes|_collect_bundle_attachments|plan\.attachments' apps/publish/backend apps/publish/frontend`
+
+- Z37 — public Publish source-provenance machinery:
+  `rg -n '_publish_source_identity|_git_tracked|external symlink target|FetchFingerprint' apps/publish/backend apps/publish/frontend`
+
+- Z38 — internal Publish on-box local-publication state:
+  `rg -n 'publish-public\.json|AIRLOCK_PUBLISH_PUBLIC_MODE|AIRLOCK_PUBLISH_PUBLIC_DIR|_local_ingest|def _reconcile' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager /home/josh/workspace/swk-devhub/infra/dev-hub/bin/setup-md-notebook.sh`
+
+- Z39 — internal Publish manager upload UI:
+  `rg -n 'type="file"|upload-file' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/frontend/publish-manager.html`
+
+- Z40 — public Publish theme control/state:
+  `rg -n 'data-theme-btn|markwand-theme' apps/publish/frontend/publish.html`
+
+- Z41 — internal Publish item-type filter:
+  `rg -n 'id="type"|#type|\$\("#type"\)' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/frontend/publish-manager.html`
+
+- Z42 — public Orca linger setup or validation:
+  `rg -n 'loginctl|enable-linger|Linger=yes' apps/orca --glob '!web-bundle/dist/**'`
+
+- Z43 — public Paseo partial-deployment systemd drift recovery:
+  `rg -n 'NeedDaemonReload' apps/paseo`
+
+- Z44 — internal Publish broken-link field:
+  `rg -n 'isBroken' /home/josh/workspace/swk-devhub/infra/dev-hub/publish-manager/backend/publish-manager.py`
+
+- Z45 — public Paseo explicit architecture rejection:
+  `rg -n 'uname -m|x86_64|aarch64|arm64|unsupported arch|미지원 arch' apps/paseo --glob '!patches/*.patch' --glob '!browse-host/test/**'`
+
+- Z46 — public Publish periodic UI refresh:
+  `rg -n 'setInterval' apps/publish/frontend/publish.html`
 
 ## devterm
 
@@ -235,9 +311,105 @@ Difference count: **14 entries**.
 
 Difference count: **9 entries**.
 
-## Progress total
+## orca
 
-The first six apps contain **74 evidence-backed difference entries**:
+Coverage note: internal `orca/web-bundle/` tracks only `VERSION`; the generated
+`install-into-box.sh`, slot manager, and nginx slot implementation come from an external
+checkout and are absent from the designated tree. The documented local-render/grab routes
+and `8500..8515`/`8520..8527` ports are therefore not counted. The base `8446`/`18820`/
+`18821` ports and the two-user-unit plus one-system-firewall-unit scope split are equal.
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| OR-N1 | unit | naming differs | Both sides own two user units plus one system firewall unit, but their identities differ: public uses `airlock-orca-xvfb.service`, `airlock-orca.service`, and `airlock-orca-firewall.service`; internal uses the corresponding `swk-orca-*` names. | P: `apps/orca/airlock-app.toml:74-90`; I: `infra/dev-hub/orca/bin/install.sh:60-68`; I: `infra/dev-hub/orca/bin/install.sh:169-185` |
+| OR-N2 | unit | ordering differs | Public user units order after `network.target`. Internal orders both after `default.target` while also installing them into `default.target`. | P: `apps/orca/render.sh:43-68`; P: `apps/orca/render.sh:77-107`; I: `infra/dev-hub/orca/bin/install.sh:217-237`; I: `infra/dev-hub/orca/bin/install.sh:242-276` |
+| OR-N3 | unit | restart behavior differs | Public collapses binary and either-user-unit changes into one flag and restarts Xvfb and Orca together. Internal tracks Xvfb and Orca changes separately, restarting Xvfb only for its own unit/socket conditions and Orca for its own unit/binary/Xvfb conditions. | P: `apps/orca/install.sh:147-178`; P: `apps/orca/install.sh:224-251`; I: `infra/dev-hub/orca/bin/install.sh:312-333` |
+| OR-N4 | unit | internal | Internal checks user linger, attempts to enable it when absent, and reports whether reboot persistence is guaranteed. Public's Orca app scope neither enables nor validates linger. | I: `infra/dev-hub/orca/bin/install.sh:375-379`; I: `infra/dev-hub/orca/bin/install.sh:425-429`; Z42 |
+| OR-C1 | config | schema/default differs | Public declares the three port defaults and an owner-only audience in the app manifest and consumes platform owner configuration. Internal exposes `ORCA_GATE_PORT`, `ORCA_BACKEND_PORT`, `ORCA_HTTPS_PORT`, and `ORCA_ALLOW`; `ORCA_ALLOW` defaults to `cho@spacewalk.tech`. The equal numeric defaults are not counted separately. | P: `apps/orca/airlock-app.toml:5-8`; P: `apps/orca/airlock-app.toml:106-108`; P: `apps/orca/install.sh:374-386`; I: `infra/dev-hub/orca/bin/install.sh:15-22`; I: `infra/dev-hub/orca/bin/install.sh:252-262`; Z22 |
+| OR-C2 | config | public | Public supports mutation-free `AIRLOCK_DRY_RUN` and redirected `AIRLOCK_RENDER_DIR` emission, including emission of the system firewall ruleset/unit without `sudo`. Internal has no corresponding app-local controls. | P: `apps/orca/install.sh:16-18`; P: `apps/orca/install.sh:86-96`; P: `apps/orca/install.sh:201-218`; P: `apps/orca/install.sh:263-287`; Z23 |
+| OR-C3 | config | bundle lifecycle differs | Public commits the patched web-client dist, pins its entry asset, file count, and full-tree hash, and verifies them before serving. Internal tracks a source commit/entry asset in `VERSION` and regenerates an untracked bundle from a separate checkout; auto mode may retain the previous deployed bundle when that checkout is absent, while require mode enforces source HEAD equality. | P: `apps/orca/web-bundle/VERSION:1-18`; P: `apps/orca/bin/verify-web-bundle.sh:22-48`; P: `apps/orca/install.sh:303-313`; I: `infra/dev-hub/orca/README.md:31-42`; I: `infra/dev-hub/orca/bin/refresh-web-bundle.sh:28-65` |
+| OR-C4 | config | artifact lifecycle differs | Public records its system-scope firewall unit, rooted firewall ruleset/web tree, and HTTPS serve-port claim in the app manifest, and deactivation delegates their removal to the artifact ledger. Internal's ownership inventory records the unit scopes and serve path, but its Orca deactivation list only stops/disables the firewall unit and does not declare removal of either the system unit file or `/etc/dev-hub/orca-firewall.nft`. | P: `apps/orca/airlock-app.toml:74-90`; P: `apps/orca/deactivate.sh:2-16`; I: `infra/dev-hub/ownership.json:297-327`; I: `infra/dev-hub/orca/bin/install.sh:162-185`; Z24 |
+| OR-S1 | state | path differs | AppImage, extracted runtime, and `serve.log` live under `~/.local/share/airlock-orca` publicly versus `~/.local/share/orca` internally. Pairing and reap-helper paths also differ: `airlock-pairing-code`/`airlock-orca-reap` versus `swk-pairing-code`/`swk-orca-daemon-reap`. | P: `apps/orca/install.sh:80-97`; I: `infra/dev-hub/orca/bin/install.sh:55-68`; I: `infra/dev-hub/orca/bin/install.sh:147-159` |
+| OR-S2 | state | internal | A later internal install detects `NeedDaemonReload=yes` or an extracted `AppRun` newer than the active process and forces a recovery restart. Public bases restart only on changes observed in the current invocation or service inactivity. | I: `infra/dev-hub/orca/bin/install.sh:288-310`; I: `infra/dev-hub/orca/bin/install.sh:326-333`; P: `apps/orca/install.sh:147-178`; P: `apps/orca/install.sh:224-251`; Z25 |
+| OR-S3 | state | internal | After an install that preserves the live service, internal scans `app-orca-*.scope`, keeps scopes containing a live `--serve` process, and removes only orphan scopes. Public removes all such scopes through `ExecStopPost`; an unchanged install performs no proactive orphan reconciliation. | I: `infra/dev-hub/orca/bin/install.sh:336-362`; P: `apps/orca/render.sh:19-35`; P: `apps/orca/install.sh:244-251`; Z26 |
+| OR-S4 | state | rooted path differs | Public writes `/etc/airlock/orca-loopback.nft` and installs its patched client below `${webroot_parent}/orca-web/`, making that serve tree world-readable. Internal writes `/etc/dev-hub/orca-firewall.nft` and maintains a root-owned launcher fragment at `/etc/nginx/devhub-orca-card.html`; further generated canary paths are outside the designated tree and are not claimed. | P: `apps/orca/install.sh:261-287`; P: `apps/orca/install.sh:298-325`; I: `infra/dev-hub/orca/bin/install.sh:66-68`; I: `infra/dev-hub/orca/bin/install.sh:162-185`; I: `infra/dev-hub/orca/bin/install.sh:443-464` |
+
+Difference count: **12 entries**.
+
+## paseo
+
+Coverage note: both sides install the core Paseo server/UI from npm, and that upstream
+body is absent from the designated trees. Core upstream API differences are therefore not
+claimed; the rows below are limited to app-owned proxy, unit, installer, vendor patches,
+and browse-host behavior.
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| PA-R1 | route | activation differs | Public emits `/browse-view/` only when `browse=true`, whose default is false. Internal's gate always exposes the route and the core installer always attempts the bundled sidecar. | P: `apps/paseo/airlock-app.toml:19-24`; P: `apps/paseo/render.sh:244-264`; P: `apps/paseo/install.sh:710-724`; I: `infra/dev-hub/bin/setup-md-notebook.sh:795-808`; I: `infra/dev-hub/paseo/bin/install.sh:484-500` |
+| PA-R2 | route | internal | Internal's main Paseo proxy sets `proxy_send_timeout 86400s` and `proxy_buffering off`. Public sets the 86400-second read timeout only, leaving send timeout and response buffering at nginx defaults. | I: `infra/dev-hub/bin/setup-md-notebook.sh:809-824`; P: `apps/paseo/render.sh:157-174`; Z27 |
+| PA-U1 | UI | behavior differs | Public's return widget opens the account/subscription menu only when `airlock_panel_url` resolves; otherwise it navigates directly home. Internal always injects `data-menu=1`. | P: `apps/paseo/install.sh:51-60`; P: `apps/paseo/render.sh:169-174`; I: `infra/dev-hub/bin/setup-md-notebook.sh:819-824` |
+| PA-N1 | unit | naming differs | Public owns `airlock-paseo.service` and `airlock-paseo-browse-host.service`; internal owns `swk-paseo.service` and `swk-paseo-browse-host.service`, with corresponding sidecar dependencies/client IDs. | P: `apps/paseo/install.sh:234-244`; P: `apps/paseo/browse-host/install.sh:19-22`; P: `apps/paseo/browse-host/install.sh:204-225`; I: `infra/dev-hub/paseo/bin/install.sh:62-64`; I: `infra/dev-hub/paseo/browse-host/install.sh:14-17`; I: `infra/dev-hub/paseo/browse-host/install.sh:148-169` |
+| PA-N2 | unit | public | Public runs a fail-open `ExecStartPre` guard that removes a provably stale or PID-reused `~/.paseo/paseo.pid`, preventing a persistent restart loop after reboot. Internal has no corresponding pre-start guard. | P: `apps/paseo/render.sh:69-82`; P: `apps/paseo/paseo-clear-stale-pid.py:8-35`; P: `apps/paseo/paseo-clear-stale-pid.py:200-228`; I: `infra/dev-hub/paseo/bin/install.sh:315-375`; Z28 |
+| PA-N3 | unit | privilege differs | Public defaults to `NoNewPrivileges=yes`, so spawned agent descendants cannot use setuid elevation; a measured snap-node escape hatch renders `NoNewPrivileges=no`. Internal deliberately omits the directive so descendants can use `sudo`. | P: `apps/paseo/install.sh:140-191`; P: `apps/paseo/render.sh:123-131`; I: `infra/dev-hub/paseo/bin/install.sh:367-375` |
+| PA-N4 | unit | internal | Internal caps shutdown at 20 seconds before systemd escalates. Public has no `TimeoutStopSec` override and uses the systemd default. | I: `infra/dev-hub/paseo/bin/install.sh:345-354`; P: `apps/paseo/render.sh:82-131`; Z29 |
+| PA-N5 | unit | resource policy differs | Public derives `MemoryMax` as box/container memory minus `max(4 GiB, 15%)`, sets `MemoryHigh` to 8/9 of that, refuses undersized boxes unless explicitly rendered unbacked, and has no hostname exceptions. Internal uses 8/12/16-GiB tiers plus fixed `josh-dev` 46/42-GiB and `suri-dev` 36/32-GiB overrides. | P: `apps/paseo/install.sh:71-122`; P: `apps/paseo/render.sh:92-109`; I: `infra/dev-hub/paseo/bin/install.sh:277-314`; I: `infra/dev-hub/paseo/bin/install.sh:355-361` |
+| PA-N6 | unit | process policy differs | Public defaults `TasksMax=infinity`, deferring to the enclosing user slice, with an environment override for a finite cap. Internal fixes the unit cap at 24576. | P: `apps/paseo/install.sh:88-92`; P: `apps/paseo/render.sh:110-127`; I: `infra/dev-hub/paseo/bin/install.sh:362-366` |
+| PA-N7 | unit | internal | Internal's installer checks and attempts to enable user linger, then reports whether reboot persistence is guaranteed. Public's Paseo app scope neither enables nor validates linger. | I: `infra/dev-hub/paseo/bin/install.sh:389-393`; I: `infra/dev-hub/paseo/bin/install.sh:454-457`; P: `apps/paseo/install.sh:566-608`; Z30 |
+| PA-N8 | unit | PATH population differs | Public always puts future npm/provider CLI directories into the unit PATH, even before those directories exist. Internal includes each candidate only if its directory exists at install time, so a provider installed later can remain undiscoverable until reinstall. | P: `apps/paseo/install.sh:214-232`; I: `infra/dev-hub/paseo/bin/install.sh:53-60` |
+| PA-N9 | unit | ordering differs | Public orders after `network.target`. Internal orders after `default.target` while also being wanted by `default.target`. | P: `apps/paseo/render.sh:36-49`; P: `apps/paseo/render.sh:130-131`; I: `infra/dev-hub/paseo/bin/install.sh:315-320`; I: `infra/dev-hub/paseo/bin/install.sh:374-375` |
+| PA-C1 | config | activation differs | Public exposes `browse` with default false and only then installs browser tools/live panels. Internal always attempts browse-host, which enables `daemon.browserTools.enabled` and normally `daemon.mcp.injectIntoAgents`, broadening the tool catalog exposed to spawned agents. | P: `apps/paseo/airlock-app.toml:19-24`; P: `apps/paseo/install.sh:66-69`; P: `apps/paseo/install.sh:710-739`; I: `infra/dev-hub/paseo/bin/install.sh:484-500`; I: `infra/dev-hub/paseo/browse-host/install.sh:106-145` |
+| PA-C2 | config | internal | Internal adds the whole tailnet suffix to `PASEO_HOSTNAMES`, alongside exact FQDN/port and localhost. Public allows the exact FQDN, exact FQDN with configured HTTPS port, and localhost only. | I: `infra/dev-hub/paseo/bin/install.sh:270-275`; I: `infra/dev-hub/paseo/bin/install.sh:329-334`; P: `apps/paseo/render.sh:60-65` |
+| PA-C3 | config | internal | Internal removes ambient `OPENAI_API_KEY` both at the systemd boundary and in the Codex spawn overlay, while preserving an explicitly configured runtime key. Public has neither protection in its Paseo app scope. | I: `infra/dev-hub/paseo/bin/install.sh:199-232`; I: `infra/dev-hub/paseo/bin/install.sh:338-342`; I: `infra/dev-hub/paseo/patches/codex-strip-ambient-openai-key.mjs:38-64`; P: `apps/paseo/render.sh:51-82`; Z31 |
+| PA-C4 | config | public | When icon-ring branding is configured, public generates and serves a ringed `/favicon.ico` plus ringed copies of Paseo's idle/running/attention favicon variants. The internal Paseo gate/app scope has no corresponding branding transformation. | P: `apps/paseo/install.sh:619-650`; P: `apps/paseo/render.sh:198-232`; I: `infra/dev-hub/bin/setup-md-notebook.sh:785-826`; Z32 |
+| PA-C5 | config | schema/default differs | Public declares HTTPS/gate/backend/browse-stream ports, browse activation, version override, and owner-only audience in the app manifest. Internal exposes `PASEO_ALLOW`, three main ports, and `PASEO_VER` as shell inputs, defaults the owner to `cho@spacewalk.tech`, and has no browse activation/stream-port input in the main installer. The equal numeric main-port defaults are not counted separately. | P: `apps/paseo/airlock-app.toml:19-28`; P: `apps/paseo/airlock-app.toml:124-126`; I: `infra/dev-hub/paseo/bin/install.sh:21-26` |
+| PA-C6 | config | sidecar port propagation differs | When browse is enabled, public passes the resolved backend, browse-stream, and HTTPS ports into browse-host and its unit/origin. Internal passes only FQDN; its sidecar fixes those values at 6767, 6768, and 8447 even if the main installer's corresponding ports were overridden. | P: `apps/paseo/install.sh:719-724`; P: `apps/paseo/browse-host/install.sh:24-28`; P: `apps/paseo/browse-host/install.sh:107-115`; P: `apps/paseo/browse-host/install.sh:218-223`; I: `infra/dev-hub/paseo/bin/install.sh:484-500`; I: `infra/dev-hub/paseo/browse-host/install.sh:51-59`; I: `infra/dev-hub/paseo/browse-host/install.sh:162-167` |
+| PA-C7 | config | internal | Internal explicitly rejects every architecture except `x86_64` before installation. Public's Paseo app scope has no explicit architecture gate; this row does not claim that every architecture is supported. | I: `infra/dev-hub/paseo/bin/install.sh:28-30`; Z45 |
+| PA-S1 | state | public | Public patches Claude and Codex session ownership to retain all spawned handles, reject or kill late spawns after close, and sweep detached process groups whose leaders exited, preventing leaked agents/MCP descendants from surviving session closure. Internal has no guard/group patch. | P: `apps/paseo/install.sh:377-493`; P: `apps/paseo/patches/orphan-process-guard.mjs:7-36`; P: `apps/paseo/patches/orphan-process-group.mjs:137-168`; Z33 |
+| PA-S2 | state | public | Public's quota-refresh patch merges refreshed credentials into raw on-disk Claude/Codex JSON, preserving unknown identity, expiry, and token metadata. Internal lacks the patch, so upstream schema-based writeback remains. | P: `apps/paseo/install.sh:495-555`; P: `apps/paseo/patches/credential-key-preservation.mjs:9-37`; P: `apps/paseo/patches/credential-key-preservation.mjs:63-98`; P: `apps/paseo/patches/credential-key-preservation.mjs:100-160`; Z34 |
+| PA-S3 | state | internal | Internal treats `NeedDaemonReload=yes` as evidence of a prior partial deployment and forces a recovery restart after daemon-reload. Public restarts only for current-run changes or inactivity, with no corresponding systemd drift check. | I: `infra/dev-hub/paseo/bin/install.sh:379-398`; P: `apps/paseo/install.sh:246-249`; P: `apps/paseo/install.sh:578-592`; Z43 |
+
+Difference count: **22 entries**.
+
+## publish
+
+Coverage note: internal publish-manager calls an external doc-public runtime whose
+implementation is absent from the designated tree. Its storage and TTL enforcement are
+not compared; only the in-tree client and runtime-negotiation behavior are counted.
+
+| ID | Axis | Only/different on | Behavior difference | Evidence |
+|---|---|---|---|---|
+| PB-R1 | route | path differs | Public management UI/shared files use `/publish/` and `/publish/files/`. Internal UI uses `/publish-manager.html`, and its shared-file links target separate HTTP `:8000/<name>`. | P: `apps/publish/airlock-app.toml:87-93`; P: `apps/publish/render.sh:99-114`; I: `infra/dev-hub/bin/setup-md-notebook.sh:1197-1206`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:569-575` |
+| PB-R2 | route | public | Public local mode creates `/g/<slug>/...` nginx routes protected by slug-specific htpasswd files. Internal app/runtime installation scope has no local `/g/` gate route. | P: `apps/publish/render.sh:118-133`; P: `apps/publish/install.sh:262-283`; Z35 |
+| PB-A1 | API | response differs | On `GET /api/list` and `/api/health`, public list/health expose `public_enabled`, `public_mode`, `gated_enabled`, and a disabled reason. Internal list returns `{ok,items,root}` while health instead reports the publisher/runtime `public_contract`. | P: `apps/publish/backend/airlock-publish.py:1655-1665`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1530-1540`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1954-1969` |
+| PB-A2 | API | contract differs | `POST /publish/api/publish-plan` publicly prefers request key `entry`, accepts `name` as a fallback, and is allowed in local mode only; the public UI sends `entry`. Internal uses `name` and plans a remote doc-public bundle. | P: `apps/publish/backend/airlock-publish.py:628-632`; P: `apps/publish/backend/airlock-publish.py:1701-1710`; P: `apps/publish/frontend/publish.html:1045-1056`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1210-1229`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:2014-2025`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:1051-1064` |
+| PB-A3 | API | protocol differs | Public remote client uses fixed `X-Airlock-Publish-Token` and rejects remote gated/bundle requests. Internal uses `X-Docpub-Token`, negotiates v0/v1 and mode capabilities through `/health`, preserves v0 behavior, validates v1 results, and revokes mismatched creations. | P: `apps/publish/backend/airlock-publish.py:731-737`; P: `apps/publish/backend/airlock-publish.py:1357-1369`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1471-1527`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1560-1606`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1710-1763` |
+| PB-A4 | API | internal | Internal external-publication input requires a ROOT-external symlink target to be a Git-tracked regular file and allows attachments inside an owner-linked directory only under bounded rules. Public follows a top-level symlink HTML target through `os.path.isfile`/`open` without the same provenance checks. | I: `infra/dev-hub/publish-manager/backend/publish-manager.py:142-161`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:164-235`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1422-1430`; P: `apps/publish/backend/airlock-publish.py:229-238`; P: `apps/publish/backend/airlock-publish.py:391-400`; Z37 |
+| PB-A5 | API | internal | Internal bundle plan/build derives linked non-HTML attachments and reports `attachments`, `attachment_bytes`, source identity, and digest, with 100-member/64-MiB member/160-MiB total limits. Public bundles HTML documents only, with 60-MiB total and 25-MiB local limits. | I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1143-1149`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1277-1299`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1302-1357`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1380-1455`; P: `apps/publish/backend/airlock-publish.py:76-88`; P: `apps/publish/backend/airlock-publish.py:673-680`; P: `apps/publish/backend/airlock-publish.py:683-719`; Z36 |
+| PB-A6 | API | bundling differs | Public single-file bundling replaces local CSS/JS/img references and leaves original tags when reads fail. Internal also handles CSS `url()`, style blocks/attributes, context masking, modules/srcset/source validation, and fails publication when local assets remain unresolved. | P: `apps/publish/backend/airlock-publish.py:367-433`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:550-569`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:970-1072`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1073-1105` |
+| PB-A7 | API | conflict handling differs | If external list fails, public remote publish can proceed with a new slug; when multiple entries share a source it reuses the first. Internal aborts on list failure or multiple entries for the same source. | P: `apps/publish/backend/airlock-publish.py:1409-1420`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1553-1557`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1635-1646` |
+| PB-A8 | API | public | Public `GET /api/list` items include `isBroken`, computed from dangling-symlink state. Internal list items omit that response field even though its UI consumes it. | P: `apps/publish/backend/airlock-publish.py:168-215`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:46-94`; Z44 |
+| PB-U1 | UI | public | Public Publish UI lets a user choose and upload a file up to 50 MiB through `/upload-file`. Internal publish-manager UI has no file-upload action. | P: `apps/publish/frontend/publish.html:225-229`; P: `apps/publish/frontend/publish.html:921-940`; Z39 |
+| PB-U2 | UI | internal | Internal UI offers system/light/dark theme controls and persists the choice in `localStorage["markwand-theme"]`. Public Publish UI has no theme-switch action. | I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:253-264`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:478-490`; Z40 |
+| PB-U3 | UI | public | Public UI separately filters HTML, image, folder, and file item types. Internal UI filters symlink/direct/broken/public states only. | P: `apps/publish/frontend/publish.html:232-253`; P: `apps/publish/frontend/publish.html:598-609`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:272-293`; Z41 |
+| PB-U4 | UI | delete confirmation differs | Public direct-file deletion requires the user to re-enter the matching filename. Internal asks for modal confirmation but fills `confirm_name` automatically. | P: `apps/publish/frontend/publish.html:567-577`; P: `apps/publish/frontend/publish.html:667-674`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:336-349`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:769-779` |
+| PB-U5 | UI | public | If external `public-list` is delayed or fails, public marks status unknown and hides or disables publish/revoke actions. Internal exposes no unknown/loading state: an `ok:false` success response resets to an empty map, while network/JSON rejection is silently caught and preserves the prior map. When no prior mapping exists, either path can leave an HTML row offering a new-publication action. | P: `apps/publish/frontend/publish.html:433-486`; P: `apps/publish/frontend/publish.html:522-581`; P: `apps/publish/frontend/publish.html:732-756`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:450-475`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:581-583`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:684-700` |
+| PB-U6 | UI | gated availability differs | Public UI enables gated publication on this box in local mode and explicitly disables it in remote mode. Internal enables gated publication when the remote runtime advertises contract v1 with gated mode. | P: `apps/publish/frontend/publish.html:1103-1137`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:435-448`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:940-965` |
+| PB-U7 | UI | internal | Internal bundle confirmation shows attachment names/count/total MiB and each document source. Public shows a linked-HTML checklist only. | I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:1077-1116`; P: `apps/publish/frontend/publish.html:1045-1081`; Z36 |
+| PB-U8 | UI | behavior differs | Internal's broken filter and repair button depend on `item.isBroken`; because its list API omits that field, the filter produces no rows and the button reports zero without calling repair. Public list supplies the field, and its repair action calls the backend without a client-side zero-count gate. | I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:533-544`; I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:916-922`; P: `apps/publish/frontend/publish.html:907-918`; PB-A8 |
+| PB-U9 | UI | internal | Internal refreshes local/public state and visible TTL aging every 30 seconds. Public performs initial and action-triggered loads but has no periodic refresh timer. | I: `infra/dev-hub/publish-manager/frontend/publish-manager.html:1282-1296`; Z46 |
+| PB-N1 | unit | naming differs | Public owns `airlock-publish.service`, `airlock-publish-cleanup.service`, and `.timer`; internal owns the corresponding `publish-manager*` names. | P: `apps/publish/airlock-app.toml:69-84`; P: `apps/publish/install.sh:228-246`; I: `infra/dev-hub/bin/setup-md-notebook.sh:487-499`; I: `infra/dev-hub/bin/setup-md-notebook.sh:513-530` |
+| PB-N2 | unit | public | Public cleanup oneshot sweeps uploads and also expires/reconciles local public snapshots. Internal cleanup oneshot performs uploads TTL deletion only. | P: `apps/publish/render.sh:48-70`; P: `apps/publish/backend/airlock-publish.py:1292-1302`; P: `apps/publish/backend/airlock-publish.py:1732-1736`; I: `infra/dev-hub/bin/setup-md-notebook.sh:513-530`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:2064-2067` |
+| PB-C1 | config | defaults differ | Public share root is configurable as `share_dir`, default `/opt/airlock/share`; backend, upload, and identity paths are injected through environment. Among the corresponding internal local share/upload/identity settings, root is fixed at `~/public_html`, uploads at `~/uploads`, and only the backend port is configurable through `PUBLISH_MANAGER_PORT`. | P: `apps/publish/airlock-app.toml:18-38`; P: `apps/publish/backend/airlock-publish.py:55-59`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:26-34`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1816-1821` |
+| PB-C2 | config | public | Public `public_target` explicitly selects `local` or `remote` and configures ingest/base URL, token env name, public/gated/auth directories, and htpasswd binary. Internal reads fixed `DOCPUB_*` and `HTTPSHARE_URL` remote-client settings from `doc-public.env`. | P: `apps/publish/airlock-app.toml:36-38`; P: `apps/publish/install.sh:49-78`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:30-34`; I: `infra/dev-hub/bin/setup-md-notebook.sh:487-499` |
+| PB-S1 | state | public | Local-mode publication content, owner/source/expiry, slug-specific htpasswd, and state persist in public/gated slug directories and `~/.local/state/airlock/publish-public.json`. Startup/cleanup reloads state, quarantines corruption, reconciles orphan dirs/transaction backups, and expires entries. Internal app scope has no on-box local-publication state layer. | P: `apps/publish/backend/airlock-publish.py:71-99`; P: `apps/publish/backend/airlock-publish.py:746-768`; P: `apps/publish/backend/airlock-publish.py:828-865`; P: `apps/publish/backend/airlock-publish.py:900-1004`; P: `apps/publish/backend/airlock-publish.py:1292-1320`; Z38 |
+| PB-S2 | state | filename differs | For arbitrary upload names, public keeps an ASCII allowlist and falls back to `file`; internal preserves Hangul and falls back to `파일`. | P: `apps/publish/backend/airlock-publish.py:1517-1518`; P: `apps/publish/backend/airlock-publish.py:1585-1588`; P: `apps/publish/backend/airlock-publish.py:1591-1622`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1890-1898`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1901-1931` |
+| PB-S3 | state | namespace differs | Clipboard-image auto-save and sequence scan use public `imageNNN-...jpg` versus internal `이미지NNN-...jpg`. | P: `apps/publish/backend/airlock-publish.py:1513-1516`; P: `apps/publish/backend/airlock-publish.py:1538-1581`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1816-1821`; I: `infra/dev-hub/publish-manager/backend/publish-manager.py:1842-1887` |
+
+Difference count: **26 entries**.
+
+## Final total
+
+The nine apps contain **134 evidence-backed difference entries**:
 
 - `devterm`: 14
 - `dev-monitor`: 19
@@ -245,7 +417,6 @@ The first six apps contain **74 evidence-backed difference entries**:
 - `feedback`: 7
 - `markwand`: 14
 - `notepad`: 9
-
-The remaining three apps (`orca`, `paseo`, and `publish`) are intentionally not yet
-inventoried. This is the requested commit/push checkpoint after the first expansion
-batch.
+- `orca`: 12
+- `paseo`: 22
+- `publish`: 26
