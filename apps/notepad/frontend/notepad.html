@@ -235,7 +235,7 @@
 
   function removeImg(n, d) {
     imgMap.delete(String(n)); viewMap.delete(String(n)); d.remove();
-    editor.value = editor.value.replace(new RegExp('\\[image' + n + '\\]\\s?', 'g'), '');
+    editor.value = editor.value.replace(new RegExp('(?:\\[image' + n + '\\]|\\[이미지' + n + '\\])\\s?', 'g'), '');
     save();
     if (!strip.querySelector('.thumb')) emptyHint.style.display = '';
   }
@@ -288,7 +288,7 @@
 
   function removeFile(n, d) {
     fileMap.delete(String(n)); d.remove();
-    editor.value = editor.value.replace(new RegExp('\\[file' + n + '\\]\\s?', 'g'), '');
+    editor.value = editor.value.replace(new RegExp('(?:\\[file' + n + '\\]|\\[파일' + n + '\\])\\s?', 'g'), '');
     save();
     if (!strip.querySelector('.thumb')) emptyHint.style.display = '';
   }
@@ -398,11 +398,19 @@
     }
     return Promise.resolve(fallbackCopy(text));
   }
-  document.getElementById('copyBtn').addEventListener('click', function () {
-    var text = editor.value
+  function expandAttachmentTokens(text) {
+    return text
       .replace(/\[image(\d+)\]/g, function (m, n) { return imgMap.get(n) || m; })
       .replace(/\[file(\d+)\]/g, function (m, n) { return fileMap.get(n) || m; })
-      .trim();
+      .replace(/\[이미지(\d+)\]/g, function (m, n) {
+        var path = imgMap.get(n); return path ? m + '(' + path + ')' : m;
+      })
+      .replace(/\[파일(\d+)\]/g, function (m, n) {
+        var path = fileMap.get(n); return path ? m + '(' + path + ')' : m;
+      });
+  }
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = expandAttachmentTokens(editor.value).trim();
     if (!text) { toast('Nothing to copy', true); return; }
     copyText(text).then(function (ok) {
       toast(ok ? 'Copied — paste into your terminal' : 'Copy failed — select the text and copy manually', !ok);

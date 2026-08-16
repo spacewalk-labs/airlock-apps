@@ -24,10 +24,11 @@ expected = "-"
 fix = "sudo apt-get update && sudo apt-get install -y curl"
 note = "Smoke check"
 
-# apps/notepad/install.sh writes exactly this one file into the hub webroot
-# (Appendix: webroot = notepad/index.html; no units, no fragments, no data).
+# apps/notepad/install.sh writes the canonical page plus one compatibility
+# redirect fragment. There are no units or retained app-owned data paths.
 [artifacts]
 webroot = ["notepad/index.html"]
+fragments = ["hub-locations.d/notepad.conf"]
 
 # From hub/index.html's APPS table (notepad row) — the hub's tile registry
 # entry this manifest replaces.
