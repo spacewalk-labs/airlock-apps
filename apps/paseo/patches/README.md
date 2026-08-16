@@ -104,6 +104,21 @@ the MIT license that covers the rest of Airlock.
   Verify after install:
   `node credential-key-preservation.test.mjs claude <installed>/quota-fetcher/providers/claude.js`.
 
+- **`codex-strip-ambient-openai-key.mjs`** (+ the reference `.patch` and runtime
+  `.test.mjs`) — prevents a shell/systemd-wide `OPENAI_API_KEY` from silently reaching
+  spawned Codex app-server processes. The unit also carries
+  `UnsetEnvironment=OPENAI_API_KEY`; this second boundary is defense in depth for
+  Paseo's own environment composition. A non-empty key explicitly configured in
+  `runtimeSettings.env` is restored by the final overlay (so an incidental launch
+  overlay cannot replace it) for intentional OpenAI-compatible runtimes.
+  The patcher requires unique helper/spawn anchors, writes a syntax-checkable candidate,
+  is idempotent, and upgrades the same-sentinel predecessor whose final overlay returned
+  `{}` (and therefore lost explicit-key precedence). The behaviour check extracts the shipped helper, imports the target
+  bundle's shipped env composer rather than copying its merge rules, and drives invented
+  ambient, launch-overlay, blank-runtime, explicit-runtime, and conflicting-key fixtures;
+  it never reads a real key. Verify after install:
+  `node codex-strip-ambient-openai-key.test.mjs <installed>/providers/codex-app-server-agent.js`.
+
 - **`anchor-manifest.json`** — records the pinned Paseo/web-ui version, web-ui SHA, every
   patcher's representative bundle anchors, and the guard-before-group dependency. The
   offline drift test checks that the manifest still agrees with the installer and patcher

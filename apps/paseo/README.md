@@ -61,6 +61,10 @@ fragment is **written directly** by `install.sh` — but it replicates
   CLI dirs + node + system). The daemon spawns provider CLIs against this PATH; a
   mismatch ("provider not found") is the #1 pilot gotcha.
 - **The depth4 search patch** (below), applied idempotently.
+- **Ambient Codex key isolation.** The unit drops an inherited `OPENAI_API_KEY`, and
+  an idempotent spawn patch strips it again after Paseo composes Codex launch overlays;
+  a non-empty key explicitly configured for that runtime is preserved. Missing or
+  drifted provider anchors fail the install rather than serving an unguarded spawn path.
 - **`sudo`** is needed for `tailscale serve` (HTTPS ingress), and — only when
   `browse = true` — for installing chromium's OS libraries. The chromium one runs
   as `sudo -n`: without passwordless `sudo` the browse-host install fails loudly

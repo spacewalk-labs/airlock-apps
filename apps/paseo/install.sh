@@ -47,6 +47,8 @@ AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-paseo}"
 . "$ROOT/install/lib.sh"
 # shellcheck source=/dev/null
 . "$HERE/render.sh"
+# shellcheck source=/dev/null
+. "$HERE/state.sh"
 
 airlock_load paseo
 # Return-widget menu attributes. With devterm installed the widget's tap opens a small
@@ -554,6 +556,47 @@ else
   fi
 fi
 
+# --- 2h. strip ambient OPENAI_API_KEY from Codex spawns (idempotent) ---
+# The unit boundary below removes a manager/session-wide OPENAI_API_KEY from the
+# daemon. Defense in depth is still required at the actual Codex spawn because
+# Paseo composes runtime and launch overlays there. The patch adds a final
+# undefined overlay unless runtimeSettings explicitly carries a non-empty key;
+# custom OpenAI-compatible runtimes therefore keep their intentional key while
+# an ambient or incidental launch overlay cannot silently switch Codex to billing.
+CODEX_KEY_PATCHER="$HERE/patches/codex-strip-ambient-openai-key.mjs"
+CODEX_KEY_TEST="$HERE/patches/codex-strip-ambient-openai-key.test.mjs"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] strip ambient OPENAI_API_KEY at Codex spawn in $CODEX_AGENT_JS"
+elif [ ! -f "$CODEX_AGENT_JS" ]; then
+  die "Codex provider not found ($CODEX_AGENT_JS) — cannot enforce ambient OPENAI_API_KEY isolation"
+elif [ ! -f "$CODEX_KEY_PATCHER" ]; then
+  die "Codex ambient-key patcher not found ($CODEX_KEY_PATCHER) — cannot enforce ambient OPENAI_API_KEY isolation"
+else
+  ck_rc=0
+  ck_out="$(node "$CODEX_KEY_PATCHER" "$CODEX_AGENT_JS")" || ck_rc=$?
+  case "$ck_rc" in
+    10) log "Codex ambient OPENAI_API_KEY spawn guard already applied" ;;
+    20) die "Codex ambient-key anchors missing or ambiguous (paseo version drift) — refusing an unguarded install" ;;
+    0)
+      CK_TMP="${CODEX_AGENT_JS}.paseo-new.mjs"
+      if node --check "$CK_TMP"; then
+        mv "$CK_TMP" "$CODEX_AGENT_JS" || die "Codex ambient-key guard mv failed"
+        need_restart=1
+        log "Codex ambient OPENAI_API_KEY spawn guard applied"
+      else
+        rm -f "$CK_TMP"
+        die "Codex ambient-key guard produced invalid JS — not applied"
+      fi
+      ;;
+    *) die "Codex ambient-key patcher error (rc=$ck_rc): $ck_out" ;;
+  esac
+  if [ -f "$CODEX_KEY_TEST" ] && grep -q 'paseo-codex-strip-ambient-openai-key' "$CODEX_AGENT_JS" 2>/dev/null; then
+    node "$CODEX_KEY_TEST" "$CODEX_AGENT_JS" >/dev/null 2>&1 \
+      || die "Codex ambient-key runtime check failed — patched spawn does not preserve only explicit runtime keys"
+    log "Codex ambient-key runtime check passed"
+  fi
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
@@ -580,13 +623,29 @@ else
      | write_if_changed "$UNIT"
   then need_restart=1; fi
 fi
+# Read this BEFORE daemon-reload clears it. NeedDaemonReload=yes means an earlier
+# deployment wrote unit bytes but did not finish its restart transaction.
+prior_daemon_reload=no
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] \
+   && paseo_unit_needs_daemon_reload airlock-paseo.service; then
+  prior_daemon_reload=yes
+  log "airlock-paseo.service reports NeedDaemonReload=yes — recovery restart required"
+fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-paseo.service
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  warn_paseo_linger "${USER:-}"
+fi
 # Restart only when something changed (or the service is down / dry-run). An
 # idempotent re-run with no changes must NOT restart — that would drop the owner's
 # live paseo agent sessions.
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] || [ "$need_restart" = 1 ] \
-   || ! systemctl --user is-active --quiet airlock-paseo.service; then
+unit_active=inactive
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] \
+   && systemctl --user is-active --quiet airlock-paseo.service; then
+  unit_active=active
+fi
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] \
+   || paseo_should_restart "$need_restart" "$prior_daemon_reload" "$unit_active"; then
   airlock_run systemctl --user restart airlock-paseo.service
 else
   log "paseo unchanged and active — not restarting (preserves live sessions)"
