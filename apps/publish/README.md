@@ -7,6 +7,8 @@ publish a page to a public URL.
   list entries, unpublish (unlink symlinks, keeping the original), delete direct
   files (with a retype-to-confirm step), batch operations, and repair broken
   symlinks.
+- **`/publish-manager.html`** — compatibility redirect to `/publish/`. Publish
+  does not create or depend on a separate `:8000` listener.
 - **`/publish/files/`** — the share directory served by nginx (behind the hub
   identity gate). Symlink or drop files here to make them reachable in your hub.
 - **`/publish/api/upload-*`** — the drop used by [notepad](../notepad): pasted
@@ -56,7 +58,8 @@ server {
 
 Snapshot metadata (owner, source name, expiry) lives in
 `~/.local/state/airlock/publish-public.json`, deliberately **outside** the
-served directory. Local snapshots are capped at 25 MB; the remote path is not.
+served directory. A single local snapshot is capped at 25 MB; an explicitly
+approved multi-member bundle uses the 160 MiB bundle cap.
 
 ### Password-gated snapshots (local mode only)
 
@@ -91,11 +94,11 @@ credential file, so a password for one document cannot unlock another. Airlock u
 If that tool is unavailable, gated publishing fails closed while open publishing
 continues to work.
 
-### mode = "remote" (default) — you host an open-only ingest service
+### mode = "remote" (default) — you host an ingest service
 
 Snapshots are POSTed to *your* endpoint, which returns the public URL.
-Bundles and password gates are local-only because the remote ingest contract has
-no corresponding shape, and this box's nginx is the component that enforces the gate.
+Legacy v0 targets remain open-only and single-document. A v1 target can advertise
+gated and bundle support explicitly.
 
 ```toml
 [apps.publish.public_target]
@@ -114,7 +117,12 @@ AIRLOCK_PUBLISH_TOKEN=…your token…
 
 ### Ingest protocol (what your target must implement)
 
-JSON over HTTPS. The token is sent in the `X-Airlock-Publish-Token` header.
+The client probes `GET /health` and negotiates the protocol. Legacy v0 remains
+open/single-document and uses only `X-Airlock-Publish-Token`. Contract v1 uses
+only `X-Docpub-Token`, advertises `public_contract.supported_versions` and
+`public_contract.modes`, and can accept gated or attachment-bearing bundles.
+The client validates v1's returned version, mode, URL, expiry, and TTL; if a
+creation does not match, it immediately attempts to revoke it.
 
 | Method + path        | Request body                                              | Response                                              |
 |----------------------|----------------------------------------------------------|------------------------------------------------------|
@@ -124,6 +132,9 @@ JSON over HTTPS. The token is sent in the `X-Airlock-Publish-Token` header.
 | `POST /set-expiry`   | `{slug, owner, ttl_hours}`                               | `{ok}`                                               |
 
 - `html_b64` is base64 of the self-contained snapshot.
+- v1 bundles use `files`, a base64 member map. At most 100 linked attachments
+  are derived from the approved HTML documents; each attachment is capped at
+  64 MiB and the complete bundle at 160 MiB.
 - `owner` is the identity of the publisher (from the hub identity header); your
   endpoint should scope `list`/`revoke`/`set-expiry` to that owner.
 - The public URL shown to the user is `base_url/slug/`; your target decides how
@@ -132,9 +143,9 @@ JSON over HTTPS. The token is sent in the `X-Airlock-Publish-Token` header.
 A minimal target is just a small web service that stores each `html_b64` under
 its `slug`, serves it until `expiry`, and returns 404 afterwards.
 
-### Bundle approval API (local mode only)
+### Bundle approval API
 
-Local mode's `POST /publish/api/publish-plan` accepts `{entry, max_docs}` and returns a
+`POST /publish/api/publish-plan` accepts `{entry, max_docs}` and returns a
 read-only BFS proposal of linked local HTML files. It returns `plan_id`,
 `plan_expires`, candidates, missing files, failed reads, truncation status, and
 the server-clamped `max_docs`. To publish an approved subset, send

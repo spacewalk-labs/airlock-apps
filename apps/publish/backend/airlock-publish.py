@@ -21,14 +21,14 @@ Optional external publish is a PLUGGABLE target with TWO backends, chosen by
 Unconfigured => local-share manager only (the external endpoints report disabled
 and the UI hides them).
 
-Ingest protocol (what a REMOTE target must implement) — JSON over HTTPS, the
-token in the `X-Airlock-Publish-Token` header:
+Ingest protocol (what a REMOTE target must implement) — JSON over HTTPS. Legacy
+v0 uses `X-Airlock-Publish-Token`; negotiated v1 uses `X-Docpub-Token`:
   POST <ingest>/ingest      {slug, owner, src, title, ttl_hours, html_b64} -> {ok, result:{expiry, ttl_hours}}
   GET  <ingest>/list?owner= -> {ok, items:[{slug, owner, src, title, expiry, expired, mode}]}
   POST <ingest>/revoke      {slug, owner} -> {ok}
   POST <ingest>/set-expiry  {slug, owner, ttl_hours} -> {ok}
-Remote mode accepts only one open document; bundle files and password-gated
-publishing are local-target features and are rejected before ingest.
+Legacy v0 accepts one open document. A v1 target may advertise gated and bundle
+support through `/health` `public_contract` metadata.
 The public URL shown to the user is `<base_url>/<slug>/`.
 
 Design notes for the local target live in docs/design/publish-local-target.md.
@@ -41,11 +41,14 @@ import os
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime
 from html import unescape as html_unescape
@@ -83,11 +86,18 @@ _RE_TRANSACTION = re.compile(
 
 # A plan is a short-lived, single-use capability for an explicit bundle build.
 MAX_BUNDLE_DOCS = 50
-MAX_BUNDLE_TOTAL_BYTES = 60 * 1024 * 1024
+MAX_BUNDLE_ATTACHMENTS = 100
+MAX_BUNDLE_MEMBER_BYTES = 64 * 1024 * 1024
+MAX_BUNDLE_TOTAL_BYTES = 160 * 1024 * 1024
 BUNDLE_PLAN_TTL_S = 10 * 60
 MAX_BUNDLE_PLANS = 256
 _BUNDLE_PLANS = {}
 _BUNDLE_PLANS_LOCK = threading.Lock()
+
+PUBLISHER_PUBLIC_CONTRACT = {
+    'supported_versions': ['0', '1'],
+    'modes': ['open', 'gated'],
+}
 
 # crypt was removed from Python 3.13. Use htpasswd's bcrypt implementation,
 # rather than embedding password hashing code in this service.
@@ -356,12 +366,61 @@ def repair_or_cleanup_all():
 
 # ==== external publish: self-contained snapshot + ingest push (pluggable) ====
 
-_RE_CSS = re.compile(r'<link\b[^>]*\brel=["\']?stylesheet["\']?[^>]*>', re.I)
-_RE_HREF = re.compile(r'\bhref=["\']([^"\']+)["\']', re.I)
-_RE_JS = re.compile(r'<script\b([^>]*)\bsrc=["\']([^"\']+)["\']([^>]*)>\s*</script>', re.I)
-_RE_IMG = re.compile(r'(<img\b[^>]*\bsrc=)["\']([^"\']+)["\']', re.I)
+_RE_CSS = re.compile(r'<link\b[^>]*\s+rel\s*=\s*["\']?stylesheet["\']?[^>]*>', re.I)
+_RE_HREF = re.compile(r'\s+href\s*=\s*["\']([^"\']+)["\']', re.I)
+_RE_JS = re.compile(
+    r'<script\b([^>]*)\s+src\s*=\s*["\']([^"\']+)["\']([^>]*)>\s*</script\s*>', re.I)
+_RE_IMG = re.compile(r'(<img\b[^>]*\s+src\s*=\s*)["\']([^"\']+)["\']', re.I)
 _RE_TITLE = re.compile(r'<title>([^<]*)</title>', re.I)
 _RE_SCHEME = re.compile(r'^[a-z]+:', re.I)
+_RE_HREF_ANY = re.compile(r'\bhref\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|([^\s>]+))', re.I)
+_RE_SRC_ANY = re.compile(r'\bsrc\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|([^\s>]+))', re.I)
+_RE_SRCSET_ANY = re.compile(r'\bsrcset\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|([^\s>]+))', re.I)
+_RE_CSS_URL = re.compile(r'url\(\s*(?P<quote>["\']?)(?P<ref>.*?)(?P=quote)\s*\)', re.I)
+_RE_CSS_IMPORT = re.compile(r'@import\s+(?:url\(\s*)?["\']?([^"\'\s;)]+)', re.I)
+_RE_STYLE_BLOCK = re.compile(r'(<style\b[^>]*>)(.*?)(</style\s*>)', re.I | re.S)
+_RE_STYLE_ATTR = re.compile(r'(\sstyle\s*=\s*)(["\'])(.*?)\2', re.I | re.S)
+_RE_STYLE_UNQUOTED = re.compile(r'(\sstyle\s*=\s*)(?!["\'])([^\s>]+)', re.I)
+_RE_SCRIPT_TAG = re.compile(r'<script\b[^>]*>', re.I)
+_RE_IMG_TAG = re.compile(r'<img\b[^>]*>', re.I)
+_RE_SOURCE_TAG = re.compile(r'<source\b[^>]*>', re.I)
+_RE_INLINED_BODY = re.compile(r'(<(style|script)\b[^>]*>)(.*?)(</\2\s*>)', re.I | re.S)
+_RE_HTML_COMMENT = re.compile(r'<!--.*?-->', re.S)
+_RE_SCRIPT_BLOCK = re.compile(r'<script\b[^>]*>.*?</script\s*>', re.I | re.S)
+_RE_STYLE_BLOCK_ANY = re.compile(r'<style\b[^>]*>.*?</style\s*>', re.I | re.S)
+_RE_MODULE_IMPORT = re.compile(
+    r'\b(?:import|export)\s+(?:[^;]*?\s+from\s+)?["\']([^"\']+)["\']'
+    r'|\bimport\s*\(\s*["\']([^"\']+)["\']\s*\)', re.I)
+
+
+def _attr_value(match):
+    return next((value for value in match.groups() if value is not None), '')
+
+
+def _spans(regex, text):
+    return [(match.start(), match.end()) for match in regex.finditer(text)]
+
+
+def _sub_outside(regex, repl, text, excluded):
+    return regex.sub(
+        lambda match: match.group(0) if any(start <= match.start() < end for start, end in excluded)
+        else repl(match), text)
+
+
+def _mask_noncontent(html):
+    masked = _RE_HTML_COMMENT.sub(lambda m: ' ' * (m.end() - m.start()), html)
+    return _RE_INLINED_BODY.sub(
+        lambda m: m.group(1) + '\n' * m.group(3).count('\n') + m.group(4), masked)
+
+
+def _is_local_ref(ref):
+    ref = (ref or '').strip()
+    return bool(ref and not ref.startswith('#') and not ref.startswith('//')
+                and not _RE_SCHEME.match(ref))
+
+
+def _data_uri(data, ctype):
+    return 'data:' + ctype + ';base64,' + base64.b64encode(data).decode('ascii')
 
 
 def _read_share_file(ref, base_dir):
@@ -385,7 +444,34 @@ def _read_share_file(ref, base_dir):
 def _guess_ctype(path):
     ext = os.path.splitext(path)[1].lower()
     return {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp'}.get(ext, 'image/png')
+            '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+            '.css': 'text/css', '.js': 'text/javascript', '.woff': 'font/woff',
+            '.woff2': 'font/woff2'}.get(ext, 'application/octet-stream')
+
+
+def _inline_css_assets(css, css_ref, base_dir, errors):
+    css_dir = os.path.dirname(os.path.join(base_dir, css_ref.split('?', 1)[0].split('#', 1)[0]))
+    for match in _RE_CSS_IMPORT.finditer(css):
+        if _is_local_ref(match.group(1)):
+            errors.append('unsupported local CSS @import: ' + match.group(1))
+
+    def replace_url(match):
+        ref = match.group('ref').strip()
+        if not _is_local_ref(ref) or ref.lower().startswith('data:'):
+            return match.group(0)
+        data, err = _read_share_file(ref, css_dir)
+        if data is None:
+            errors.append(f'CSS asset read failed: {ref} ({err})')
+            return match.group(0)
+        return 'url("' + _data_uri(data, _guess_ctype(ref)) + '")'
+    return _RE_CSS_URL.sub(replace_url, css)
+
+
+def _local_srcset_refs(value):
+    if (value or '').lower().startswith('data:') and value.count(',') == 1:
+        return []
+    return [part.strip().split(None, 1)[0] for part in (value or '').split(',')
+            if part.strip() and _is_local_ref(part.strip().split(None, 1)[0])]
 
 
 def bundle_single_file(name):
@@ -399,36 +485,88 @@ def bundle_single_file(name):
     with open(path, 'r', encoding='utf-8', errors='replace') as fh:
         html = fh.read()
 
+    errors = []
+    comment_spans = _spans(_RE_HTML_COMMENT, html)
+
     def _css(m):
         hm = _RE_HREF.search(m.group(0))
         if not hm:
             return m.group(0)
-        data, _err = _read_share_file(hm.group(1), base_dir)
-        if data is None:
+        ref = hm.group(1)
+        if not _is_local_ref(ref):
             return m.group(0)
-        css = data.decode('utf-8', 'replace').replace('</style', '<\\/style')
+        data, err = _read_share_file(ref, base_dir)
+        if data is None:
+            errors.append(f'stylesheet read failed: {ref} ({err})')
+            return m.group(0)
+        css = _inline_css_assets(data.decode('utf-8', 'replace'), ref, base_dir, errors)
+        css = css.replace('</style', '<\\/style')
         return '<style>\n' + css + '\n</style>'
 
     def _js(m):
         pre, ref, post = m.group(1), m.group(2), m.group(3)
-        data, _err = _read_share_file(ref, base_dir)
+        if not _is_local_ref(ref):
+            return m.group(0)
+        data, err = _read_share_file(ref, base_dir)
         if data is None:
+            errors.append(f'script read failed: {ref} ({err})')
             return m.group(0)
         typ = ' type="module"' if 'module' in (pre + post) else ''
         js = data.decode('utf-8', 'replace').replace('</script', '<\\/script')
+        if typ:
+            for imp in _RE_MODULE_IMPORT.finditer(js):
+                dep = imp.group(1) or imp.group(2)
+                if _is_local_ref(dep):
+                    errors.append('unsupported local module import: ' + dep)
         return '<script' + typ + '>\n' + js + '\n</script>'
 
     def _img(m):
         pre, ref = m.group(1), m.group(2)
-        data, _err = _read_share_file(ref, base_dir)
+        if not _is_local_ref(ref):
+            return m.group(0)
+        data, err = _read_share_file(ref, base_dir)
         if data is None:
+            errors.append(f'image read failed: {ref} ({err})')
             return m.group(0)
         b = os.path.join(base_dir, ref) if not ref.startswith('/') else os.path.join(ROOT, ref.lstrip('/'))
-        return pre + '"data:' + _guess_ctype(b) + ';base64,' + base64.b64encode(data).decode('ascii') + '"'
+        return pre + '"' + _data_uri(data, _guess_ctype(b)) + '"'
 
-    html = _RE_CSS.sub(_css, html)
-    html = _RE_JS.sub(_js, html)
-    html = _RE_IMG.sub(_img, html)
+    html = _sub_outside(_RE_CSS, _css, html, comment_spans + _spans(_RE_SCRIPT_BLOCK, html))
+    html = _sub_outside(_RE_JS, _js, html, _spans(_RE_HTML_COMMENT, html) + _spans(_RE_STYLE_BLOCK_ANY, html))
+    html = _sub_outside(_RE_IMG, _img, html, _spans(_RE_HTML_COMMENT, html) + _spans(_RE_SCRIPT_BLOCK, html))
+
+    def _style_block(m):
+        css = _inline_css_assets(m.group(2), '', base_dir, errors).replace('</style', '<\\/style')
+        return m.group(1) + css + m.group(3)
+
+    def _style_attr(m):
+        return m.group(1) + m.group(2) + _inline_css_assets(m.group(3), '', base_dir, errors) + m.group(2)
+
+    def _style_unquoted(m):
+        return m.group(1) + _inline_css_assets(m.group(2), '', base_dir, errors)
+
+    html = _sub_outside(_RE_STYLE_BLOCK, _style_block, html,
+                        _spans(_RE_SCRIPT_BLOCK, html) + _spans(_RE_HTML_COMMENT, html))
+    html = _sub_outside(_RE_STYLE_ATTR, _style_attr, html,
+                        _spans(_RE_SCRIPT_BLOCK, html) + _spans(_RE_HTML_COMMENT, html))
+    html = _sub_outside(_RE_STYLE_UNQUOTED, _style_unquoted, html,
+                        _spans(_RE_SCRIPT_BLOCK, html) + _spans(_RE_HTML_COMMENT, html))
+    scan = _mask_noncontent(html)
+    for match in _RE_SRCSET_ANY.finditer(scan):
+        for ref in _local_srcset_refs(_attr_value(match)):
+            errors.append('unsupported local srcset: ' + ref)
+    for match in _RE_CSS.finditer(scan):
+        href = _RE_HREF_ANY.search(match.group(0))
+        if href and _is_local_ref(_attr_value(href)):
+            errors.append('unresolved local stylesheet: ' + _attr_value(href))
+    for tag_re, label in ((_RE_SCRIPT_TAG, 'script'), (_RE_IMG_TAG, 'image'),
+                          (_RE_SOURCE_TAG, 'source asset')):
+        for match in tag_re.finditer(scan):
+            src = _RE_SRC_ANY.search(match.group(0))
+            if src and _is_local_ref(_attr_value(src)):
+                errors.append(f'unresolved local {label}: ' + _attr_value(src))
+    if errors:
+        raise BundleValidationError('; '.join(dict.fromkeys(errors)))
     tm = _RE_TITLE.search(html)
     return (tm.group(1).strip() if tm else name), html.encode('utf-8')
 
@@ -544,6 +682,19 @@ def _bundle_target(ref, current):
     return None, path
 
 
+def _attachment_target(ref, current):
+    """Return a flat local non-HTML file linked from an active anchor."""
+    ref = html_unescape(ref or '')
+    if not _is_local_ref(ref):
+        return None
+    path = urllib.parse.unquote(urllib.parse.urlsplit(
+        urllib.parse.urljoin('/' + current, ref)).path).lstrip('/')
+    if (not path or path.lower().endswith(('.html', '.htm')) or '/' in path
+            or not safe_resolve(path)):
+        return None
+    return path
+
+
 def _bundle_anchors(html, current):
     parser = _AnchorParser(html)
     parser.feed(html)
@@ -570,6 +721,8 @@ def _rewrite_bundle_anchors(html, current, link_map):
             unsupported.append(unsupported_target)
             continue
         if not target:
+            target = _attachment_target(anchor['ref'], current)
+        if not target:
             continue
         if target not in link_map:
             warnings.append(target)
@@ -581,6 +734,64 @@ def _rewrite_bundle_anchors(html, current, link_map):
     for start, end, replacement in reversed(replacements):
         html = html[:start] + replacement + html[end:]
     return html, list(dict.fromkeys(warnings)), list(dict.fromkeys(unsupported))
+
+
+def _collect_bundle_attachments(names):
+    found, seen = [], set()
+    for name in names:
+        path = safe_resolve(name)
+        try:
+            with open(path, encoding='utf-8', errors='replace') as fh:
+                parser = _AnchorParser(fh.read())
+                parser.feed(parser.source)
+                parser.close()
+        except OSError as exc:
+            raise BundleValidationError(f'attachment scan failed: {name} ({exc})') from exc
+        for anchor in parser.anchors:
+            target = _attachment_target(anchor['ref'], name)
+            if not target or target in seen:
+                continue
+            target_path = safe_resolve(target)
+            if not target_path or not os.path.lexists(target_path):
+                raise BundleValidationError(f'attachment not found: {target}')
+            # PB-A4 remains held: a newly supported attachment must not widen
+            # provenance by following a share-root symlink to an unmeasured source.
+            if os.path.islink(target_path):
+                raise BundleValidationError(
+                    f'attachment symlink provenance is not approved: {target}')
+            if not os.path.isfile(target_path):
+                raise BundleValidationError(f'attachment is not a regular file: {target}')
+            if len(found) >= MAX_BUNDLE_ATTACHMENTS:
+                raise BundleValidationError(
+                    f'bundle attachment limit exceeded: > {MAX_BUNDLE_ATTACHMENTS}')
+            seen.add(target)
+            found.append(target)
+    return found
+
+
+def _read_attachment(name):
+    path = safe_resolve(name)
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    except OSError as exc:
+        raise BundleValidationError(f'cannot read attachment: {name} ({exc})') from exc
+    try:
+        with os.fdopen(fd, 'rb') as fh:
+            info = os.fstat(fh.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise BundleValidationError(f'attachment is not a regular file: {name}')
+            if info.st_size > MAX_BUNDLE_MEMBER_BYTES:
+                raise BundleValidationError(
+                    f'bundle member size exceeds limit: {name}: '
+                    f'{info.st_size} > {MAX_BUNDLE_MEMBER_BYTES}')
+            data = fh.read(MAX_BUNDLE_MEMBER_BYTES + 1)
+    except BundleValidationError:
+        raise
+    except OSError as exc:
+        raise BundleValidationError(f'cannot read attachment: {name} ({exc})') from exc
+    if len(data) > MAX_BUNDLE_MEMBER_BYTES:
+        raise BundleValidationError(f'bundle member size exceeds limit while reading: {name}')
+    return data
 
 
 def _register_bundle_plan(owner, entry, candidates):
@@ -627,9 +838,6 @@ def _consume_bundle_plan(plan_id, owner, entry, docs):
 
 def plan_bundle(entry, max_docs=MAX_BUNDLE_DOCS, owner=''):
     """Read-only BFS proposal of locally linked HTML documents."""
-    # Bundle planning is a local filesystem operation; remote ingest has no such contract.
-    if PUBLIC_MODE != 'local':
-        return False, 'bundle planning is available only in local mode'
     try:
         max_docs = int(max_docs or MAX_BUNDLE_DOCS)
     except (TypeError, ValueError):
@@ -668,13 +876,21 @@ def plan_bundle(entry, max_docs=MAX_BUNDLE_DOCS, owner=''):
         _title, _files, _warnings, integrity = build_bundle_files(entry, found, include_integrity=True)
     except Exception as exc:
         return False, f'bundle plan build failed: {exc}'
-    candidates = {name: {'digest': integrity[name]['digest']} for name in found}
+    candidates = {name: {'digest': item['digest'], 'source': item['source']}
+                  for name, item in integrity.items()}
     plan_id, expires = _register_bundle_plan(owner, entry, candidates)
     return True, {'plan_id': plan_id, 'plan_expires': expires, 'entry': entry,
                   'docs': [{'name': name, 'title': integrity[name]['title'],
                             'digest': integrity[name]['digest'],
+                            'source': integrity[name]['source'],
                             'member': 'index.html' if name == entry else name,
                             'entry': name == entry} for name in found],
+                  'attachments': [{'name': name, 'bytes': item['bytes'],
+                                   'source': item['source'], 'member': name}
+                                  for name, item in integrity.items()
+                                  if item.get('kind') == 'attachment'],
+                  'attachment_bytes': sum(item['bytes'] for item in integrity.values()
+                                          if item.get('kind') == 'attachment'),
                   'count': len(found), 'missing': list(dict.fromkeys(missing)),
                   'fetch_failed': failed, 'truncated': truncated, 'max_docs': max_docs,
                   'unsupported': list(dict.fromkeys(unsupported)), 'warnings': _warnings}
@@ -690,7 +906,9 @@ def build_bundle_files(entry, docs, include_integrity=False):
             raise BundleValidationError(f'not an HTML document: {name}')
         if not safe_resolve(name) or not os.path.isfile(safe_resolve(name)):
             raise BundleValidationError(f'not found: {name}')
+    attachments = _collect_bundle_attachments(names)
     link_map = {name: ('./' if name == entry else name) for name in names}
+    link_map.update({name: name for name in attachments})
     files, warnings, integrity, total = {}, [], {}, 0
     entry_title = entry
     for name in names:
@@ -706,14 +924,27 @@ def build_bundle_files(entry, docs, include_integrity=False):
                 f'bundle member name collides with the entry page: {member}')
         files[member] = data
         total += len(data)
-        integrity[name] = {'title': title, 'digest': digest}
+        integrity[name] = {'title': title, 'digest': digest,
+                           'source': os.path.realpath(safe_resolve(name))}
         warnings.extend(f'{name}: link outside bundle: {target}' for target in dangling)
         warnings.extend(f'{name}: unsupported subdirectory link: {target}' for target in unsupported)
         if name == entry:
             entry_title = title
-    limit = LOCAL_MAX_BYTES if PUBLIC_MODE == 'local' else MAX_BUNDLE_TOTAL_BYTES
-    if total > limit:
-        raise BundleValidationError(f'bundle total size exceeds limit: {total} > {limit}')
+    for name in attachments:
+        if name in files:
+            raise BundleValidationError(f'attachment collides with bundle document: {name}')
+        data = _read_attachment(name)
+        files[name] = data
+        total += len(data)
+        integrity[name] = {'title': os.path.basename(name),
+                           'digest': hashlib.sha256(data).hexdigest(),
+                           'source': os.path.realpath(safe_resolve(name)),
+                           'kind': 'attachment', 'bytes': len(data)}
+    total_limit = (LOCAL_MAX_BYTES if PUBLIC_MODE == 'local' and len(files) == 1
+                   else MAX_BUNDLE_TOTAL_BYTES)
+    if total > total_limit:
+        raise BundleValidationError(
+            f'bundle total size exceeds limit: {total} > {total_limit}')
     if include_integrity:
         return entry_title, files, warnings, integrity
     return entry_title, files, warnings
@@ -728,13 +959,124 @@ def _slugify(title, name):
     return f'{base}-{secrets.token_hex(3)}'
 
 
-def _ingest(method, ep, body=None, timeout=20):
+def _ingest(method, ep, body=None, timeout=20, version='0'):
     data = json.dumps(body).encode('utf-8') if body is not None else None
+    token_header = 'X-Docpub-Token' if str(version) == '1' else 'X-Airlock-Publish-Token'
     req = urllib.request.Request(
         INGEST_URL + ep, data=data, method=method,
-        headers={'Content-Type': 'application/json', 'X-Airlock-Publish-Token': TOKEN})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode('utf-8'))
+        headers={'Content-Type': 'application/json', token_header: TOKEN})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode('utf-8'))
+        except Exception:
+            raise exc
+        if isinstance(payload, dict):
+            return payload
+        raise exc
+
+
+def _normalize_contract(value):
+    if not isinstance(value, dict):
+        return None
+    versions, modes = value.get('supported_versions'), value.get('modes')
+    if (not isinstance(versions, list) or not versions
+            or any(not isinstance(v, str) or not v for v in versions)
+            or not isinstance(modes, list) or not modes
+            or any(not isinstance(mode, str) or not mode for mode in modes)):
+        return None
+    return {'supported_versions': list(dict.fromkeys(versions)),
+            'modes': list(dict.fromkeys(modes))}
+
+
+def runtime_public_capability():
+    """Discover remote v1 with its header; retain v0 when health is legacy."""
+    if PUBLIC_MODE == 'local':
+        modes = ['open'] + (['gated'] if GATED_ENABLED else [])
+        return {'state': 'available', 'transport_version': '1',
+                'contract': {'supported_versions': ['1'], 'modes': modes}}
+    if not (INGEST_URL and TOKEN):
+        return {'state': 'unavailable', 'error': 'remote target not configured'}
+    try:
+        health = _ingest('GET', '/health', timeout=4, version='1')
+    except Exception:
+        # A pre-contract runtime may have no /health or reject the v1 header.
+        return {'state': 'legacy', 'transport_version': '0',
+                'contract': {'supported_versions': ['0'], 'modes': ['open']}}
+    if not isinstance(health, dict) or not health.get('ok'):
+        return {'state': 'unavailable', 'error': 'runtime health response invalid'}
+    if 'public_contract' not in health:
+        return {'state': 'legacy', 'transport_version': '0',
+                'contract': {'supported_versions': ['0'], 'modes': ['open']}}
+    contract = _normalize_contract(health.get('public_contract'))
+    if contract is None:
+        return {'state': 'unavailable', 'error': 'runtime public_contract invalid'}
+    return {'state': 'available', 'transport_version': '1', 'contract': contract}
+
+
+def publisher_health():
+    contract = {'publisher': dict(PUBLISHER_PUBLIC_CONTRACT)}
+    runtime = runtime_public_capability() if PUBLIC_ENABLED else None
+    if runtime and runtime.get('contract'):
+        contract['runtime'] = runtime['contract']
+    return {'public_contract': contract}
+
+
+def _error_text(error):
+    if isinstance(error, dict):
+        code = error.get('code')
+        message = error.get('message') or error.get('error')
+        return f'{code}: {message}' if code and message else (message or json.dumps(error))
+    return str(error or 'ingest error')
+
+
+def _existing_public(items, name):
+    matches = [item for item in items if item.get('src') == name]
+    if len(matches) > 1:
+        slugs = ', '.join(sorted(str(item.get('slug', '?')) for item in matches))
+        return False, f'multiple public entries for one source: {slugs}'
+    return True, matches[0] if matches else None
+
+
+def _select_contract_version(mode, owner, existing, capability):
+    existing_version = str((existing or {}).get('contract_version') or '0')
+    if existing:
+        if existing_version == '0':
+            if mode == 'gated':
+                return False, 'revoke the existing v0 open link before creating a gated link'
+            return True, '0'
+        if existing_version != '1':
+            return False, f'unsupported existing contract version: {existing_version}'
+    if not owner:
+        return False, 'identity header missing'
+    if capability.get('state') == 'unavailable':
+        return False, 'runtime capability unavailable: ' + capability.get('error', 'unknown')
+    contract = capability.get('contract') or {}
+    versions, modes = contract.get('supported_versions', []), contract.get('modes', [])
+    if existing and existing_version == '1':
+        if '1' in versions and mode in modes:
+            return True, '1'
+        return False, f'runtime does not support existing v1 {mode} publication'
+    if mode == 'gated':
+        if '1' in versions and 'gated' in modes:
+            return True, '1'
+        return False, 'runtime does not support gated contract v1'
+    if '1' in versions and 'open' in modes:
+        return True, '1'
+    if '0' in versions and 'open' in modes:
+        return True, '0'
+    return False, 'no compatible open publication contract'
+
+
+def _rollback_unexpected_publish(slug, owner, version='1'):
+    try:
+        result = _ingest('POST', '/revoke', {'slug': slug, 'owner': owner},
+                         timeout=12, version=version)
+    except Exception as exc:
+        return False, str(exc)
+    return (True, '') if result.get('ok') else (False, _error_text(result.get('error')))
 
 
 # ---- local target: snapshots on disk, served by this box's nginx ----------
@@ -1071,8 +1413,9 @@ def _local_ingest(slug, owner, src, title, ttl_hours, files, mode='open', passwo
     if not _files_valid(files):
         return {'ok': False, 'error': 'invalid bundle files'}
     total_bytes = sum(len(data) for data in files.values())
-    if total_bytes > LOCAL_MAX_BYTES:
-        return {'ok': False, 'error': f'snapshot too large (>{LOCAL_MAX_BYTES // (1024 * 1024)}MB)'}
+    size_limit = MAX_BUNDLE_TOTAL_BYTES if len(files) > 1 else LOCAL_MAX_BYTES
+    if total_bytes > size_limit:
+        return {'ok': False, 'error': f'snapshot too large (>{size_limit // (1024 * 1024)}MB)'}
     if mode not in ('open', 'gated'):
         return {'ok': False, 'error': 'mode must be open or gated'}
     if mode == 'gated' and not GATED_ENABLED:
@@ -1361,12 +1704,7 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
         return False, 'identity header missing — refusing to publish without an owner'
     if mode not in ('open', 'gated'):
         return False, 'mode must be open or gated'
-    if PUBLIC_MODE != 'local' and docs is not None:
-        # Remote ingest accepts one html_b64 snapshot, not the local bundle files map.
-        return False, 'bundle publishing is available only in local mode'
-    if PUBLIC_MODE != 'local' and mode == 'gated':
-        # Never turn an explicit password request into an unauthenticated open URL.
-        return False, 'gated publishing is available only in local mode'
+    ttl_hours = _ttl_hours(ttl_hours)
     # Validate the credential before reading or writing any source/public data.
     if mode == 'gated' and (not isinstance(password, str) or not password):
         return False, 'gated publish requires a password'
@@ -1386,6 +1724,21 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
         return False, f'not found: {name}'
     if not name.lower().endswith(('.html', '.htm')):
         return False, 'only HTML pages can be published externally'
+    existing, capability, version = None, runtime_public_capability(), '1'
+    if PUBLIC_MODE != 'local':
+        existing_list = public_list(owner, capability=capability)
+        if not existing_list.get('ok'):
+            return False, 'public list preflight failed: ' + _error_text(
+                existing_list.get('error') or existing_list.get('message'))
+        existing_ok, existing = _existing_public(existing_list.get('items', []), name)
+        if not existing_ok:
+            return False, existing
+        version_ok, version = _select_contract_version(mode, owner, existing, capability)
+        if not version_ok:
+            return False, version
+        if docs and version != '1':
+            return False, 'bundle publishing requires contract v1'
+
     warnings = []
     if docs:
         plan_ok, plan = _consume_bundle_plan(plan_id, owner, name, docs)
@@ -1395,8 +1748,10 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
             title, files, warnings, current = build_bundle_files(name, docs, include_integrity=True)
         except Exception as e:
             return False, f'bundle failed: {e}'
-        changed = [doc for doc in dict.fromkeys(docs)
-                   if plan['candidates'][doc]['digest'] != current[doc]['digest']]
+        changed = [item for item, actual in current.items()
+                   if item not in plan['candidates']
+                   or plan['candidates'][item]['digest'] != actual['digest']
+                   or plan['candidates'][item]['source'] != actual['source']]
         if changed:
             return False, 'source changed after bundle plan: ' + ', '.join(changed)
         html_bytes = None
@@ -1406,18 +1761,7 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
             files = {'index.html': html_bytes}
         except Exception as e:
             return False, f'bundle failed: {e}'
-    slug = _slugify(title, name)
-    if PUBLIC_MODE != 'local':
-        # Remote ingest owns the remote slug contract; local reuse happens inside _local_ingest's lock.
-        existing = public_list(owner)
-        if existing.get('ok'):
-            items = existing.get('items', [])
-            reused = next((it['slug'] for it in items
-                           if it.get('src') == name and not it.get('expired')), None)
-            if not reused:
-                reused = next((it['slug'] for it in items if it.get('src') == name), None)
-            if reused:
-                slug = reused
+    slug = (existing or {}).get('slug') or _slugify(title, name)
     if PUBLIC_MODE == 'local':
         try:
             res = _local_ingest(slug, owner, name, title, ttl_hours, files, mode, password)
@@ -1433,9 +1777,11 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
                 payload['files'] = {member: base64.b64encode(data).decode('ascii') for member, data in files.items()}
             else:
                 payload['html_b64'] = base64.b64encode(html_bytes).decode('ascii')
-            if mode == 'gated':
-                payload.update({'mode': 'gated', 'gate': {'type': 'password', 'password': password}})
-            res = _ingest('POST', '/ingest', payload)
+            if version == '1':
+                payload.update({'contract_version': '1', 'mode': mode, 'owner': owner})
+                if mode == 'gated':
+                    payload['gate'] = {'type': 'password', 'password': password}
+            res = _ingest('POST', '/ingest', payload, timeout=300, version=version)
         except Exception as e:
             return False, f'ingest failed: {e}'
     if not isinstance(res, dict):
@@ -1443,12 +1789,51 @@ def publish_public(name, ttl_hours, owner, mode='open', password='', docs=None, 
     if not res.get('ok'):
         return False, res.get('error', 'ingest error')
     r = res.get('result', {})
-    if not isinstance(r, dict) or 'expiry' not in r:
-        return False, 'ingest returned an invalid result'
-    slug = r.get('slug', slug)      # the local target may mint a fresh slug
+    if PUBLIC_MODE != 'local' and version == '1':
+        result_slug = r.get('slug') if isinstance(r, dict) else None
+        result_url = r.get('url') if isinstance(r, dict) else None
+        parsed, base = urllib.parse.urlsplit(result_url or ''), urllib.parse.urlsplit(BASE_URL)
+        expected_path = f'/g/{result_slug}/' if mode == 'gated' else f'/{result_slug}/'
+        expiry = r.get('expiry') if isinstance(r, dict) else None
+        returned_ttl = r.get('ttl_hours') if isinstance(r, dict) else None
+        expected_expiry = int(time.time()) + ttl_hours * 3600
+        valid = (isinstance(r, dict) and r.get('contract_version') == '1'
+                 and r.get('mode') == mode and isinstance(result_slug, str) and result_slug
+                 and result_slug == slug
+                 and isinstance(result_url, str) and parsed.path == expected_path
+                 and parsed.scheme.lower() == base.scheme.lower()
+                 and parsed.netloc.lower() == base.netloc.lower()
+                 and not parsed.query and not parsed.fragment
+                 and isinstance(expiry, int) and not isinstance(expiry, bool)
+                 and abs(expiry - expected_expiry) <= 300
+                 and isinstance(returned_ttl, int) and not isinstance(returned_ttl, bool)
+                 and returned_ttl == ttl_hours)
+        if not valid:
+            rollback_targets = [slug]
+            if (isinstance(result_slug, str) and _RE_SLUG.match(result_slug)
+                    and result_slug != slug):
+                rollback_targets.append(result_slug)
+            rollback_results = [
+                (target, *_rollback_unexpected_publish(target, owner, version='1'))
+                for target in rollback_targets
+            ]
+            rollback_ok = all(ok for _target, ok, _error in rollback_results)
+            rollback_error = '; '.join(
+                f'{target}: {error}' for target, ok, error in rollback_results if not ok)
+            detail = ('mismatched creation revoked'
+                      if rollback_ok else 'automatic revoke failed: ' + rollback_error)
+            return False, 'runtime returned a mismatched v1 result; ' + detail
+        return True, {'url': result_url, 'slug': result_slug, 'expiry': r['expiry'],
+                      'ttl_hours': r['ttl_hours'], 'mode': mode, 'contract_version': '1',
+                      'bundle': sorted(files) if docs else None, 'warnings': warnings}
+    if not isinstance(r, dict):
+        r = {}
+    result_slug = r.get('slug') or slug
     prefix = '/g' if mode == 'gated' and PUBLIC_MODE == 'local' else ''
-    return True, {'url': f'{BASE_URL}{prefix}/{slug}/', 'slug': slug, 'expiry': r.get('expiry'),
-                  'ttl_hours': r.get('ttl_hours'), 'mode': mode,
+    return True, {'url': r.get('url') or f'{BASE_URL}{prefix}/{result_slug}/',
+                  'slug': result_slug, 'expiry': r.get('expiry'),
+                  'ttl_hours': r.get('ttl_hours'), 'mode': mode if PUBLIC_MODE == 'local' else 'open',
+                  'contract_version': '1' if PUBLIC_MODE == 'local' else '0',
                   'bundle': sorted(files) if docs else None, 'warnings': warnings}
 
 
@@ -1462,16 +1847,20 @@ def _local_guard(owner):
     return None
 
 
-def public_list(owner):
+def public_list(owner, capability=None):
     bad = _local_guard(owner)
     if bad:
         return bad
     if PUBLIC_MODE == 'local':
         d = _local_list(owner)
     else:
+        capability = capability or runtime_public_capability()
+        if capability.get('state') == 'unavailable':
+            return {'ok': False, 'error': capability.get('error', 'runtime capability unavailable')}
+        version = capability.get('transport_version', '0')
         ep = '/list' + (('?owner=' + urllib.parse.quote(owner)) if owner else '')
         try:
-            d = _ingest('GET', ep, timeout=12)
+            d = _ingest('GET', ep, timeout=12, version=version)
         except Exception as e:
             return {'ok': False, 'error': str(e)}
     if not isinstance(d, dict):
@@ -1492,8 +1881,12 @@ def public_revoke(slug, owner):
         return bad
     if PUBLIC_MODE == 'local':
         return _local_revoke(slug, owner)
+    capability = runtime_public_capability()
+    if capability.get('state') == 'unavailable':
+        return {'ok': False, 'error': capability.get('error', 'runtime capability unavailable')}
     try:
-        return _ingest('POST', '/revoke', {'slug': slug, 'owner': owner}, timeout=12)
+        return _ingest('POST', '/revoke', {'slug': slug, 'owner': owner}, timeout=12,
+                       version=capability.get('transport_version', '0'))
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 
@@ -1504,18 +1897,23 @@ def public_set_expiry(slug, owner, ttl_hours):
         return bad
     if PUBLIC_MODE == 'local':
         return _local_set_expiry(slug, owner, ttl_hours)
+    capability = runtime_public_capability()
+    if capability.get('state') == 'unavailable':
+        return {'ok': False, 'error': capability.get('error', 'runtime capability unavailable')}
     try:
-        return _ingest('POST', '/set-expiry', {'slug': slug, 'owner': owner, 'ttl_hours': ttl_hours}, timeout=12)
+        return _ingest('POST', '/set-expiry', {'slug': slug, 'owner': owner, 'ttl_hours': ttl_hours},
+                       timeout=12, version=capability.get('transport_version', '0'))
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 
 
 # ==== uploads — clipboard image / arbitrary file drop into ~/uploads ====
-_RE_UPLOAD = re.compile(r'^image([0-9]{3,})-[0-9]{8}-[0-9]{6}\.jpg\Z')   # only auto-named files (protect manual ones)
+_RE_UPLOAD = re.compile(r'^(?:image|이미지)([0-9]{3,})-[0-9]{8}-[0-9]{6}\.jpg\Z')
 UPLOAD_TTL_SEC = 24 * 3600
 UPLOAD_MAX_BYTES = 12 * 1024 * 1024
 FILE_MAX_BYTES = 50 * 1024 * 1024
-_RE_FILE_SAFE = re.compile(r'[^0-9A-Za-z._ \-()]+')            # filename allowlist (blocks traversal/control chars)
+UPLOAD_NAME_MAX_CHARS = 120
+UPLOAD_NAME_MAX_BYTES = 240
 _upload_lock = threading.Lock()
 
 
@@ -1582,10 +1980,35 @@ def save_uploaded_image(image_b64):
     return False, 'sequence exhausted'
 
 
+def _truncate_upload_component(name, max_chars=UPLOAD_NAME_MAX_CHARS,
+                               max_bytes=UPLOAD_NAME_MAX_BYTES):
+    value = str(name or '')[:max(0, max_chars)]
+    while value and len(value.encode('utf-8')) > max_bytes:
+        value = value[:-1]
+    return value
+
+
 def _safe_upload_name(name):
-    base = os.path.basename(str(name or '').replace('\\', '/')).strip()
-    base = _RE_FILE_SAFE.sub('_', base).lstrip('.').strip() or 'file'
-    return base[:120]
+    base = os.path.basename(unicodedata.normalize(
+        'NFC', str(name or '').replace('\\', '/'))).strip()
+    base = ''.join('_' if ch in '/\\' or unicodedata.category(ch).startswith('C') else ch
+                   for ch in base)
+    base = base.lstrip('.').strip() or 'file'
+    return _truncate_upload_component(base) or 'file'
+
+
+def _collision_upload_name(name, ordinal):
+    stem, ext = os.path.splitext(name)
+    suffix = f'-{ordinal}'
+    # Keep the distinguishing suffix even when a multibyte basename is already
+    # at the public limit; trim extension, then stem, against both limits.
+    ext = _truncate_upload_component(
+        ext, UPLOAD_NAME_MAX_CHARS - len(suffix) - 1,
+        UPLOAD_NAME_MAX_BYTES - len(suffix.encode('utf-8')) - 1)
+    stem = _truncate_upload_component(
+        stem, UPLOAD_NAME_MAX_CHARS - len(suffix) - len(ext),
+        UPLOAD_NAME_MAX_BYTES - len(suffix.encode('utf-8')) - len(ext.encode('utf-8')))
+    return (stem or 'f') + suffix + ext
 
 
 def save_uploaded_file(filename, data_b64):
@@ -1609,9 +2032,8 @@ def save_uploaded_file(filename, data_b64):
     with _upload_lock:
         cleanup_old_uploads()
         os.makedirs(UPLOADS, exist_ok=True)
-        stem, ext = os.path.splitext(safe)
         for i in range(1000):
-            cand = safe if i == 0 else f'{stem}-{i + 1}{ext}'
+            cand = safe if i == 0 else _collision_upload_name(safe, i + 1)
             fpath = os.path.join(UPLOADS, cand)
             try:
                 fd = os.open(fpath, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
@@ -1657,12 +2079,14 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/api/list', '/list'):
             self._json(200, {'ok': True, 'items': list_items(), 'root': ROOT, 'public_enabled': PUBLIC_ENABLED,
                              'public_mode': PUBLIC_MODE, 'gated_enabled': GATED_ENABLED,
-                             'gated_disabled_reason': GATED_DISABLED_REASON})
+                             'gated_disabled_reason': GATED_DISABLED_REASON,
+                             **publisher_health()})
             return
         if path in ('/api/health', '/health', '/'):
             self._json(200, {'ok': True, 'service': 'airlock-publish', 'port': PORT, 'public_enabled': PUBLIC_ENABLED,
                              'public_mode': PUBLIC_MODE, 'gated_enabled': GATED_ENABLED,
-                             'gated_disabled_reason': GATED_DISABLED_REASON})
+                             'gated_disabled_reason': GATED_DISABLED_REASON,
+                             **publisher_health()})
             return
         if path in ('/api/public-list', '/public-list'):
             self._json(200, public_list(self._owner()))
@@ -1699,9 +2123,6 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200 if ok else 400, {'ok': ok, 'result': res} if ok else {'ok': ok, 'error': res})
             return
         if path in ('/api/publish-plan', '/publish-plan'):
-            if PUBLIC_MODE != 'local':
-                self._json(400, {'ok': False, 'error': 'bundle planning is available only in local mode'})
-                return
             owner = self._owner()
             if PUBLIC_MODE == 'local' and not owner:
                 self._json(400, {'ok': False, 'error': 'identity header missing'})
