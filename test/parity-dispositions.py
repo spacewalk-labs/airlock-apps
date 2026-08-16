@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Check that the bounded parity triage has one disposition per cluster."""
+"""Check that every parity-matrix ID has one pinned cluster disposition."""
 
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
 from pathlib import Path
 import re
 
@@ -12,11 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TRIAGE = ROOT / "census" / "parity-decision-triage.md"
 DISPOSITIONS = ROOT / "docs" / "parity" / "dispositions.md"
 MATRIX = ROOT / "census" / "parity-matrix.md"
-EXPECTED_BUCKETS = Counter({"A": 18, "B": 13, "C": 8, "D": 3})
-EXPECTED_DISPOSITIONS = Counter({"keep": 14, "migrate": 15, "retire": 2, "hold": 11})
-EXPECTED_CLUSTER_COUNT = 42
-EXPECTED_ID_COUNT = 47
-EXPECTED_STATUS = "Status: 31 executable clusters decided; 11 clusters deliberately held"
+EXPECTED_BUCKETS = Counter({"A": 18, "B": 13, "C": 8, "D": 3, "E": 66})
+EXPECTED_DISPOSITIONS = Counter({"keep": 58, "migrate": 36, "retire": 3, "hold": 11})
+EXPECTED_CLUSTER_COUNT = 108
+EXPECTED_ID_COUNT = 134
+EXPECTED_STATUS = "Status: 97 executable clusters decided; 11 clusters deliberately held"
+EXPECTED_TRIAGE_SHA256 = "6b3499bd292f02d25dff0562ddada6a3fe13689dc46aac043a6dafa8c249e625"
 EXPECTED_CLUSTER_DISPOSITIONS = {
     ("DT-C4",): "migrate",
     ("DT-U2",): "keep",
@@ -60,6 +62,75 @@ EXPECTED_CLUSTER_DISPOSITIONS = {
     ("DT-R1",): "hold",
     ("OR-C4",): "hold",
     ("OR-S4",): "hold",
+    ("DT-R2",): "migrate",
+    ("DT-A2",): "migrate",
+    ("DT-N2",): "keep",
+    ("DT-N3",): "keep",
+    ("DT-C1", "DT-C3"): "keep",
+    ("DT-S1",): "keep",
+    ("DT-S2",): "migrate",
+    ("DM-R1", "DM-A2", "DM-U3", "DM-N1", "DM-C1", "DM-S2"): "keep",
+    ("DM-A1", "DM-U4", "DM-S3"): "keep",
+    ("DM-U1",): "migrate",
+    ("DM-N2",): "keep",
+    ("DM-S1",): "keep",
+    ("DM-S4",): "keep",
+    ("DM-S5",): "migrate",
+    ("CS-A1", "CS-U1", "CS-C1"): "keep",
+    ("CS-N1",): "keep",
+    ("CS-N2",): "keep",
+    ("CS-N3",): "keep",
+    ("CS-C2",): "keep",
+    ("CS-C3",): "keep",
+    ("CS-S1", "CS-S2"): "migrate",
+    ("FB-R1", "FB-A1", "FB-A2", "FB-A3", "FB-N1", "FB-C1", "FB-C2"): "keep",
+    ("MW-R1",): "migrate",
+    ("MW-R3",): "keep",
+    ("MW-U2",): "keep",
+    ("MW-N1",): "keep",
+    ("MW-N2",): "migrate",
+    ("MW-N3",): "keep",
+    ("MW-C2",): "keep",
+    ("MW-S3",): "migrate",
+    ("NP-R1",): "migrate",
+    ("NP-A1",): "keep",
+    ("NP-U3",): "keep",
+    ("NP-N1", "NP-C1"): "keep",
+    ("OR-N1",): "keep",
+    ("OR-N2",): "keep",
+    ("OR-N3", "OR-S2"): "migrate",
+    ("OR-N4",): "migrate",
+    ("OR-C1",): "keep",
+    ("OR-C2",): "keep",
+    ("OR-S1",): "keep",
+    ("OR-S3",): "migrate",
+    ("PA-R2",): "migrate",
+    ("PA-N1",): "keep",
+    ("PA-N2",): "keep",
+    ("PA-N4",): "migrate",
+    ("PA-N7",): "migrate",
+    ("PA-N8",): "keep",
+    ("PA-N9",): "keep",
+    ("PA-C4",): "keep",
+    ("PA-C5", "PA-C6"): "keep",
+    ("PA-C7",): "retire",
+    ("PA-S1",): "keep",
+    ("PA-S2",): "keep",
+    ("PA-S3",): "migrate",
+    ("PB-A1",): "migrate",
+    ("PB-A8", "PB-U8"): "keep",
+    ("PB-U1",): "keep",
+    ("PB-U2",): "migrate",
+    ("PB-U3",): "keep",
+    ("PB-U7",): "migrate",
+    ("PB-U9",): "migrate",
+    ("PB-N1",): "keep",
+    ("PB-N2",): "keep",
+    ("PB-C1",): "keep",
+    ("PB-S1",): "keep",
+}
+EXPECTED_CLUSTER_DISPOSITIONS = {
+    tuple(sorted(key)): value for key, value in EXPECTED_CLUSTER_DISPOSITIONS.items()
 }
 
 
@@ -83,7 +154,8 @@ def read_triage() -> dict[tuple[str, ...], tuple[str, str]]:
         if line.startswith("|---"):
             continue
         if not line.startswith("|"):
-            break
+            in_table = False
+            continue
         row = cells(line)
         key = id_key(row[1])
         if key in result:
@@ -101,6 +173,8 @@ def read_dispositions() -> dict[tuple[str, ...], tuple[str, str, str]]:
             section = "A"
         elif line.startswith("## B "):
             section = "B"
+        elif line.startswith("## E "):
+            section = "E"
         elif line.startswith("## Held "):
             section = "held"
 
@@ -131,14 +205,22 @@ def read_dispositions() -> dict[tuple[str, ...], tuple[str, str, str]]:
     return result
 
 
-def matrix_ids() -> set[str]:
-    result = set()
+def matrix_ids() -> list[str]:
+    result = []
     for line in MATRIX.read_text().splitlines():
         if line.startswith("|"):
             first = cells(line)[0]
             if re.fullmatch(r"[A-Z]{2}-[A-Z]\d+", first):
-                result.add(first)
+                result.append(first)
     return result
+
+
+def triage_digest(triage: dict[tuple[str, ...], tuple[str, str]]) -> str:
+    canonical = "\n".join(
+        f"{','.join(key)}\t{cluster}\t{bucket}"
+        for key, (cluster, bucket) in sorted(triage.items())
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def main() -> None:
@@ -148,6 +230,13 @@ def main() -> None:
         missing = sorted(triage.keys() - dispositions.keys())
         extra = sorted(dispositions.keys() - triage.keys())
         raise SystemExit(f"disposition coverage mismatch: missing={missing} extra={extra}")
+
+    actual_triage_sha256 = triage_digest(triage)
+    if actual_triage_sha256 != EXPECTED_TRIAGE_SHA256:
+        raise SystemExit(
+            "triage mapping drift: "
+            f"{actual_triage_sha256} != {EXPECTED_TRIAGE_SHA256}"
+        )
 
     actual_cluster_dispositions = {
         key: disposition for key, (_, _, disposition) in dispositions.items()
@@ -162,20 +251,29 @@ def main() -> None:
         }
         raise SystemExit(f"cluster disposition drift: {drift}")
 
-    known_matrix_ids = matrix_ids()
+    matrix_rows = matrix_ids()
+    matrix_counts = Counter(matrix_rows)
+    duplicate_matrix_ids = sorted(
+        matrix_id for matrix_id, count in matrix_counts.items() if count != 1
+    )
+    if duplicate_matrix_ids:
+        raise SystemExit(f"matrix IDs must be unique: {duplicate_matrix_ids}")
+    known_matrix_ids = set(matrix_rows)
     used_ids = Counter(matrix_id for key in triage for matrix_id in key)
     reused_ids = sorted(matrix_id for matrix_id, count in used_ids.items() if count != 1)
     if reused_ids:
         raise SystemExit(f"matrix IDs must appear in exactly one cluster: {reused_ids}")
+    if set(used_ids) != known_matrix_ids:
+        missing = sorted(known_matrix_ids - set(used_ids))
+        extra = sorted(set(used_ids) - known_matrix_ids)
+        raise SystemExit(f"matrix coverage mismatch: missing={missing} extra={extra}")
     for key, (triage_cluster, triage_bucket) in triage.items():
         cluster, bucket, disposition = dispositions[key]
         if cluster != triage_cluster:
             raise SystemExit(f"cluster drift for {key}: {cluster!r} != {triage_cluster!r}")
         if bucket != triage_bucket:
             raise SystemExit(f"bucket drift for {key}: {bucket} != {triage_bucket}")
-        allowed = {"keep", "migrate", "retire", "hold"} if bucket == "A" else {"keep", "migrate", "retire"}
-        if bucket in {"C", "D"}:
-            allowed = {"hold"}
+        allowed = {"hold"} if bucket in {"C", "D"} else {"keep", "migrate", "retire"}
         if disposition not in allowed:
             raise SystemExit(f"invalid disposition for {key}: {bucket}/{disposition}")
         unknown = set(key) - known_matrix_ids
@@ -198,7 +296,7 @@ def main() -> None:
     if status != EXPECTED_STATUS:
         raise SystemExit(f"status drift: {status!r} != {EXPECTED_STATUS!r}")
     print(f"ok: {len(triage)} clusters / {sum(len(key) for key in triage)} matrix IDs")
-    print("buckets:", " ".join(f"{key}={bucket_counts[key]}" for key in "ABCD"))
+    print("buckets:", " ".join(f"{key}={bucket_counts[key]}" for key in "ABCDE"))
     print(
         "dispositions:",
         " ".join(

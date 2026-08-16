@@ -1,11 +1,11 @@
 # Public app parity disposition register
 
-Status: 31 executable clusters decided; 11 clusters deliberately held
+Status: 97 executable clusters decided; 11 clusters deliberately held
 
-This register is the disposition layer over the conservative 42-cluster sample in
+This register is the disposition layer over the exhaustive 108-cluster triage in
 [`../../census/parity-decision-triage.md`](../../census/parity-decision-triage.md).
-It is not a disposition of all 134 rows in
-[`../../census/parity-matrix.md`](../../census/parity-matrix.md).
+It assigns every one of the 134 rows in
+[`../../census/parity-matrix.md`](../../census/parity-matrix.md) exactly once.
 
 The evidence pair remains fixed at:
 
@@ -38,7 +38,7 @@ These eighteen rows need no person decision and can proceed now.
 |---|---|---|---|
 | devterm terminal font | DT-C4 | migrate | Add D2Coding as an available bundled font and retain the platform monospace stack as the default/fallback. Font license and NOTICE become release inputs. |
 | devterm account switcher activation | DT-U2 | keep | Keep explicit `accounts=false/true`; it already represents both disabled and always-enabled deployments without a hostname policy. |
-| dev-monitor service restart surface | DM-R2, DM-U2 | migrate | Carry the allow-listed user-service restart API/UI and log targets into a separately authenticated mutation path; system services remain rejected. |
+| dev-monitor service restart surface | DM-R2, DM-U2 | migrate | Carry the allow-listed user-service restart API/UI into a separately authenticated mutation path; system services remain rejected. Keep the public discovered-user-service log selector instead of copying the internal fixed list. |
 | dev-monitor spool firewall | DM-N3 | keep | Keep the public operator-owned `0700` spool boundary and do not carry the internal low-trust spool UID or its root-owned firewall unit into an app with `capabilities = []`. |
 | dev-monitor executable-skill allow-list | DM-C2 | migrate | Add an optional membership allow-list; unset keeps the current syntax validation and set adds membership validation. |
 | dev-monitor message-console activation | DM-C3 | keep | Keep the explicit `messages` setting and retire the `hostname == josh-dev` activation rule. |
@@ -77,9 +77,83 @@ step.
 | Publish upload filename normalization | PB-S2 | migrate | Preserve safe Unicode, including Hangul, for future uploads with explicit normalization and length bounds; do not rename stored files. |
 | Publish clipboard-image namespace | PB-S3 | keep | Keep `imageNNN` for new writes and extend sequence recognition to existing `이미지NNN` names during migration. Existing files are not renamed. |
 
+## E — fixed-SHA exhaustive closure
+
+These 66 evidence-complete clusters were outside the original conservative A-D
+candidate set. All can proceed without census, privilege promotion, or a person choice.
+
+| Cluster | Matrix IDs | Disposition | Destination contract |
+|---|---|---|---|
+| devterm keytest diagnostic | DT-R2 | migrate | Add the app-scoped input diagnostic under the existing owner gate. |
+| devterm wrong-method contract | DT-A2 | migrate | Return explicit JSON 405 responses for wrong secret methods. |
+| devterm install restart discipline | DT-N2 | keep | Restart only on content change or inactivity. |
+| devterm unit identity | DT-N3 | keep | Keep canonical `airlock-devterm*` units. |
+| devterm platform configuration and identity | DT-C1, DT-C3 | keep | Keep app-scoped settings and the platform-configured identity header. |
+| devterm usage cache persistence | DT-S1 | keep | Keep the identity-checked persistent Codex usage cache. |
+| devterm legacy tab-state path | DT-S2 | migrate | Read or copy legacy tab state non-destructively; write only the public path. |
+| dev-monitor token freshness surface | DM-R1, DM-A2, DM-U3, DM-N1, DM-C1, DM-S2 | keep | Keep the opt-in API, health, UI, units, config, and snapshot as one capability. |
+| dev-monitor run retention | DM-A1, DM-U4, DM-S3 | keep | Keep the completed-run window and 24-hour reclamation state. |
+| dev-monitor bulk message actions | DM-U1 | migrate | Add visible-card bulk actions with progress, partial failure, and undo. |
+| dev-monitor unit identity | DM-N2 | keep | Keep `airlock-dev-monitor.service` canonical. |
+| dev-monitor observability history | DM-S1 | keep | Keep history in durable app state rather than `/tmp`. |
+| dev-monitor delivery leases | DM-S4 | keep | Keep lane-aware claim leases and startup recovery. |
+| dev-monitor legacy message-state path | DM-S5 | migrate | Import legacy DB/spool state non-destructively; write only the public path. |
+| code-server configurable slots | CS-A1, CS-U1, CS-C1 | keep | Keep configurable slot counts, ports, validation, and UI topology. |
+| code-server unit identity | CS-N1 | keep | Keep canonical `airlock-code-server*` units. |
+| code-server unit ordering | CS-N2 | keep | Keep `network.target` ordering. |
+| code-server install restart discipline | CS-N3 | keep | Restart only changed or inactive services. |
+| code-server identity configuration | CS-C2 | keep | Keep the configured identity header and fail-closed owner check. |
+| code-server architecture support | CS-C3 | keep | Keep verified amd64 and arm64 artifacts. |
+| code-server legacy state | CS-S1, CS-S2 | migrate | Copy legacy slots/extensions/tabs and single-instance state without deleting it; write canonical Airlock paths. |
+| feedback owned surface | FB-R1, FB-A1, FB-A2, FB-A3, FB-N1, FB-C1, FB-C2 | keep | Keep the same-origin route, validated API, identity-derived submitter, delivery modes, user unit, and env-reference secret boundary. |
+| Markwand legacy edit route | MW-R1 | migrate | Redirect legacy `/edit...` paths to canonical `/markwand/edit...`. |
+| Markwand long editor timeout | MW-R3 | keep | Keep the 86400-second editor proxy read timeout. |
+| Markwand return widget | MW-U2 | keep | Keep the Airlock return widget on direct file pages. |
+| Markwand unit identity | MW-N1 | keep | Keep canonical `airlock-markserv` and `airlock-filebrowser` units. |
+| Markwand linger observation | MW-N2 | migrate | Warn on missing linger; do not enable it from the app. |
+| Markwand Node PATH | MW-N3 | keep | Keep the discovered Node path in the unit environment. |
+| Markwand code-root requirement | MW-C2 | keep | Require an explicit absolute code root. |
+| Markwand database backup | MW-S3 | migrate | Take an atomic bounded backup before DB settings changes. |
+| Notepad canonical route | NP-R1 | migrate | Redirect `/notepad.html` to canonical `/notepad/`. |
+| Notepad upload encoding | NP-A1 | keep | Keep prefix-free base64 writes and backend Data URL compatibility. |
+| Notepad upload-size preflight | NP-U3 | keep | Keep the 12 MiB encoded-image preflight. |
+| Notepad independent package lifecycle | NP-N1, NP-C1 | keep | Keep Notepad unitless, Publish-dependent, and independently deactivatable. |
+| Orca unit identity | OR-N1 | keep | Keep canonical `airlock-orca*` identities. |
+| Orca unit ordering | OR-N2 | keep | Keep `network.target` ordering. |
+| Orca partial-deploy restart | OR-N3, OR-S2 | migrate | Separate Xvfb/Orca change flags and use drift evidence for targeted recovery. |
+| Orca linger observation | OR-N4 | migrate | Warn on missing linger; do not enable it from the app. |
+| Orca manifest boundary | OR-C1 | keep | Keep manifest ports and platform owner audience. |
+| Orca dry-run renderer | OR-C2 | keep | Keep mutation-free dry-run and redirected rendering. |
+| Orca app-state namespace | OR-S1 | keep | Keep state and helpers in the Airlock namespace. |
+| Orca orphan-scope reconciliation | OR-S3 | migrate | Preserve live serve scopes and remove only proven orphans. |
+| Paseo stream proxy policy | PA-R2 | migrate | Add 86400-second send timeout and disable response buffering. |
+| Paseo unit identity | PA-N1 | keep | Keep canonical `airlock-paseo*` identities. |
+| Paseo stale pidfile guard | PA-N2 | keep | Keep the evidence-gated stale/PID-reuse guard. |
+| Paseo shutdown timeout | PA-N4 | migrate | Add `TimeoutStopSec=20`. |
+| Paseo linger observation | PA-N7 | migrate | Warn on missing linger; do not enable it from the app. |
+| Paseo future provider PATH | PA-N8 | keep | Keep future provider directories in unit PATH. |
+| Paseo unit ordering | PA-N9 | keep | Keep `network.target` ordering. |
+| Paseo app favicon branding | PA-C4 | keep | Keep app-scoped icon-ring favicon generation. |
+| Paseo manifest and sidecar ports | PA-C5, PA-C6 | keep | Keep explicit manifest settings, platform owner, and resolved sidecar ports. |
+| Paseo architecture restriction | PA-C7 | retire | Do not carry the host-specific x86-only rejection into the destination. |
+| Paseo spawned-process ownership | PA-S1 | keep | Keep handle ownership and orphan process-group cleanup. |
+| Paseo credential metadata preservation | PA-S2 | keep | Keep merge-write refresh that preserves unknown fields. |
+| Paseo partial-deploy restart | PA-S3 | migrate | Treat `NeedDaemonReload=yes` as recovery-restart evidence. |
+| Publish public contract metadata | PB-A1 | migrate | Add versioned `public_contract` fields without removing existing fields. |
+| Publish broken-item contract | PB-A8, PB-U8 | keep | Keep `isBroken` in the API and the functioning repair action. |
+| Publish direct upload | PB-U1 | keep | Keep bounded 50 MiB file upload. |
+| Publish theme preference | PB-U2 | migrate | Add system/light/dark using a Publish-specific storage key. |
+| Publish item-type filters | PB-U3 | keep | Keep HTML, image, folder, and file filters. |
+| Publish bundle confirmation | PB-U7 | migrate | Show attachment names/count/size and document sources over PB-A5. |
+| Publish periodic refresh | PB-U9 | migrate | Add visibility-aware 30-second refresh guarded against stale responses. |
+| Publish unit identity | PB-N1 | keep | Keep canonical `airlock-publish*` identities. |
+| Publish cleanup scope | PB-N2 | keep | Keep upload cleanup plus local-publication expiry/reconciliation. |
+| Publish share-root configuration | PB-C1 | keep | Keep configurable injected paths and avoid `~/public_html` defaults. |
+| Publish local state | PB-S1 | keep | Keep transactional local/gated content, ownership, expiry, credential, and recovery state. |
+
 ## Held evidence and promotion work
 
-The held set is 11 clusters in this bounded sample: eight C and three D.
+The held set is 11 clusters in the exhaustive register: eight C and three D.
 No code or regression fixture for these rows is authorized by this register.
 
 | Bucket | Cluster | Matrix IDs | Disposition | Waiting for | Producer or decision owner |
@@ -113,7 +187,8 @@ task's approved output, not values that can be derived again from the census tab
 
 ## Accounting boundary
 
-The positive control is the triage register itself: 42 table rows covering 47 matrix
-IDs, partitioned as A 18, B 13, C 8, D 3. This register assigns all 18 A plus all 13 B
-rows and holds 8 C plus 3 D rows. Therefore its bounded accounting is 31 decided plus
-11 held, not a claim that the full 134-row parity matrix has zero undecided deltas.
+The positive control is the matrix itself: 134 distinct IDs. The triage partitions
+them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns all A, B, and
+E clusters and holds only C 8 plus D 3: 97 decided plus 11 held, covering 108 clusters
+and all 134 matrix IDs exactly once. This is an exhaustive fixed-SHA claim, not a
+current-HEAD census; changes after the declared pair require a new delta.

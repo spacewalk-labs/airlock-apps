@@ -1,11 +1,12 @@
 # Parity difference decision triage
 
-Status: first-pass triage of 42 clusters (47 matrix IDs)
+Status: exhaustive triage of 108 clusters (134 matrix IDs)
 
-This document applies the campaign's over-gate to the conservative candidate set
-derived from [`parity-matrix.md`](parity-matrix.md). It does **not** choose `keep`,
-`drop`, or `migrate`. Each ID below points to the evidence-backed matrix row; this
-triage adds no new behavior claim.
+This document applies the campaign's over-gate to every row derived from
+[`parity-matrix.md`](parity-matrix.md). It does **not** choose `keep`, `drop`, or
+`migrate`. Each ID below points to the evidence-backed matrix row; this triage adds no
+new behavior claim. A-D retain the original conservative decision set, while E closes
+the rows that already have a bounded evidence-complete path.
 
 The buckets are applied in order:
 
@@ -15,6 +16,10 @@ The buckets are applied in order:
 - **C — census/measurement:** deployed state or use can answer the open fact.
 - **D — ask a person:** the alternatives are mutually exclusive and a wrong choice
   is costly to reverse or silently disconnects an existing user.
+- **E — evidence-complete closure:** fixed-SHA evidence already determines a bounded,
+  reversible destination contract. No census, privilege promotion, or person choice is
+  needed. E closes rows omitted from the original conservative candidate set; it does
+  not weaken A-D.
 
 | Cluster | Related matrix IDs | Bucket | Why |
 |---|---|---|---|
@@ -61,15 +66,91 @@ The buckets are applied in order:
 | Publish upload filename normalization | PB-S2 | B | Filename character rules and fallback text are reversible naming defaults; existing stored names need not be renamed by the initial choice. |
 | Publish clipboard-image namespace | PB-S3 | B | The filename prefix is a reversible default, and readers can continue to recognize files created under either namespace. |
 
+### E — fixed-SHA exhaustive closure
+
+These 66 clusters cover every matrix ID omitted from the original A-D candidate set.
+Compatibility readers do not move canonical writes or privilege ownership.
+
+| Cluster | Related matrix IDs | Bucket | Why |
+|---|---|---|---|
+| devterm keytest diagnostic | DT-R2 | E | An app-scoped diagnostic page is additive and removable. |
+| devterm wrong-method contract | DT-A2 | E | Explicit JSON 405 responses are an additive protocol clarification. |
+| devterm install restart discipline | DT-N2 | E | Change-sensitive restarts preserve service continuity. |
+| devterm unit identity | DT-N3 | E | Public package ownership requires the `airlock-*` identities. |
+| devterm platform configuration and identity | DT-C1, DT-C3 | E | The manifest schema and configured identity header are the portable boundary. |
+| devterm usage cache persistence | DT-S1 | E | The bounded, identity-checked cache is safer than process-only state. |
+| devterm legacy tab-state path | DT-S2 | E | Compatibility reads need not move canonical writes. |
+| dev-monitor token freshness surface | DM-R1, DM-A2, DM-U3, DM-N1, DM-C1, DM-S2 | E | API, UI, units, config, and state are one optional public capability. |
+| dev-monitor run retention | DM-A1, DM-U4, DM-S3 | E | API, UI, and persisted retention state form one public capability. |
+| dev-monitor bulk message actions | DM-U1 | E | Bulk actions can layer over bounded per-item operations. |
+| dev-monitor unit identity | DM-N2 | E | Public package ownership requires the `airlock-*` identity. |
+| dev-monitor observability history | DM-S1 | E | Durable app state is preferable to `/tmp`. |
+| dev-monitor delivery leases | DM-S4 | E | Claim leases preserve interruption recovery and lane isolation. |
+| dev-monitor legacy message-state path | DM-S5 | E | Compatibility reads need not move canonical writes. |
+| code-server configurable slots | CS-A1, CS-U1, CS-C1 | E | API, UI, and config are one elastic-slot contract. |
+| code-server unit identity | CS-N1 | E | Public package ownership requires the `airlock-*` identities. |
+| code-server unit ordering | CS-N2 | E | Network ordering avoids the documented target cycle. |
+| code-server install restart discipline | CS-N3 | E | Change-sensitive restarts preserve sessions. |
+| code-server identity configuration | CS-C2 | E | Configured headers and fail-closed ownership are portable. |
+| code-server architecture support | CS-C3 | E | Verified amd64/arm64 artifacts preserve the broader capability. |
+| code-server legacy state | CS-S1, CS-S2 | E | Bounded copy-in can coexist with canonical Airlock paths. |
+| feedback owned surface | FB-R1, FB-A1, FB-A2, FB-A3, FB-N1, FB-C1, FB-C2 | E | Route, API, unit, and config are one public-only capability. |
+| Markwand legacy edit route | MW-R1 | E | Same-origin redirects preserve callers without a second service. |
+| Markwand long editor timeout | MW-R3 | E | The bounded proxy policy supports long editing sessions. |
+| Markwand return widget | MW-U2 | E | App navigation is independent of split-page controls. |
+| Markwand unit identity | MW-N1 | E | Public package ownership requires the `airlock-*` identities. |
+| Markwand linger observation | MW-N2 | E | Read-only validation warns without granting authority. |
+| Markwand Node PATH | MW-N3 | E | The discovered executable path makes the unit deterministic. |
+| Markwand code-root requirement | MW-C2 | E | An explicit absolute path avoids a host-specific root. |
+| Markwand database backup | MW-S3 | E | A bounded pre-mutation backup is reversible. |
+| Notepad canonical route | NP-R1 | E | A same-origin redirect can preserve the old path. |
+| Notepad upload encoding | NP-A1 | E | Prefix-free base64 can remain canonical with compatibility reads. |
+| Notepad upload-size preflight | NP-U3 | E | The existing bound prevents doomed requests. |
+| Notepad independent package lifecycle | NP-N1, NP-C1 | E | An explicit Publish dependency preserves independent disable. |
+| Orca unit identity | OR-N1 | E | Public package ownership requires the `airlock-*` identities. |
+| Orca unit ordering | OR-N2 | E | Network ordering avoids the documented target cycle. |
+| Orca partial-deploy restart | OR-N3, OR-S2 | E | Separate flags and drift evidence recover only affected services. |
+| Orca linger observation | OR-N4 | E | Read-only validation warns without enabling linger. |
+| Orca manifest boundary | OR-C1 | E | Manifest ports and platform audience avoid personal defaults. |
+| Orca dry-run renderer | OR-C2 | E | Redirected mutation-free rendering is testable. |
+| Orca app-state namespace | OR-S1 | E | The Airlock namespace preserves package ownership. |
+| Orca orphan-scope reconciliation | OR-S3 | E | Live scopes can be retained while proven orphans are removed. |
+| Paseo stream proxy policy | PA-R2 | E | Long-stream send timeout and disabled buffering are bounded. |
+| Paseo unit identity | PA-N1 | E | Public package ownership requires the `airlock-*` identities. |
+| Paseo stale pidfile guard | PA-N2 | E | Evidence-gated cleanup prevents restart loops. |
+| Paseo shutdown timeout | PA-N4 | E | A unit timeout is reversible release policy. |
+| Paseo linger observation | PA-N7 | E | Read-only validation warns without enabling linger. |
+| Paseo future provider PATH | PA-N8 | E | Future directories preserve discovery without reinstall. |
+| Paseo unit ordering | PA-N9 | E | Network ordering avoids the documented target cycle. |
+| Paseo app favicon branding | PA-C4 | E | App-scoped assets do not change global identity. |
+| Paseo manifest and sidecar ports | PA-C5, PA-C6 | E | Schema and resolved port propagation are one boundary. |
+| Paseo architecture restriction | PA-C7 | E | A host-specific rejection need not become destination policy. |
+| Paseo spawned-process ownership | PA-S1 | E | Handle and process-group ownership prevents leaks. |
+| Paseo credential metadata preservation | PA-S2 | E | Merge-write preserves unknown upstream fields. |
+| Paseo partial-deploy restart | PA-S3 | E | `NeedDaemonReload` is bounded recovery evidence. |
+| Publish public contract metadata | PB-A1 | E | Versioned additive fields preserve existing consumers. |
+| Publish broken-item contract | PB-A8, PB-U8 | E | API field and repair UI are one contract. |
+| Publish direct upload | PB-U1 | E | The bounded upload is an independent capability. |
+| Publish theme preference | PB-U2 | E | An app-specific key avoids preference collision. |
+| Publish item-type filters | PB-U3 | E | Type filters are independent of publication state. |
+| Publish bundle confirmation | PB-U7 | E | Review UI can layer on the bounded bundle API. |
+| Publish periodic refresh | PB-U9 | E | Visibility-aware refresh with sequence guards is reversible. |
+| Publish unit identity | PB-N1 | E | Public package ownership requires the `airlock-*` identities. |
+| Publish cleanup scope | PB-N2 | E | Local-publication reconciliation belongs with expiry. |
+| Publish share-root configuration | PB-C1 | E | Injected paths avoid host-specific fixed directories. |
+| Publish local state | PB-S1 | E | Transactional local/gated state is the public contract. |
+
 ## Counts
 
 - A: 18 clusters
 - B: 13 clusters
 - C: 8 clusters
 - D: 3 clusters
-- Total: 42 clusters / 47 matrix IDs
+- E: 66 clusters
+- Total: 108 clusters / 134 matrix IDs
 
 The D bucket is an escalation list, not a decision. `DT-R1` is already tracked as the
-separate `:9900` route decision; it remains here so the 42-cluster input set stays
-complete. Its D classification does not bypass the live-evidence prerequisite recorded
+separate `:9900` route decision; it remains here so the original 42-cluster A-D
+decision set stays traceable inside the exhaustive register. Its D classification does
+not bypass the live-evidence prerequisite recorded
 in [`devterm-9900.md`](devterm-9900.md); this triage does not open a new question.
