@@ -1,0 +1,22 @@
+{
+  "name": "Markwand",
+  "short_name": "Markwand",
+  "id": "/markwand/",
+  "start_url": "/markwand/",
+  "scope": "/markwand/",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "/assets/app-icons/markwand.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/assets/app-icons/markwand.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "#0f766e",
+  "background_color": "#fbf7ef"
+}
