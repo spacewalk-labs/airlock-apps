@@ -17,6 +17,50 @@ EXPECTED_DISPOSITIONS = Counter({"keep": 14, "migrate": 15, "retire": 2, "hold":
 EXPECTED_CLUSTER_COUNT = 42
 EXPECTED_ID_COUNT = 47
 EXPECTED_STATUS = "Status: 31 executable clusters decided; 11 clusters deliberately held"
+EXPECTED_CLUSTER_DISPOSITIONS = {
+    ("DT-C4",): "migrate",
+    ("DT-U2",): "keep",
+    ("DM-R2", "DM-U2"): "migrate",
+    ("DM-N3",): "keep",
+    ("DM-C2",): "migrate",
+    ("DM-C3",): "keep",
+    ("MW-U1",): "migrate",
+    ("MW-S1",): "migrate",
+    ("NP-U1",): "migrate",
+    ("NP-S1",): "keep",
+    ("OR-C3",): "migrate",
+    ("PA-C1", "PA-R1"): "keep",
+    ("PA-U1",): "keep",
+    ("PA-C3",): "migrate",
+    ("PB-R1",): "migrate",
+    ("PB-A2", "PB-C2", "PB-R2", "PB-U6"): "migrate",
+    ("PB-A3",): "migrate",
+    ("PB-A5",): "migrate",
+    ("DT-N1",): "keep",
+    ("DT-C2",): "keep",
+    ("CS-C4",): "retire",
+    ("MW-C1",): "keep",
+    ("MW-C3",): "retire",
+    ("NP-U2",): "keep",
+    ("NP-U4",): "keep",
+    ("PB-A6",): "migrate",
+    ("PB-A7",): "migrate",
+    ("PB-U4",): "keep",
+    ("PB-U5",): "keep",
+    ("PB-S2",): "migrate",
+    ("PB-S3",): "keep",
+    ("DT-A1",): "hold",
+    ("MW-R2",): "hold",
+    ("MW-S2",): "hold",
+    ("PA-N3",): "hold",
+    ("PA-N5",): "hold",
+    ("PA-N6",): "hold",
+    ("PA-C2",): "hold",
+    ("PB-A4",): "hold",
+    ("DT-R1",): "hold",
+    ("OR-C4",): "hold",
+    ("OR-S4",): "hold",
+}
 
 
 def cells(line: str) -> list[str]:
@@ -104,6 +148,19 @@ def main() -> None:
         missing = sorted(triage.keys() - dispositions.keys())
         extra = sorted(dispositions.keys() - triage.keys())
         raise SystemExit(f"disposition coverage mismatch: missing={missing} extra={extra}")
+
+    actual_cluster_dispositions = {
+        key: disposition for key, (_, _, disposition) in dispositions.items()
+    }
+    if actual_cluster_dispositions != EXPECTED_CLUSTER_DISPOSITIONS:
+        drift = {
+            key: (EXPECTED_CLUSTER_DISPOSITIONS.get(key), actual_cluster_dispositions.get(key))
+            for key in sorted(
+                EXPECTED_CLUSTER_DISPOSITIONS.keys() | actual_cluster_dispositions.keys()
+            )
+            if EXPECTED_CLUSTER_DISPOSITIONS.get(key) != actual_cluster_dispositions.get(key)
+        }
+        raise SystemExit(f"cluster disposition drift: {drift}")
 
     known_matrix_ids = matrix_ids()
     used_ids = Counter(matrix_id for key in triage for matrix_id in key)

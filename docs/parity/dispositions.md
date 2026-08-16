@@ -102,6 +102,15 @@ sample positively finds Orca as the `system-unit`/`rooted-artifact` promotion ta
 the board activity records that the remaining producer closed and no replacement owner
 was assigned. This is a campaign-doc sample, not a company-wide absence claim.
 
+## Decision pinning gate
+
+Coverage and aggregate counts do not identify the selected decision: exchanging two
+cluster dispositions preserves both signals. The validator therefore pins every exact
+matrix-ID set to its reviewed `keep`, `migrate`, `retire`, or `hold` disposition. A
+future decision change must deliberately update both this register and that pin in the
+same reviewed change. The pin is appropriate here because these dispositions are this
+task's approved output, not values that can be derived again from the census tables.
+
 ## Accounting boundary
 
 The positive control is the triage register itself: 42 table rows covering 47 matrix
