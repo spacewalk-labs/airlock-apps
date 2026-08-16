@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: python3 test/parity-dispositions.py
+      - run: bash test/all-app-artifacts.sh --parity --fixture-contract
   no-core-mix:
     runs-on: ubuntu-latest
     steps:
