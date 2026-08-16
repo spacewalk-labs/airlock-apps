@@ -93,15 +93,17 @@ def main() -> None:
     monitor_source = monitor_path.read_text()
     if 'id="messages"' not in monitor_source:
         raise SystemExit("DM-U1 positive control missing: message console")
-    if 'id="msg-bulk"' in monitor_source:
-        raise SystemExit("DM-U1 migrate fixture stale: destination already contains bulk UI")
+    for marker in ('id="msg-bulk"', "function selectedVisible()", "function runPool("):
+        if marker not in monitor_source:
+            raise SystemExit(f"DM-U1 destination anchor missing: {marker}")
     print(
         "ok: synthetic sample directional controls "
         "public-only=devterm/DT-S1 internal-only=dev-monitor/DM-U1 "
         "measured=test/fixtures/parity/{public,internal}; "
         "destination sample=apps/devterm/backend/devterm-gate.py," 
         "apps/dev-monitor/frontend/dev-monitor.html "
-        "positive-control=dev-monitor#messages"
+        "positive-control=dev-monitor#messages; "
+        "selected-destination=dev-monitor#msg-bulk"
     )
 
 

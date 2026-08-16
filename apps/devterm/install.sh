@@ -152,7 +152,8 @@ else
   install -d "$WEB_ROOT/vendor"
   install -m644 "$HERE/web/app.js" "$HERE/web/accounts.js" "$HERE/web/ui.js" \
                 "$HERE/web/secretdrop.js" "$HERE/web/popup.css" "$HERE/web/panel.html" \
-                "$HERE/web/favicon.svg" "$HERE/web/apple-touch-icon.png" "$WEB_ROOT/"
+                "$HERE/web/keytest.html" "$HERE/web/favicon.svg" \
+                "$HERE/web/apple-touch-icon.png" "$WEB_ROOT/"
   install -m644 "$HERE"/web/vendor/* "$WEB_ROOT/vendor/"
   # template the config placeholder (JSON has no sed metachars; use | as delimiter)
   sed "s|%%DEVTERM_CONFIG%%|${CFG_JSON}|" "$HERE/web/index.html" > "$WEB_ROOT/index.html"

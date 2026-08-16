@@ -1,0 +1,19 @@
+Third-party notices for the devterm app
+=======================================
+
+D2 Coding
+---------
+
+Files:
+  web/vendor/d2coding-400.woff2
+  web/vendor/d2coding-700.woff2
+
+Source: https://github.com/naver/d2-coding-font
+Source commit: 9d6f0559691ebe670a23fbf7b72a8dc42362f1fb
+Copyright (c) 2015, NAVER Corporation (https://www.navercorp.com).
+Reserved Font Names: D2Coding and D2Coding-Bold.
+License: SIL Open Font License, Version 1.1.
+
+The WOFF2 files above are copied unmodified from the upstream source commit.
+The required copyright notice and full license text are distributed alongside
+them at web/vendor/D2Coding-OFL.txt.

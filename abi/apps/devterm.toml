@@ -8,5 +8,6 @@ reverse = "pending-parity"
 rpo = "0"
 paths = [
   "~/.config/airlock-devterm/tabs.json",
+  "~/.local/state/airlock/devterm/codex-usage.json",
 ]
 capabilities = ["plaintext-redirect"]

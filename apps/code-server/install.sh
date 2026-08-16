@@ -9,7 +9,8 @@
 # `slots` code-server instances, each a templated unit (airlock-code-server@N) on
 # its own loopback port. A static tab-bar shell (spawn/kill/rename/color/reorder +
 # iframe readiness-retry) drives it over the gate's /api/ route. All counts/ports
-# come from airlock.toml ([apps.code-server]). Greenfield: no legacy migration.
+# come from airlock.toml ([apps.code-server]). Legacy state is copied into the
+# canonical Airlock paths once, without moving, deleting, or replacing user data.
 # Honors AIRLOCK_DRY_RUN=1.
 set -euo pipefail
 
@@ -71,6 +72,14 @@ SLOT_LAUNCHER="$HOME/.local/bin/airlock-code-server-slot"
 MANAGER_BIN="$HOME/.local/bin/airlock-code-server-manager"
 MANAGER_SRC="$HERE/manager/manager.py"
 SHELL_DIR="$CONFD/code-server"
+LEGACY_MIGRATOR="$HERE/bin/migrate-legacy-state"
+
+[ -x "$LEGACY_MIGRATOR" ] || die "code-server: state migrator not executable: $LEGACY_MIGRATOR"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] copy legacy code-server state into canonical Airlock paths"
+else
+  "$LEGACY_MIGRATOR"
+fi
 
 # --- 1. provision code-server (sha256-pinned; no piped installer) ---
 provision_code_server() {

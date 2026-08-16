@@ -20,6 +20,8 @@ import os
 # The message feature needs all of these, or none of them.
 _REQUIRED = ('DEV_MONITOR_OWNER', 'DEV_MONITOR_PROXY_SECRET',
              'DEV_MONITOR_SPOOL', 'DEV_MONITOR_DB')
+_RESTART_REQUIRED = ('DEV_MONITOR_RESTART_OWNER', 'DEV_MONITOR_RESTART_PROXY_SECRET',
+                     'DEV_MONITOR_RESTART_ALLOW')
 
 MAX_BODY = 64 * 1024                    # cap for an owner POST body
 
@@ -43,6 +45,27 @@ def load_config():
         'secret': present['DEV_MONITOR_PROXY_SECRET'],
         'spool': present['DEV_MONITOR_SPOOL'],
         'db': present['DEV_MONITOR_DB'],
+    }
+
+
+def load_restart_config():
+    """Load the independent service-restart gate, or None when it is disabled."""
+    present = {k: os.environ.get(k, '').strip() for k in _RESTART_REQUIRED}
+    have = [k for k, value in present.items() if value]
+    if not have:
+        return None
+    if len(have) != len(_RESTART_REQUIRED):
+        missing = [k for k in _RESTART_REQUIRED if not present[k]]
+        raise ConfigError('restart feature is partially configured (fail-closed) — missing: %s'
+                          % ', '.join(missing))
+    allowed = frozenset(name.strip() for name in present['DEV_MONITOR_RESTART_ALLOW'].split(',')
+                        if name.strip())
+    if not allowed:
+        raise ConfigError('restart feature has an empty allow-list')
+    return {
+        'owner': present['DEV_MONITOR_RESTART_OWNER'],
+        'secret': present['DEV_MONITOR_RESTART_PROXY_SECRET'],
+        'allowed': allowed,
     }
 
 

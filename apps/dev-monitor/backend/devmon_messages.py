@@ -754,6 +754,9 @@ def canonical_plan(card_row, exec_cfg):
         skill = skill.strip()
         if not SKILL_RE.match(skill):
             return None
+        skill_allow = exec_cfg.get('skill_allow')
+        if skill_allow is not None and skill not in skill_allow:
+            return None
         plan['skill'] = skill
     else:
         prompt = action.get('prompt')

@@ -8,6 +8,7 @@ reverse = "pending-parity"
 rpo = "0"
 paths = [
   "~/.local/share/airlock-code-server/",
+  "~/.config/airlock-code-server/tabs.json",
   "~/.config/code-server/",
 ]
 capabilities = []

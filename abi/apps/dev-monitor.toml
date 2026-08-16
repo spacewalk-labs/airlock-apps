@@ -8,5 +8,6 @@ reverse = "pending-parity"
 rpo = "0"
 paths = [
   "~/.local/state/airlock/dev-monitor/",
+  "~/.local/share/airlock-dev-monitor/history.csv",
 ]
 capabilities = []
