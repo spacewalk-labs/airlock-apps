@@ -13,9 +13,9 @@
 # proxied to the runtime. If the bundle is absent it falls back to the raw upstream
 # client. Provenance: apps/orca/web-bundle/README.md; attribution: repo-root NOTICE.
 #
-# Config from airlock.toml ([apps.orca]). Honors AIRLOCK_DRY_RUN=1: every system
-# mutation (download, apt, systemctl, nft, tailscale, sudo) prints "[dry] ..."
-# instead of running. The nginx fragment is config, not a mutation — always written.
+# Config from airlock.toml ([apps.orca]). Honors AIRLOCK_DRY_RUN=1: every write,
+# chmod, download, apt, systemctl, nft, tailscale, and sudo action is observation
+# only. AIRLOCK_RENDER_DIR is the sole opt-in dry-run output root.
 #
 # Pilot findings encoded below (each cost real debugging; do NOT "simplify" away):
 # - orca serve has no --host flag, so it binds 0.0.0.0 -> nft loopback-only.
@@ -151,7 +151,7 @@ provision_orca() {
      && [ ! "$APPIMAGE" -nt "$APPRUN" ]; then
     log "orca $VER present + extracted (sha ok)"; return
   fi
-  need_restart=1   # binary missing or changed -> restart after (re)provisioning
+  binary_changed=1   # binary missing or changed -> restart after (re)provisioning
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
     log "[dry] download+verify orca $VER ($ASSET) + --appimage-extract -> $SQUASHFS"; return
   fi
@@ -171,10 +171,11 @@ provision_orca() {
   ( cd "$ORCA_DIR" && "$APPIMAGE" --appimage-extract >/dev/null ) || die "orca AppImage extract failed"
   [ -x "$APPRUN" ] || die "orca AppRun missing after extract: $APPRUN"
 }
-# Tracks whether anything that requires a service restart changed this run. Kept 0
-# on an idempotent re-run so we do NOT restart orca (which would kill the owner's
-# live PTYs/browser panes — they are live-only and non-recoverable).
-need_restart=0
+# Track Xvfb, Orca unit, and binary changes independently: only the dependency
+# whose evidence changed is restarted. This preserves live browser panes and PTYs.
+binary_changed=0
+xvfb_changed=0
+orca_changed=0
 provision_orca
 
 # --- 2. fixed pairing code + tailnet FQDN (both baked into the unit ExecStart) ---
@@ -210,7 +211,7 @@ else
   # Daemon reap — orca forks its daemon into app-orca-*.scope (app.slice), which
   # the service's KillMode never reaches. Runs as ExecStopPost (i.e. on every
   # restart): kill the daemon pid (PID-reuse-safe via /proc/<pid>/exe) and stop
-  # every leftover app-orca-*.scope (one agent-browser child leaks per restart).
+  # only scopes proven not to contain a live `--serve` process.
   render_orca_reap_script >"$REAP_BIN"
   # RENDER_DIR is a harness text-emission-only hook — no chmod, no touching real
   # (non-redirected) state under $HOME.
@@ -222,13 +223,13 @@ else
   # headless. A per-start xvfb-run races the socket create on some boxes ('Missing
   # X server'); a standing unit removes that race. orca (below) After/Requires it.
   if render_orca_unit_xvfb "$XDISP" | write_if_changed "$UNIT_DIR/airlock-orca-xvfb.service"
-  then need_restart=1; fi
+  then xvfb_changed=1; fi
 
   # orca serve — single instance behind the loopback gate.
   if render_orca_unit_serve "$SQUASHFS" "$XDISP" "$APPRUN" "$BACKEND_PORT" "$PAIRING_CODE" \
        "$FQDN" "$HTTPS_PORT" "$SERVELOG" "$REAP_BIN" \
      | write_if_changed "$UNIT_DIR/airlock-orca.service"
-  then need_restart=1; fi
+  then orca_changed=1; fi
 
   # serve.log 0600 (it holds the pairing webClientUrl). ExecStart's '>' preserves
   # an existing file's mode, so lock it down before the first start. Skipped under
@@ -239,16 +240,45 @@ else
   fi
 fi
 
+# NeedDaemonReload must be read before daemon-reload clears the evidence. Keep
+# these flags separate so an Orca-only edit does not bounce the X server.
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  orca_unit_needs_reload airlock-orca-xvfb.service && xvfb_changed=1
+  orca_unit_needs_reload airlock-orca.service && orca_changed=1
+fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-orca-xvfb.service airlock-orca.service
-# Restart only when something changed (or the service is down / dry-run). An
-# idempotent re-run with no changes must NOT restart — that would kill the owner's
-# live orca session (PTYs + browser panes are live-only and non-recoverable).
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] || [ "$need_restart" = 1 ] \
-   || ! systemctl --user is-active --quiet airlock-orca.service; then
-  airlock_run systemctl --user restart airlock-orca-xvfb.service airlock-orca.service
+
+xvfb_active=0
+socket_ready=0
+orca_active=0
+stale_apprun=0
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  systemctl --user is-active --quiet airlock-orca-xvfb.service && xvfb_active=1
+  [ -S "${ORCA_XSOCKET:-/tmp/.X11-unix/X${XDISP}}" ] && socket_ready=1
+  systemctl --user is-active --quiet airlock-orca.service && orca_active=1
+  if orca_apprun_is_stale airlock-orca.service "$APPRUN"; then
+    stale_apprun=1
+    log "orca AppRun is newer than the active service — scheduling Orca-only restart"
+  fi
+fi
+
+mapfile -t orca_restart_units < <(orca_restart_plan \
+  "$xvfb_changed" "$xvfb_active" "$socket_ready" \
+  "$orca_changed" "$binary_changed" "$stale_apprun" "$orca_active")
+if [ "${#orca_restart_units[@]}" -gt 0 ]; then
+  for unit in "${orca_restart_units[@]}"; do
+    airlock_run systemctl --user restart "$unit"
+  done
 else
-  log "orca unchanged and active — not restarting (preserves the live session)"
+  log "orca units unchanged and healthy — not restarting (preserves the live session)"
+fi
+
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  # Reconcile old scopes even on an unchanged install. Unknown evidence is kept;
+  # only a scope conclusively lacking a live --serve process is stopped.
+  reconcile_orca_scopes
+  warn_orca_linger "$(id -un)"
 fi
 
 # --- 4. nft: restrict the backend to loopback callers (orca binds 0.0.0.0) ---
@@ -306,11 +336,10 @@ if [ -f "$WEB_BUNDLE/web-index.html" ]; then
   # indistinguishable from "installed fine" — so a mismatch fails the install loudly.
   # (The entry-HTML comparison below is a cheap staleness check, not an integrity one.)
   BUNDLE_VERIFY="$HERE/bin/verify-web-bundle.sh"
-  if [ -x "$BUNDLE_VERIFY" ]; then
-    bash "$BUNDLE_VERIFY" --quiet || die "orca web-bundle does not match web-bundle/VERSION — refusing to serve it"
-  else
-    log "warning: $BUNDLE_VERIFY missing — serving the bundle unverified"
-  fi
+  [ -x "$BUNDLE_VERIFY" ] \
+    || die "orca web-bundle verifier missing or non-executable: $BUNDLE_VERIFY"
+  bash "$BUNDLE_VERIFY" --quiet \
+    || die "orca web-bundle does not match web-bundle/VERSION — refusing to serve it"
   ORCA_WEB_ENABLED=1
   if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
     log "[dry] install patched web client: $WEB_BUNDLE -> $ORCA_DIST_SERVE (sudo, a+rX)"
@@ -370,13 +399,19 @@ fi
 # $orca_redir map). Each added location carries its own owner guard (a per-location `if`
 # only covers its own location; emit_owner_gate guards only location /).
 frag="$CONFD/servers.d/orca.conf"
-install -d "$CONFD/servers.d"
-render_orca_nginx "$GATE_PORT" "$BACKEND_PORT" "$WEBROOT" "$ORCA_WEB_ENABLED" \
-  "$ORCA_DIST_SERVE" "$WIDGET_MENU_ATTRS" "$pairing_frag" > "$frag"
-# The fragment embeds the pairing blob (deviceToken) when captured -> lock to owner/root
-# (nginx master reads config as root). serve.log is already 0600 for the same reason.
-if [ -n "$pairing_frag" ]; then chmod 600 "$frag" 2>/dev/null || true; fi
-log "wrote nginx fragment: $frag"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
+  log "[dry] render nginx fragment: $frag"
+else
+  install -d "$CONFD/servers.d"
+  render_orca_nginx "$GATE_PORT" "$BACKEND_PORT" "$WEBROOT" "$ORCA_WEB_ENABLED" \
+    "$ORCA_DIST_SERVE" "$WIDGET_MENU_ATTRS" "$pairing_frag" > "$frag"
+  # The fragment embeds the pairing blob (deviceToken) when captured -> lock to
+  # owner/root (nginx master reads config as root). serve.log is already 0600.
+  if [ -n "$pairing_frag" ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
+    chmod 600 "$frag" 2>/dev/null || true
+  fi
+  log "wrote nginx fragment: $frag"
+fi
 
 # NOTE: smoke runs from the orchestrator AFTER nginx is rendered + reloaded
 # (the gate isn't live until then). See install/airlock-install.sh.

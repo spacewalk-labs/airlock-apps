@@ -25,19 +25,20 @@ Orca web client (MIT) plus local patches (also MIT); see repo-root `NOTICE`.
 
 ## Integrity: VERSION + verify-web-bundle.sh
 
-`VERSION` pins what this build *is*: the upstream AppImage version it pairs with, the entry
-asset name, the file count and a sha256 over the whole tree. A build carries no version
-string inside it, so without that file neither "is this stale?" nor "did this get corrupted
-in transit?" can be answered.
+`VERSION` pins what this build *is*: the clean maintainer-source commit, upstream AppImage
+version, entry asset name, file count and a sha256 over the whole tree. A build carries no
+version string inside it, so without those fields neither "is this stale?" nor "did this
+get corrupted in transit?" can be answered.
 
 `../bin/verify-web-bundle.sh` checks `dist/` against the pin, and `../install.sh` runs it
 before serving. This matters because of *how* a broken bundle fails: a partial clone or a
 truncated copy still serves 200s and then renders a blank page, so nothing looks wrong.
 Verifying up front turns that into a failed install.
 
-It does **not** rebuild — re-deriving the client needs the upstream source and toolchain,
-which this repo deliberately does not vendor. When you do re-derive `dist/`, regenerate
-every field in `VERSION` in the same commit; a stale pin is worse than no pin.
+It does **not** rebuild. `../bin/refresh-web-bundle.sh` consumes a clean, separately
+maintained source checkout's built `dist/`, applies `public-scrub.json`, regenerates every
+pin, runs this verifier, then atomically swaps the public bundle. Missing/non-executable
+verification and any incomplete refresh fail closed.
 
 ## Provenance / PII
 
@@ -51,22 +52,17 @@ Airlock/operator PII.
 
 ## Refreshing the bundle
 
-The dist here is a static snapshot. To refresh it (new upstream pin or new patch):
+The dist here is a static snapshot. Build the separately maintained source checkout, make
+sure it is clean, then run:
 
-1. Produce a fresh built `dist/` from the (separately maintained) patched Orca web
-   client — `web-index.html` + `assets/` only.
-2. Replace `dist/` here with it.
-3. **Re-run the PII scrub** — the built bundle bakes in our patches' UI strings, which
-   were authored in a non-English language and reference internal names. Grep the fresh
-   `dist/` for internal identifiers (your organization name, dev-host names, internal
-   repo/script names) and translate any of our patch strings still in the original
-   language to English. The set of terms + the exact old→new string map is recorded in
-   this directory's git history (the commit that first vendored the bundle). Only our
-   patch strings are scrubbed — upstream's own i18n locales are left intact.
-   The durable fix is to English-ize those strings in the patches upstream and rebuild;
-   scrubbing the built dist is the fallback when only the build is at hand.
-4. Confirm `web-index.html` still ends with `</body>` (the return-widget `sub_filter`
-   injection anchors on it) and still references its assets by their (new) hashed names.
+```bash
+apps/orca/bin/refresh-web-bundle.sh \
+  --source /path/to/orca-web --appimage-version 1.4.139
+```
+
+The command refuses a dirty/non-git source, symlinked or incomplete dist, incomplete HTML
+body, ambiguous/missing hashed entry asset, residual scrub source, denied internal/PII
+terms, or mismatched pins. It keeps the prior public bundle intact on every failure.
 
 ## Not wired in v1
 
