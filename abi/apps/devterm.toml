@@ -10,4 +10,4 @@ paths = [
   "~/.config/airlock-devterm/tabs.json",
   "~/.local/state/airlock/devterm/codex-usage.json",
 ]
-capabilities = ["plaintext-redirect"]
+capabilities = []

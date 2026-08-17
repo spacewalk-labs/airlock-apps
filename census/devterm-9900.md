@@ -1,17 +1,18 @@
 # Bounded census — configured `http:9900` (devterm)
 
-This is the configured-consumer half of todo ⑧. It does **not** decide
-keep / migrate / retire.
+This records the pre-retirement evidence and the selected transition order for
+todo ⑧. The current package is HTTPS-only; the rows below describe the historical
+configured surface at the fixed census point.
 
-## Configured in this tree
+## Configured at the fixed census point
 
 | Source | What it says |
 |---|---|
-| `apps/devterm/airlock-app.toml` `[config.defaults] public_port` | `9900` |
-| same file `[plaintext_redirect]` | `public_port -> redirect_port` |
-| `apps/devterm/README.md` | plaintext port 301s to HTTPS |
+| historical `apps/devterm/airlock-app.toml` `[config.defaults] public_port` | `9900` |
+| historical `[plaintext_redirect]` | `public_port -> redirect_port` |
+| selected package state | no plaintext config, renderer, smoke assertion, or lifecycle claim |
 
-No other shipped app declares `public_port = 9900`. A colour literal
+At that point no other shipped app declared `public_port = 9900`. A colour literal
 `#990000` in `apps/devterm/web/app.js` is not a listener.
 
 ## Live boxes
@@ -25,9 +26,17 @@ topology nodes, positively observed automated callers, responding endpoints,
 the configured same-origin browser surface, and the explicitly unknown
 human/browser-principal count.
 
-That mapping closes only the evidence half of `DT-R1`. It does not choose
-keep / migrate / retire; this card waits for the recorded owner decision before
-adding the selected route regression fixture.
+The owner decision recorded in taskboard opinion `0ff93d05` is `retire` and
+accepts the risk of uncounted callers. Closure must still follow this order:
+
+1. migrate the four confirmed consumers: central fleet collector, non-central
+   gate central-store reader, legacy dev-monitor IP fallback, and legacy hub IP
+   fallback;
+2. deploy the HTTPS-only package state and close plaintext `:9900`.
+
+This repository fixes the second step's desired state and regression. It does
+not claim that the four external consumers have already migrated or that live
+`:9900` has already closed.
 
 ## Visibility scan of the nine app trees
 

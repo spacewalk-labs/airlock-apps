@@ -1,6 +1,6 @@
 # Public app parity disposition register
 
-Status: 105 executable clusters decided; 3 clusters deliberately held
+Status: 106 executable clusters decided; 2 clusters deliberately held
 
 This register is the disposition layer over the exhaustive 108-cluster triage in
 [`../../census/parity-decision-triage.md`](../../census/parity-decision-triage.md).
@@ -95,6 +95,12 @@ disposition validator. Missing caller/Host fields remain `unknown`, never zero.
 | Paseo accepted hostnames | PA-C2 | keep | Keep exact FQDN, exact FQDN with HTTPS port, and localhost. Incoming Host was not logged, so this is a conservative no-widening choice rather than a zero-use claim. |
 | Publish source provenance | PB-A4 | keep | Preserve top-level external-symlink HTML publication compatibility; 13 active publications depend on it. Keep attachment symlink provenance rejected and the existing lexical path boundary intact. |
 
+## D — owner decisions
+
+| Cluster | Matrix IDs | Disposition | Destination contract |
+|---|---|---|---|
+| devterm plain-HTTP behavior | DT-R1 | retire | Remove `public_port`, `redirect_port`, `[plaintext_redirect]`, the loopback redirect renderer, and the `plaintext-redirect` lifecycle claim from the package. Deployment is ordered: migrate the four confirmed consumers first, then apply this HTTPS-only desired state and close `:9900`; uncounted callers are an accepted decision risk. |
+
 ## E — fixed-SHA exhaustive closure
 
 These 66 evidence-complete clusters were outside the original conservative A-D
@@ -171,12 +177,11 @@ candidate set. All can proceed without census, privilege promotion, or a person 
 
 ## Held decision work
 
-The held set is now three D clusters. All eight C measurements and their selected
-fixtures are bound above.
+The held set is now two D clusters. All eight C measurements and the selected
+DT-R1 fixture are bound above.
 
 | Bucket | Cluster | Matrix IDs | Disposition | Waiting for | Producer or decision owner |
 |---|---|---|---|---|---|
-| D | devterm plain-HTTP behavior | DT-R1 | hold | The dated live `:9900` mapping attached to the decision surface, followed by the already-scoped keep/migrate/retire decision. Only then can this card add the selected route fixture. | `FLEET_CENSUS_TARGET` supplies live evidence; the person owns the disposition; `PUBLIC_APP_PARITY` only consumes it. |
 | D | Orca rooted-artifact deactivation | OR-C4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
 | D | Orca rooted paths and serve tree | OR-S4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
 
@@ -199,6 +204,6 @@ task's approved output, not values that can be derived again from the census tab
 
 The positive control is the matrix itself: 134 distinct IDs. The triage partitions
 them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns all A, B, C,
-and E clusters and holds only D 3: 105 decided plus 3 held, covering 108 clusters and
+and E clusters plus one D decision, and holds only D 2: 106 decided plus 2 held, covering 108 clusters and
 all 134 matrix IDs exactly once. This is an exhaustive fixed-SHA claim, not a
 current-HEAD census; changes after the declared pair require a new delta.

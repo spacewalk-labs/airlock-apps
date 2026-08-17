@@ -43,8 +43,7 @@ capabilities = []         # elevated/restricted names; declaration only
 ```
 
 `capabilities` marks promotion *targets*. It does not promote. `orca`
-declares `rooted-artifact` and `system-unit`. `devterm` declares
-`plaintext-redirect`. The rest declare an empty list.
+declares `rooted-artifact` and `system-unit`. The rest declare an empty list.
 
 Campaign cutover requires RPO=0 for stateful apps. A declared but
 unimplemented migrator is still a complete ABI row; implementation belongs

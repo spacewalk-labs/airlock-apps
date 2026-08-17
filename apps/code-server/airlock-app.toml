@@ -117,9 +117,8 @@ serve_ports = ["https_port"]
 [serve.https]
 https_port = "gate_port"
 
-# From hub/index.html's APPS table (code-server row). code-server has no
-# public_port/redirect_port at all (https only), so unlike devterm there is
-# no [plaintext_redirect] here.
+# From hub/index.html's APPS table (code-server row). The app is HTTPS-only:
+# it has no public_port/redirect_port or [plaintext_redirect].
 [tile]
 label = "code-server"
 sub = "browser IDE"

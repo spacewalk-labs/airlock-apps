@@ -114,9 +114,8 @@ https_port = "gate_port"
 
 # From hub/index.html's APPS table (paseo row), image moved in-app (was
 # hub/assets/paseo.png — repo-root NOTICE updated to the new path) and
-# staged by the platform like every other declared tile icon (F4). paseo
-# has no public_port at all (https only), so unlike devterm there is no
-# [plaintext_redirect] here.
+# staged by the platform like every other declared tile icon (F4). Paseo is
+# HTTPS-only: it has no public_port or [plaintext_redirect].
 [tile]
 label = "Paseo"
 sub = "agent orchestration"

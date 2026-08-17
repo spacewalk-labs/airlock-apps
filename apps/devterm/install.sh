@@ -30,8 +30,6 @@ airlock_load devterm
 TTYD_PORT="${AIRLOCK_DEVTERM_TTYD_PORT:?}"
 BACKEND_PORT="${AIRLOCK_DEVTERM_BACKEND_PORT:?}"
 GATE_PORT="${AIRLOCK_DEVTERM_GATE_PORT:?}"
-HTTPS_PORT="${AIRLOCK_DEVTERM_HTTPS_PORT:?}"
-REDIRECT_PORT="${AIRLOCK_DEVTERM_REDIRECT_PORT:?}"
 CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 TTYD_BIN="${TTYD_BIN:-$HOME/.local/bin/ttyd}"
 DEVTERM_LANG="${AIRLOCK_DEVTERM_LANG:-C.UTF-8}"
@@ -81,21 +79,6 @@ if app_enabled markwand && [ -n "$CODE_ROOT" ]; then MARKWAND=true; fi
 ORCA_SHIM=""
 if [ -n "$ORCA_SHIM_CFG" ]; then ORCA_SHIM="$ORCA_SHIM_CFG"
 elif app_enabled orca; then ORCA_SHIM="~/.config/orca/linux-orca-cli-shim/orca"; fi  # gate expanduser()s the ~
-# Canonical https origin for the plaintext-port redirect. The Tailscale cert is
-# issued for the FQDN only, so the short tailnet hostname must not be the target.
-# Resolve it live whenever tailscale answers — including under AIRLOCK_DRY_RUN,
-# since the nginx fragment is written unconditionally and a placeholder would
-# leave a broken redirect behind. ts_fqdn die()s (exit) when it cannot measure,
-# which kills the substitution subshell — so catch that on the assignment.
-FQDN="${AIRLOCK_TS_FQDN:-}"
-[ -n "$FQDN" ] || FQDN="$(ts_fqdn 2>/dev/null)" || FQDN=""
-# No short-hostname fallback — that name has no cert, so redirecting to it just
-# moves the failure. Refuse rather than write a broken redirect target.
-[ -n "$FQDN" ] || die "could not determine the tailnet FQDN for devterm's \
-plaintext->https redirect. Is tailscaled up? For an offline render, set \
-AIRLOCK_TS_FQDN=<box>.<tailnet>.ts.net."
-CANON="https://${FQDN}:${HTTPS_PORT}"
-
 # --- 1. provision ttyd (sha256-pinned) ---
 provision_ttyd() {
   [ -x "$TTYD_BIN" ] && { log "ttyd present: $TTYD_BIN"; return; }
@@ -267,21 +250,15 @@ fi
 # Written unconditionally: it is config the renderer includes, not a system mutation.
 frag="$CONFD/servers.d/devterm.conf"
 install -d "$CONFD/servers.d"
-render_devterm_nginx "$GATE_PORT" "$BACKEND_PORT" "$REDIRECT_PORT" "$CANON" > "$frag"
+render_devterm_nginx "$GATE_PORT" "$BACKEND_PORT" > "$frag"
 log "wrote nginx fragment: $frag"
 
 # --- 6. tailscale serve: HTTPS carries devterm ---
-# HTTPS gives a secure context (clipboard, OSC52). Needs the FQDN cert Tailscale
-# issues — which is also why the redirect targets the FQDN and not the short name.
+# HTTPS gives a secure context (clipboard, OSC52) using Tailscale's FQDN cert.
 # The platform renders this now (manifest [serve.https]; child-4 P2b STEP 0 —
 # install/lib.sh's airlock_render_serve_https, called from
 # install/airlock-install.sh right after this script returns) — byte-identical
 # to the direct call this used to make (install/test-serve-https-parity.sh
 # proved the two productions equal before this line was removed).
-# The PLAINTEXT port (public_port -> redirect_port) is wired by the orchestrator
-# AFTER nginx reloads: repointing it here would break the plaintext port for the rest of
-# the run (nginx is not serving $REDIRECT_PORT yet), and leave it broken for good if
-# a later step fails. See install/airlock-install.sh step 6.
-
 # NOTE: smoke runs from the orchestrator AFTER nginx is rendered + reloaded.
 log "devterm installed (owner: ${AIRLOCK_OWNER}; accounts=${ACCOUNTS}, markwand=${MARKWAND}, orca=$([ -n "$ORCA_SHIM" ] && echo true || echo false))"
