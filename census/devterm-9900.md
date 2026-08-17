@@ -1,7 +1,8 @@
 # Bounded census — configured `http:9900` (devterm)
 
-This is the configured-consumer half of todo ⑧. It does **not** decide
-keep / migrate / retire.
+Decision (2026-08-17, board `0ff93d05`): **retire**.
+Plaintext 9900 is closed after the four known consumers move.
+Uncounted users are accepted. Live close is not this file.
 
 ## Configured in this tree
 

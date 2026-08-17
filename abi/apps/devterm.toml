@@ -9,4 +9,4 @@ rpo = "0"
 paths = [
   "~/.config/airlock-devterm/tabs.json",
 ]
-capabilities = ["plaintext-redirect"]
+capabilities = []
