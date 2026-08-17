@@ -7,6 +7,8 @@ from collections import Counter
 import hashlib
 from pathlib import Path
 import re
+import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,10 +16,10 @@ TRIAGE = ROOT / "census" / "parity-decision-triage.md"
 DISPOSITIONS = ROOT / "docs" / "parity" / "dispositions.md"
 MATRIX = ROOT / "census" / "parity-matrix.md"
 EXPECTED_BUCKETS = Counter({"A": 18, "B": 13, "C": 8, "D": 3, "E": 66})
-EXPECTED_DISPOSITIONS = Counter({"keep": 58, "migrate": 36, "retire": 3, "hold": 11})
+EXPECTED_DISPOSITIONS = Counter({"keep": 63, "migrate": 39, "retire": 3, "hold": 3})
 EXPECTED_CLUSTER_COUNT = 108
 EXPECTED_ID_COUNT = 134
-EXPECTED_STATUS = "Status: 97 executable clusters decided; 11 clusters deliberately held"
+EXPECTED_STATUS = "Status: 105 executable clusters decided; 3 clusters deliberately held"
 EXPECTED_TRIAGE_SHA256 = "6b3499bd292f02d25dff0562ddada6a3fe13689dc46aac043a6dafa8c249e625"
 EXPECTED_CLUSTER_DISPOSITIONS = {
     ("DT-C4",): "migrate",
@@ -51,14 +53,14 @@ EXPECTED_CLUSTER_DISPOSITIONS = {
     ("PB-U5",): "keep",
     ("PB-S2",): "migrate",
     ("PB-S3",): "keep",
-    ("DT-A1",): "hold",
-    ("MW-R2",): "hold",
-    ("MW-S2",): "hold",
-    ("PA-N3",): "hold",
-    ("PA-N5",): "hold",
-    ("PA-N6",): "hold",
-    ("PA-C2",): "hold",
-    ("PB-A4",): "hold",
+    ("DT-A1",): "keep",
+    ("MW-R2",): "migrate",
+    ("MW-S2",): "migrate",
+    ("PA-N3",): "migrate",
+    ("PA-N5",): "keep",
+    ("PA-N6",): "keep",
+    ("PA-C2",): "keep",
+    ("PB-A4",): "keep",
     ("DT-R1",): "hold",
     ("OR-C4",): "hold",
     ("OR-S4",): "hold",
@@ -173,6 +175,8 @@ def read_dispositions() -> dict[tuple[str, ...], tuple[str, str, str]]:
             section = "A"
         elif line.startswith("## B "):
             section = "B"
+        elif line.startswith("## C "):
+            section = "C"
         elif line.startswith("## E "):
             section = "E"
         elif line.startswith("## Held "):
@@ -224,6 +228,9 @@ def triage_digest(triage: dict[tuple[str, ...], tuple[str, str]]) -> str:
 
 
 def main() -> None:
+    subprocess.run(
+        [sys.executable, ROOT / "test" / "parity-c-measurement.py"], check=True
+    )
     triage = read_triage()
     dispositions = read_dispositions()
     if triage.keys() != dispositions.keys():
@@ -273,7 +280,7 @@ def main() -> None:
             raise SystemExit(f"cluster drift for {key}: {cluster!r} != {triage_cluster!r}")
         if bucket != triage_bucket:
             raise SystemExit(f"bucket drift for {key}: {bucket} != {triage_bucket}")
-        allowed = {"hold"} if bucket in {"C", "D"} else {"keep", "migrate", "retire"}
+        allowed = {"hold"} if bucket == "D" else {"keep", "migrate", "retire"}
         if disposition not in allowed:
             raise SystemExit(f"invalid disposition for {key}: {bucket}/{disposition}")
         unknown = set(key) - known_matrix_ids

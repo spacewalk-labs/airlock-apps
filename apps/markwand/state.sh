@@ -23,18 +23,20 @@ _markwand_state_dir_safe() {
   case "$state_real/" in "$home_real"/*) return 0 ;; *) return 1 ;; esac
 }
 
-# reconcile_markwand_home_aliases CODE_ROOT CSV STATE_FILE
+# reconcile_markwand_home_aliases CODE_ROOT CSV STATE_FILE [SOURCE_PREFIX]
 #
 # STATE_FILE is the ownership ledger. A pre-existing path is never adopted, and
 # an owned link is removed/replaced only while it still points to the exact
-# top-level $HOME directory recorded by its name. This keeps unrelated files and
-# user-retargeted symlinks out of the reconciliation boundary.
+# top-level $HOME directory recorded by its name. SOURCE_PREFIX is either empty
+# (ordinary aliases) or `.` (the separately configured claude/codex aliases).
+# This keeps unrelated files and user-retargeted symlinks out of the boundary.
 reconcile_markwand_home_aliases() {
-  local code_root="$1" csv="$2" state_file="$3"
+  local code_root="$1" csv="$2" state_file="$3" source_prefix="${4:-}"
   local state_dir name source target item tmp
   local -a parts=()
   local -A wanted=() previous=() owned=()
 
+  case "$source_prefix" in ''|.) ;; *) log "invalid Markwand alias source prefix"; return 1 ;; esac
   IFS=',' read -r -a parts <<<"$csv"
   for item in "${parts[@]}"; do
     name="$(_markwand_trim "$item")"
@@ -91,10 +93,10 @@ reconcile_markwand_home_aliases() {
   # link still has the exact target Markwand created.
   for name in "${!previous[@]}"; do
     [ -z "${wanted[$name]:-}" ] || continue
-    source="$HOME/$name"
+    source="$HOME/${source_prefix}${name}"
     target="$code_root/$name"
     if [ -L "$target" ] && [ "$(readlink -- "$target")" = "$source" ]; then
-      rm -- "$target"
+      rm -- "$target" || return 1
       log "removed Markwand home alias: $target"
     elif [ -e "$target" ] || [ -L "$target" ]; then
       log "preserving changed Markwand alias target: $target"
@@ -102,7 +104,7 @@ reconcile_markwand_home_aliases() {
   done
 
   for name in "${!wanted[@]}"; do
-    source="$HOME/$name"
+    source="$HOME/${source_prefix}${name}"
     target="$code_root/$name"
     if [ "$source" = "$code_root" ]; then
       log "skipping recursive Markwand home alias: $name"
@@ -111,7 +113,7 @@ reconcile_markwand_home_aliases() {
     if [ ! -d "$source" ] || [ -L "$source" ]; then
       if [ -n "${previous[$name]:-}" ] && [ -L "$target" ] \
           && [ "$(readlink -- "$target")" = "$source" ]; then
-        rm -- "$target"
+        rm -- "$target" || return 1
         log "removed stale Markwand home alias: $target"
       else
         log "skipping missing or symlinked Markwand home directory: $source"
@@ -123,14 +125,14 @@ reconcile_markwand_home_aliases() {
       if [ -L "$target" ] && [ "$(readlink -- "$target")" = "$source" ]; then
         owned["$name"]=1
       elif [ ! -e "$target" ] && [ ! -L "$target" ]; then
-        ln -s -- "$source" "$target"
+        ln -s -- "$source" "$target" || return 1
         owned["$name"]=1
         log "restored Markwand home alias: $target -> $source"
       else
         log "preserving changed Markwand alias target: $target"
       fi
     elif [ ! -e "$target" ] && [ ! -L "$target" ]; then
-      ln -s -- "$source" "$target"
+      ln -s -- "$source" "$target" || return 1
       owned["$name"]=1
       log "created Markwand home alias: $target -> $source"
     else
@@ -140,7 +142,9 @@ reconcile_markwand_home_aliases() {
   done
 
   if [ "${#owned[@]}" -eq 0 ]; then
-    [ ! -f "$state_file" ] || rm -- "$state_file"
+    if [ -f "$state_file" ]; then
+      rm -- "$state_file" || return 1
+    fi
     return 0
   fi
   tmp="$(mktemp "$state_dir/.markwand-home-aliases.tmp.XXXXXX")" || return 1
@@ -148,10 +152,43 @@ reconcile_markwand_home_aliases() {
     rm -f -- "$tmp"
     return 1
   fi
-  chmod 600 "$tmp"
+  if ! chmod 600 "$tmp"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
   if ! mv -f -- "$tmp" "$state_file"; then
     rm -f -- "$tmp"
     return 1
+  fi
+}
+
+# reconcile_markwand_alias_sets CODE_ROOT HOME_CSV AGENT_CSV HOME_STATE AGENT_STATE
+#
+# The two configurations share one target namespace. Reconcile the ledger that
+# is giving up `claude`/`codex` first, then let the gaining ledger create it.
+# Reject an ambiguous configuration before either ledger is touched.
+reconcile_markwand_alias_sets() {
+  local code_root="$1" home_csv="$2" agent_csv="$3"
+  local home_state="$4" agent_state="$5" item name
+  local -a home_parts=()
+
+  case "$agent_csv" in ''|'claude,codex') ;; *) log "invalid Markwand agent alias set"; return 1 ;; esac
+  if [ -n "$agent_csv" ]; then
+    IFS=',' read -r -a home_parts <<<"$home_csv"
+    for item in "${home_parts[@]}"; do
+      name="$(_markwand_trim "$item")"
+      case "$name" in
+        claude|codex)
+          log "Markwand alias '$name' is ambiguous: remove it from home_aliases when agent_config_aliases=true"
+          return 1
+          ;;
+      esac
+    done
+    reconcile_markwand_home_aliases "$code_root" "$home_csv" "$home_state" || return 1
+    reconcile_markwand_home_aliases "$code_root" "$agent_csv" "$agent_state" "." || return 1
+  else
+    reconcile_markwand_home_aliases "$code_root" "" "$agent_state" "." || return 1
+    reconcile_markwand_home_aliases "$code_root" "$home_csv" "$home_state" || return 1
   fi
 }
 

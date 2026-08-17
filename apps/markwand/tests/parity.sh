@@ -15,6 +15,8 @@ grep -Fq 'location ~ ^/edit/(.+)$' <<<"$rendered"
 grep -Fq 'return 302 /markwand/edit/$1$is_args$args;' <<<"$rendered"
 grep -Fq 'proxy_read_timeout 86400s;' <<<"$rendered"
 grep -Fq '<script src="/airlock-return.js" data-mode="corner" defer></script>' <<<"$rendered"
+grep -Fq 'location = /markwand/split {' <<<"$rendered"
+[ "$(grep -Fc 'try_files /__mw/markwand-split.html =404;' <<<"$rendered")" -eq 2 ]
 
 APP="$APP" python3 - <<'PY'
 import json
@@ -44,6 +46,7 @@ assert 'enable-linger' not in install
 
 package = tomllib.loads((app / 'airlock-app.toml').read_text())
 assert package['config']['defaults']['home_aliases'] == ''
+assert package['config']['defaults']['agent_config_aliases'] is False
 assert package['artifacts']['units'] == [
     'airlock-markserv.service', 'airlock-filebrowser.service']
 render = (app / 'render.sh').read_text()
@@ -124,6 +127,47 @@ PY
   if reconcile_markwand_home_aliases "$tmp/code" 'safe' "$state"; then exit 1; fi
   [ ! -e "$tmp/code/safe" ]
   [ -z "$(find "$outside_state" -mindepth 1 -maxdepth 1 -print -quit)" ]
+
+  # MW-S2 measured compatibility is explicit, exact, and separately owned.
+  rm -rf "$HOME/.config"
+  mkdir -p "$HOME/.config" "$HOME/.claude" "$HOME/.codex" "$HOME/claude"
+  home_state="$HOME/.config/airlock/markwand-home-aliases"
+  agent_state="$HOME/.config/airlock/markwand-agent-config-aliases"
+  reconcile_markwand_alias_sets "$tmp/code" '' 'claude,codex' "$home_state" "$agent_state"
+  [ "$(readlink "$tmp/code/claude")" = "$HOME/.claude" ]
+  [ "$(readlink "$tmp/code/codex")" = "$HOME/.codex" ]
+  [ "$(cat "$agent_state")" = $'claude\ncodex' ]
+
+  # Both transition directions converge in one call; an ambiguous simultaneous
+  # claim is rejected before either ledger or target changes.
+  reconcile_markwand_alias_sets "$tmp/code" 'claude' '' "$home_state" "$agent_state"
+  [ "$(readlink "$tmp/code/claude")" = "$HOME/claude" ]
+  [ ! -e "$tmp/code/codex" ] && [ ! -L "$tmp/code/codex" ]
+  [ "$(cat "$home_state")" = claude ]
+  [ ! -e "$agent_state" ]
+  reconcile_markwand_alias_sets "$tmp/code" '' 'claude,codex' "$home_state" "$agent_state"
+  [ "$(readlink "$tmp/code/claude")" = "$HOME/.claude" ]
+  [ "$(readlink "$tmp/code/codex")" = "$HOME/.codex" ]
+  before="$(find "$tmp/code" "$HOME/.config/airlock" -maxdepth 1 -printf '%p %l\n' | sort)"
+  if reconcile_markwand_alias_sets "$tmp/code" 'claude' 'claude,codex' "$home_state" "$agent_state"; then exit 1; fi
+  [ "$(find "$tmp/code" "$HOME/.config/airlock" -maxdepth 1 -printf '%p %l\n' | sort)" = "$before" ]
+
+  reconcile_markwand_alias_sets "$tmp/code" '' '' "$home_state" "$agent_state"
+  [ ! -e "$tmp/code/claude" ] && [ ! -L "$tmp/code/claude" ]
+  [ ! -e "$tmp/code/codex" ] && [ ! -L "$tmp/code/codex" ]
+  [ ! -e "$agent_state" ]
+
+  # Wrapper callers test its status, so helper mutations must propagate errors
+  # explicitly even when Bash disables errexit inside an OR-list function call.
+  mkdir -p "$tmp/fail-bin"
+  cat >"$tmp/fail-bin/ln" <<'SH'
+#!/usr/bin/env bash
+exit 73
+SH
+  chmod +x "$tmp/fail-bin/ln"
+  if PATH="$tmp/fail-bin:$PATH" reconcile_markwand_alias_sets \
+      "$tmp/code" '' 'claude,codex' "$home_state" "$agent_state"; then exit 1; fi
+  [ ! -e "$agent_state" ]
 )
 
 # Backup fixtures prove same-directory atomic publication, a hard retention
@@ -181,4 +225,4 @@ SH
   [[ "$messages" == *'WARN: linger is not enabled'* ]]
 )
 
-echo 'ok: Markwand parity (MW-R1/U1/N1/N2/N3/C1/C2/C3/S1/S3 + retained R3/U2)'
+echo 'ok: Markwand parity (MW-R1/R2/U1/N1/N2/N3/C1/C2/C3/S1/S2/S3 + retained R3/U2)'

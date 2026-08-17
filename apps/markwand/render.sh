@@ -93,6 +93,14 @@ location = /markwand/ {
     add_header Cache-Control "no-cache, no-store, must-revalidate" always;
 }
 
+# Measured compatibility alias. The bare route is intentionally not canonical;
+# it renders the same split viewer without copying or redirecting user state.
+location = /markwand/split {
+    try_files /__mw/markwand-split.html =404;
+    default_type text/html;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+}
+
 # markserv viewer — strip the /markwand/ prefix, inject tokens + enhance + edit button
 location /markwand/ {
     rewrite ^/markwand/(.*)$ /$1 break;

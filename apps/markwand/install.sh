@@ -52,6 +52,12 @@ airlock_load markwand
 MS_PORT="${AIRLOCK_MARKWAND_MARKSERV_PORT:?}"
 FB_PORT="${AIRLOCK_MARKWAND_FILEBROWSER_PORT:?}"
 HOME_ALIASES="${AIRLOCK_MARKWAND_HOME_ALIASES:-}"
+AGENT_CONFIG_ALIASES="${AIRLOCK_MARKWAND_AGENT_CONFIG_ALIASES:-false}"
+case "$AGENT_CONFIG_ALIASES" in
+  true) AGENT_ALIAS_NAMES="claude,codex" ;;
+  false) AGENT_ALIAS_NAMES="" ;;
+  *) die "AIRLOCK_MARKWAND_AGENT_CONFIG_ALIASES must be true or false" ;;
+esac
 # No fallback: this directory is served read+write to the owner AND every
 # collaborator, so it is stated in airlock.toml or nothing is installed. `validate`
 # rejects it first; this is the second line of defence for a direct run of this
@@ -102,13 +108,16 @@ MS_UNIT_PATH="${MS_UNIT_PATH}:/usr/local/bin:/usr/bin:/bin"
 airlock_run mkdir -p "$CODE_ROOT"
 
 # An empty list is intentionally a no-op except for reclaiming aliases recorded
-# by an earlier Markwand install. Hidden directories are rejected by the state
-# helper, so MW-S2's .claude/.codex decision remains untouched.
+# by an earlier Markwand install. Agent-config aliases use a separate ledger and
+# explicit boolean because they expose credentials and session history.
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] reconcile Markwand home aliases under $CODE_ROOT: ${HOME_ALIASES:-<none>}"
+  log "[dry] reconcile Markwand agent-config aliases under $CODE_ROOT: ${AGENT_ALIAS_NAMES:-<none>}"
 else
-  reconcile_markwand_home_aliases "$CODE_ROOT" "$HOME_ALIASES" \
-    "$HOME/.config/airlock/markwand-home-aliases"
+  reconcile_markwand_alias_sets "$CODE_ROOT" "$HOME_ALIASES" "$AGENT_ALIAS_NAMES" \
+    "$HOME/.config/airlock/markwand-home-aliases" \
+    "$HOME/.config/airlock/markwand-agent-config-aliases" \
+    || die "Markwand alias reconciliation failed"
 fi
 
 # --- 1. provision markserv (npm, no sudo — local prefix) ---

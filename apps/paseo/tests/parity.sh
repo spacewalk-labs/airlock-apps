@@ -19,10 +19,17 @@ grep -Fxq 'After=network.target' <<<"$unit"
 ! grep -Fxq 'After=default.target' <<<"$unit"
 grep -Fxq 'ExecStartPre=-/usr/bin/python3 /app/paseo-clear-stale-pid.py /fixture/home/.paseo/paseo.pid' <<<"$unit"
 grep -Fxq 'Environment=PASEO_HOSTNAMES=box.tail.test,box.tail.test:8447,localhost' <<<"$unit"
-grep -Fxq 'MemoryMax=28G' <<<"$unit"       # PA-N5 hold remains public policy
-grep -Fxq 'MemoryHigh=24G' <<<"$unit"      # PA-N5 hold remains public policy
-grep -Fxq 'TasksMax=infinity' <<<"$unit"   # PA-N6 hold remains public policy
-grep -Fxq 'NoNewPrivileges=yes' <<<"$unit" # PA-N3 hold remains public policy
+grep -Fxq 'MemoryMax=28G' <<<"$unit"       # PA-N5 selected dynamic policy
+grep -Fxq 'MemoryHigh=24G' <<<"$unit"      # PA-N5 selected dynamic policy
+grep -Fxq 'TasksMax=infinity' <<<"$unit"   # PA-N6 selected outer-slice policy
+grep -Fxq 'NoNewPrivileges=yes' <<<"$unit" # PA-N3 hardened default
+
+sudo_unit="$(bash -c 'source "$1/render.sh"; render_paseo_unit \
+  "/future/npm:/future/claude:/usr/bin" "/fixture/home" "box.tail.test" 8447 \
+  "/future/npm/paseo" 6767 "/usr/bin/python3" "/app/paseo-clear-stale-pid.py" \
+  "28G" "24G" "infinity" "NoNewPrivileges=no"' _ "$APP")"
+grep -Fxq 'NoNewPrivileges=no' <<<"$sudo_unit"
+! grep -Fxq 'NoNewPrivileges=yes' <<<"$sudo_unit"
 
 nginx="$(bash -c 'source "$1/render.sh"; render_paseo_nginx \
   18822 6767 box.tail.test 8447 /opt/airlock-return.js "" false 6768 ""' _ "$APP")"
@@ -54,6 +61,9 @@ reload = 'airlock_run systemctl --user daemon-reload'
 decide = 'paseo_should_restart "$need_restart" "$prior_daemon_reload" "$unit_active"'
 assert install.index(observe) < install.index(reload) < install.index(decide)
 assert 'enable-linger' not in install
+assert 'DESCENDANT_SUDO="${AIRLOCK_PASEO_DESCENDANT_SUDO:-false}"' in install
+assert 'if [ "$DESCENDANT_SUDO" = true ]; then' in install
+assert 'paseo_memory_cap_bytes' in install
 assert '20) die "Codex ambient-key anchors missing or ambiguous' in install
 assert 'Codex provider not found ($CODEX_AGENT_JS) — cannot enforce' in install
 
@@ -70,10 +80,11 @@ assert 'x86_64' not in install and 'uname -m' not in install
 defaults = manifest["config"]["defaults"]
 assert defaults == {
     "https_port": 8447, "gate_port": 18822, "backend_port": 6767,
-    "browse": False, "browse_ws_port": 6768, "version": ""}
+    "browse": False, "browse_ws_port": 6768, "descendant_sudo": False,
+    "version": ""}
 assert manifest["audience"] == {"supported": ["owner"], "default": "owner"}
 
-# PA-C2 remains on hold: only exact fqdn, fqdn:port, and localhost are accepted.
+# PA-C2 selected no-widening contract: exact fqdn, fqdn:port, and localhost.
 assert 'Environment=PASEO_HOSTNAMES=${FQDN},${FQDN}:${HTTPS_PORT},localhost' in render
 ids = {entry["id"] for entry in anchors["patches"]}
 assert "codex-strip-ambient-openai-key" in ids
@@ -104,6 +115,15 @@ SH
   log() { messages="${messages}${messages:+|}$*"; }
   # shellcheck source=/dev/null
   source "$APP/state.sh"
+
+  # PA-N5: finite cgroup cap wins; bare metal may use MemTotal; an unbounded
+  # container fails until the operator supplies an explicit cap.
+  [ "$(paseo_memory_cap_bytes '' 34359738368 137438953472 1)" = 34359738368 ]
+  [ "$(paseo_memory_cap_bytes 137438953472 34359738368 137438953472 1)" = 34359738368 ]
+  [ "$(paseo_memory_cap_bytes '' max 137438953472 0)" = 137438953472 ]
+  if paseo_memory_cap_bytes '' max 137438953472 1 >/dev/null; then exit 1; fi
+  [ "$(paseo_memory_cap_bytes 25769803776 max 137438953472 1)" = 25769803776 ]
+  if paseo_memory_cap_bytes invalid max 137438953472 1 >/dev/null; then exit 1; fi
 
   PASEO_RELOAD_STATE=yes PATH="$tmp/bin:$PATH" paseo_unit_needs_daemon_reload airlock-paseo.service
   [ "$(cat "$PASEO_SYSTEMCTL_LOG")" = '--user show airlock-paseo.service -p NeedDaemonReload --value' ]
@@ -208,4 +228,4 @@ JS
   [ ! -e "$tmp/drift.js.paseo-new.mjs" ]
 )
 
-echo 'ok: Paseo parity (migrate PA-R2/N4/N7/C3/S3; holds N3/N5/N6/C2 unchanged; keep/retire preserved)'
+echo 'ok: Paseo parity (migrate PA-R2/N3/N4/N7/C3/S3; keep PA-N5/N6/C2 and prior contracts)'

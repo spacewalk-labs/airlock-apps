@@ -146,6 +146,43 @@ async def test_gate_routes(gate):
         assert isinstance(json.loads(body), dict)
 
 
+async def test_owner_only_status_routes(gate):
+    calls = []
+
+    def stub(name):
+        async def serve(*args):
+            calls.append(name)
+            await gate._send_json(args[-1], b"200 OK", {"route": name})
+        return serve
+
+    handlers = {
+        "/claude-status": "_serve_claude_status",
+        "/claude-usage": "_serve_claude_usage",
+        "/claude-usage-store": "_serve_usage_store",
+        "/codex-usage": "_serve_codex_usage",
+    }
+    originals = {name: getattr(gate, name) for name in handlers.values()}
+    try:
+        for route, name in handlers.items():
+            setattr(gate, name, stub(route))
+        for route in handlers:
+            writer = Writer()
+            await gate.handle(Reader(request("GET", route)), writer)
+            status, body = response(writer)
+            assert status == b"HTTP/1.1 200 OK" and json.loads(body)["route"] == route
+
+            before = list(calls)
+            writer = Writer()
+            await gate.handle(Reader(request("GET", route, "other@example.test")), writer)
+            status, _body = response(writer)
+            assert status == b"HTTP/1.1 403 Forbidden"
+            assert calls == before, (route, calls)
+    finally:
+        for name, original in originals.items():
+            setattr(gate, name, original)
+    assert calls == list(handlers)
+
+
 async def test_legacy_prefs(gate, home):
     legacy = home / ".config" / "devterm" / "tabs.json"
     canonical = home / ".config" / "airlock-devterm" / "tabs.json"
@@ -179,8 +216,9 @@ def main():
         home = Path(tmp)
         gate = load_gate(home)
         asyncio.run(test_gate_routes(gate))
+        asyncio.run(test_owner_only_status_routes(gate))
         asyncio.run(test_legacy_prefs(gate, home))
-    print("ok: devterm parity (DT-C4 DT-U2 DT-N1 DT-C2 DT-R2 DT-A2 DT-N2 DT-N3 DT-C1 DT-C3 DT-S1 DT-S2)")
+    print("ok: devterm parity (DT-C4 DT-U2 DT-N1 DT-C2 DT-R2 DT-A1 DT-A2 DT-N2 DT-N3 DT-C1 DT-C3 DT-S1 DT-S2)")
 
 
 if __name__ == "__main__":

@@ -189,7 +189,7 @@ def t_slug_abuse(tmp):
 
 # ---------------------------------------------------------------------- 3
 def t_symlinked_source(tmp):
-    print('\n[3] a symlinked source still publishes (the documented workflow)')
+    print('\n[3] PB-A4 keeps external-symlink HTML publication compatibility')
     share, pub, _s, env = make_dirs(tmp)
     m = load(env)
     real = os.path.join(tmp, 'elsewhere')
@@ -199,7 +199,7 @@ def t_symlinked_source(tmp):
         fh.write('<html><title>repo doc</title><body>x</body></html>')
     os.symlink(src, os.path.join(share, 'repo-doc.html'))
     ok, res = m.publish_public('repo-doc.html', 24, OWNER)
-    check('symlinked doc publishes', ok, str(res))
+    check('PB-A4 selected external-symlink doc publishes', ok, str(res))
     check('content came from the link target', ok and 'repo doc' in
           open(os.path.join(pub, res['slug'], 'index.html')).read())
 
@@ -735,7 +735,7 @@ def t_parity_migrations(tmp):
     os.symlink(outside, os.path.join(share, 'outside.pdf'))
     page(share, 'symlink-attachment.html', '<a href="outside.pdf">outside</a>')
     ok_symlink, symlink_error = m.plan_bundle('symlink-attachment.html', owner=OWNER)
-    check('PB-A4 hold rejects symlink attachment provenance',
+    check('PB-A4 keep does not widen attachment symlink provenance',
           not ok_symlink and 'symlink provenance' in str(symlink_error), str(symlink_error))
     check('attachment reader independently refuses a symlink',
           _raises(lambda: m._read_attachment('outside.pdf')))

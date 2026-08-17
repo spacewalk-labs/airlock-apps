@@ -6,8 +6,9 @@ id = "paseo"
 # Env-var names this installer READS from the environment but which are not
 # operator config. TASKS_MAX is a genuine knob, deliberately left here rather than
 # promoted: it is read as a raw string with its own default, and declaring it as a
-# config key would export it and change what the installer sees. MEM_CAP_BYTES is a
-# test seam the source marks as not a supported knob (install.sh:79-82).
+# config key would export it and change what the installer sees. MEM_CAP_BYTES is
+# an explicit cap for an otherwise unbounded container; tests
+# also use it to make the renderer independent of the runner's RAM.
 # ALLOW_UNBACKED_MEM is compared against the literal `1` (install.sh:105), so
 # declaring it as a bool would export "true" and silently stop matching.
 runtime_env = [
@@ -22,6 +23,7 @@ gate_port = 18822
 backend_port = 6767
 browse = false
 browse_ws_port = 6768
+descendant_sudo = false
 # empty = the installer's own pinned version wins. A value here OVERRIDES
 # that pin, so it must default to "" — a real version string would silently
 # freeze every box on this release.

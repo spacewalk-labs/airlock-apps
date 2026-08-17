@@ -1,6 +1,6 @@
 # Public app parity disposition register
 
-Status: 97 executable clusters decided; 11 clusters deliberately held
+Status: 105 executable clusters decided; 3 clusters deliberately held
 
 This register is the disposition layer over the exhaustive 108-cluster triage in
 [`../../census/parity-decision-triage.md`](../../census/parity-decision-triage.md).
@@ -77,6 +77,24 @@ step.
 | Publish upload filename normalization | PB-S2 | migrate | Preserve safe Unicode, including Hangul, for future uploads with explicit normalization and length bounds; do not rename stored files. |
 | Publish clipboard-image namespace | PB-S3 | keep | Keep `imageNNN` for new writes and extend sequence recognition to existing `이미지NNN` names during migration. Existing files are not renamed. |
 
+## C — measured decisions
+
+The private raw records remain in `TeamSPWK/swk-infra`; the public sanitized
+fixture is [`../../census/parity-c-measurement-20260817.json`](../../census/parity-c-measurement-20260817.json).
+Its exact evidence commit and L2 REFUTE certificate are executable inputs to the
+disposition validator. Missing caller/Host fields remain `unknown`, never zero.
+
+| Cluster | Matrix IDs | Disposition | Destination contract |
+|---|---|---|---|
+| devterm fleet usage visibility | DT-A1 | keep | Keep the four status endpoints owner-only. The retained request source had positive traffic controls but no caller-principal field, so there is no evidence to widen the audience. |
+| Markwand split route | MW-R2 | migrate | Add an exact `/markwand/split` compatibility route to the canonical split viewer; `/markwand/` remains canonical. The exact legacy route had 20 retained requests. |
+| Markwand hidden credential-directory aliases | MW-S2 | migrate | Add explicit opt-in, package-owned `claude -> ~/.claude` and `codex -> ~/.codex` aliases. Default remains off; the measurement found links on 5/5 and 4/5 boxes and 39 direct alias requests. |
+| Paseo descendant privilege | PA-N3 | migrate | Add an explicit descendant-sudo capability that renders `NoNewPrivileges=no` for this unit only. Default remains hardened; the positive failure/recovery record proves spawned-agent setuid dependence. |
+| Paseo memory limits | PA-N5 | keep | Keep box-derived `MemoryHigh`/`MemoryMax` for finite cgroup caps. An unbounded container must supply an explicit cap instead of inheriting shared-host `MemTotal`. |
+| Paseo task limit | PA-N6 | keep | Keep `TasksMax=infinity` as delegation to the enclosing user slice rather than pinning a box-specific finite guess. Current/peak/event measurements remain covered by the outer cap. |
+| Paseo accepted hostnames | PA-C2 | keep | Keep exact FQDN, exact FQDN with HTTPS port, and localhost. Incoming Host was not logged, so this is a conservative no-widening choice rather than a zero-use claim. |
+| Publish source provenance | PB-A4 | keep | Preserve top-level external-symlink HTML publication compatibility; 13 active publications depend on it. Keep attachment symlink provenance rejected and the existing lexical path boundary intact. |
+
 ## E — fixed-SHA exhaustive closure
 
 These 66 evidence-complete clusters were outside the original conservative A-D
@@ -151,21 +169,13 @@ candidate set. All can proceed without census, privilege promotion, or a person 
 | Publish share-root configuration | PB-C1 | keep | Keep configurable injected paths and avoid `~/public_html` defaults. |
 | Publish local state | PB-S1 | keep | Keep transactional local/gated content, ownership, expiry, credential, and recovery state. |
 
-## Held evidence and promotion work
+## Held decision work
 
-The held set is 11 clusters in the exhaustive register: eight C and three D.
-No code or regression fixture for these rows is authorized by this register.
+The held set is now three D clusters. All eight C measurements and their selected
+fixtures are bound above.
 
 | Bucket | Cluster | Matrix IDs | Disposition | Waiting for | Producer or decision owner |
 |---|---|---|---|---|---|
-| C | devterm fleet usage visibility | DT-A1 | hold | Strict accepted caller/access measurement for the four status endpoints. | `FLEET_CENSUS_TARGET`. |
-| C | Markwand split route | MW-R2 | hold | Five-box route request/access measurement for `/markwand/split`. | `FLEET_CENSUS_TARGET`. |
-| C | Markwand hidden credential-directory aliases | MW-S2 | hold | Installed-link and access/use measurement for the `.claude` and `.codex` aliases. | `FLEET_CENSUS_TARGET`. |
-| C | Paseo descendant privilege | PA-N3 | hold | Box/session evidence of spawned-agent setuid `sudo` dependence. | `FLEET_CENSUS_TARGET`. |
-| C | Paseo memory limits | PA-N5 | hold | Box memory plus observed Paseo working-set and pressure measurement. | `FLEET_CENSUS_TARGET`. |
-| C | Paseo task limit | PA-N6 | hold | Current and peak task-count measurement on the five boxes. | `FLEET_CENSUS_TARGET`. |
-| C | Paseo accepted hostnames | PA-C2 | hold | Gate/access evidence for tailnet-suffix hostname use. | `FLEET_CENSUS_TARGET`. |
-| C | Publish source provenance | PB-A4 | hold | Bounded scan of current publication sources and their symlink/provenance dependence. | `FLEET_CENSUS_TARGET`. |
 | D | devterm plain-HTTP behavior | DT-R1 | hold | The dated live `:9900` mapping attached to the decision surface, followed by the already-scoped keep/migrate/retire decision. Only then can this card add the selected route fixture. | `FLEET_CENSUS_TARGET` supplies live evidence; the person owns the disposition; `PUBLIC_APP_PARITY` only consumes it. |
 | D | Orca rooted-artifact deactivation | OR-C4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
 | D | Orca rooted paths and serve tree | OR-S4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
@@ -188,7 +198,7 @@ task's approved output, not values that can be derived again from the census tab
 ## Accounting boundary
 
 The positive control is the matrix itself: 134 distinct IDs. The triage partitions
-them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns all A, B, and
-E clusters and holds only C 8 plus D 3: 97 decided plus 11 held, covering 108 clusters
-and all 134 matrix IDs exactly once. This is an exhaustive fixed-SHA claim, not a
+them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns all A, B, C,
+and E clusters and holds only D 3: 105 decided plus 3 held, covering 108 clusters and
+all 134 matrix IDs exactly once. This is an exhaustive fixed-SHA claim, not a
 current-HEAD census; changes after the declared pair require a new delta.

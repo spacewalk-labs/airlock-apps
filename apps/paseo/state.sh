@@ -1,6 +1,31 @@
 #!/usr/bin/env bash
 # Small, sourceable state decisions used by install.sh and parity fixtures.
 
+# paseo_memory_cap_bytes OVERRIDE CGROUP_MAX MEMTOTAL_BYTES IS_CONTAINER
+#
+# Select the memory budget the unit may derive from. An unbounded container
+# cannot borrow shared-host MemTotal; it needs an explicit operator cap.
+paseo_memory_cap_bytes() {
+  local override="$1" cgroup_max="$2" memtotal_bytes="$3" is_container="$4"
+  case "$is_container" in 0|1) ;; *) return 1 ;; esac
+  if [ -n "$override" ]; then
+    case "$override" in *[!0-9]*|0) return 1 ;; esac
+  fi
+  case "$cgroup_max" in
+    ''|max)
+      if [ -n "$override" ]; then
+        printf '%s\n' "$override"
+        return 0
+      fi
+      [ "$is_container" = 0 ] || return 1
+      case "$memtotal_bytes" in ''|*[!0-9]*|0) return 1 ;; esac
+      printf '%s\n' "$memtotal_bytes"
+      ;;
+    *[!0-9]*|0) return 1 ;;
+    *) printf '%s\n' "$cgroup_max" ;;
+  esac
+}
+
 # A stale systemd manager view is evidence that a prior deployment stopped after
 # writing the unit but before completing daemon-reload/restart. Observe it before
 # this install runs daemon-reload, otherwise the evidence is erased.

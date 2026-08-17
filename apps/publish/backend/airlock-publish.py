@@ -754,8 +754,8 @@ def _collect_bundle_attachments(names):
             target_path = safe_resolve(target)
             if not target_path or not os.path.lexists(target_path):
                 raise BundleValidationError(f'attachment not found: {target}')
-            # PB-A4 remains held: a newly supported attachment must not widen
-            # provenance by following a share-root symlink to an unmeasured source.
+            # PB-A4 keeps the measured top-level HTML symlink workflow; that does
+            # not widen newly supported attachments to follow symlink sources.
             if os.path.islink(target_path):
                 raise BundleValidationError(
                     f'attachment symlink provenance is not approved: {target}')
