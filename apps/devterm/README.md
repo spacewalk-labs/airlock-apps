@@ -33,8 +33,8 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
 ## Config (`[apps.devterm]`)
 
 `https_port` (secure-context, clipboard) · `gate_port` (loopback nginx gate) ·
-`backend_port` (loopback devterm-gate) ·
-`ttyd_port` (loopback ttyd) · `font_size` · `lang`.
+`backend_port` (loopback devterm-gate) · `ttyd_port` (loopback ttyd) ·
+`font_size` · `lang`. D-DEVTERM-9900 retired the plaintext public port.
 
 ### Optional features (default off, degrade cleanly when their deps are absent)
 

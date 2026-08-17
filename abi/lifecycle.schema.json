@@ -27,7 +27,7 @@
     "capabilities": {
       "type": "array",
       "items": {
-        "enum": ["rooted-artifact", "system-unit", "plaintext-redirect"]
+        "enum": ["rooted-artifact", "system-unit"]
       },
       "uniqueItems": true
     }

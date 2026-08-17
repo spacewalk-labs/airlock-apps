@@ -15,7 +15,7 @@ REQUIRED = (
     "write_capture", "reverse", "rpo", "paths", "capabilities",
 )
 NONE_FIELDS = ("quiesce", "snapshot", "forward", "write_capture", "reverse")
-CAPABILITIES = ("rooted-artifact", "system-unit", "plaintext-redirect")
+CAPABILITIES = ("rooted-artifact", "system-unit")
 EXPECTED_CAPABILITIES = {
     "orca": ("rooted-artifact", "system-unit"),
 }
