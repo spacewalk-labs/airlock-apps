@@ -5,7 +5,7 @@
     "id": "public-app-split/v1",
     "core_contract": [1],
     "lifecycle_required_by": "airlock-apps-release-gate",
-    "digest": "ee089d4a0f4b0b144ad4c18207c427d41a1523baebdb650a5006ac5a60ecff13"
+    "digest": "701f4863a83d9a91b6239860676417df753c4c2986021bc0a84b1da9f46e8ed0"
   },
   "repository": {
     "planned_name": "airlock-apps",
@@ -19,7 +19,9 @@
       "D-REPO-NAME": "airlock-apps",
       "D-REPO-VISIBILITY": "public org public",
       "D-REPO-PROTECTION": "required-status-checks",
-      "board_comment": "f9b1d9d4"
+      "D-DEVTERM-9900": "retire",
+      "board_comment": "f9b1d9d4",
+      "devterm_9900_board_comment": "0ff93d05"
     }
   },
   "lock": {

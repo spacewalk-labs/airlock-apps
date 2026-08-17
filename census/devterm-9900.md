@@ -2,7 +2,9 @@
 
 This records the pre-retirement evidence and the selected transition order for
 todo ⑧. The current package is HTTPS-only; the rows below describe the historical
-configured surface at the fixed census point.
+configured surface at the fixed census point. Decision (2026-08-17, board
+`0ff93d05`): **retire** after the four known consumers move; uncounted callers
+are accepted. Live close is not this file.
 
 ## Configured at the fixed census point
 
