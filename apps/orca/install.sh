@@ -72,10 +72,10 @@ case "$(uname -m)" in
   *) die "orca: unsupported arch $(uname -m) — the pinned SHA is for amd64" ;;
 esac
 
-VER=1.4.139
+# shellcheck source=/dev/null
+. "$HERE/release-pin.sh"
 ASSET=orca-linux.AppImage
 URL="https://github.com/stablyai/orca/releases/download/v${VER}/${ASSET}"
-SHA256=35ab8dc3b1427544ea1fc67f8c54a337f0b9b4d315abee4eedd9306006b43fb2
 
 ORCA_DIR="$HOME/.local/share/airlock-orca"
 APPIMAGE="$ORCA_DIR/orca-${VER}.AppImage"

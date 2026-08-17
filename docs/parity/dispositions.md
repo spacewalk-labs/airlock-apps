@@ -1,6 +1,6 @@
 # Public app parity disposition register
 
-Status: 106 executable clusters decided; 2 clusters deliberately held
+Status: 108 executable clusters decided; 0 clusters deliberately held
 
 This register is the disposition layer over the exhaustive 108-cluster triage in
 [`../../census/parity-decision-triage.md`](../../census/parity-decision-triage.md).
@@ -100,6 +100,8 @@ disposition validator. Missing caller/Host fields remain `unknown`, never zero.
 | Cluster | Matrix IDs | Disposition | Destination contract |
 |---|---|---|---|
 | devterm plain-HTTP behavior | DT-R1 | retire | Remove `public_port`, `redirect_port`, `[plaintext_redirect]`, the loopback redirect renderer, and the `plaintext-redirect` lifecycle claim from the package. Deployment is ordered: migrate the four confirmed consumers first, then apply this HTTPS-only desired state and close `:9900`; uncounted callers are an accepted decision risk. |
+| Orca rooted-artifact deactivation | OR-C4 | keep | Keep the complete ledger declaration for both user units, the system firewall unit, the firewall ruleset, public serve tree, and HTTPS mapping. Generic deactivation revalidates ownership before removal; the fixed AppImage SHA and web-bundle VERSION provide the reinstall path. |
+| Orca rooted paths and serve tree | OR-S4 | keep | Keep `/etc/airlock/orca-loopback.nft` and `${webroot_parent}/orca-web/` as the only canonical writes. Adopt or retire legacy internal paths and nginx fragments only during a confirmed transition, never during an ordinary install. |
 
 ## E — fixed-SHA exhaustive closure
 
@@ -177,13 +179,8 @@ candidate set. All can proceed without census, privilege promotion, or a person 
 
 ## Held decision work
 
-The held set is now two D clusters. All eight C measurements and the selected
-DT-R1 fixture are bound above.
-
-| Bucket | Cluster | Matrix IDs | Disposition | Waiting for | Producer or decision owner |
-|---|---|---|---|---|---|
-| D | Orca rooted-artifact deactivation | OR-C4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
-| D | Orca rooted paths and serve tree | OR-S4 | hold | Orca capability promotion with immutable upstream evidence across the TRUST boundary. | The upstream evidence producer/promotion owner is currently unassigned; `TRUST_CAPABILITY_GATE` is the consumer. |
+The held set is empty. All eight C measurements and all three owner decisions
+have selected executable fixtures above.
 
 The Orca owner check above is bounded to the campaign board and active task documents
 on `swk-infra` `origin/main`, plus this repository's ABI files. The same `git grep`
@@ -203,7 +200,7 @@ task's approved output, not values that can be derived again from the census tab
 ## Accounting boundary
 
 The positive control is the matrix itself: 134 distinct IDs. The triage partitions
-them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns all A, B, C,
-and E clusters plus one D decision, and holds only D 2: 106 decided plus 2 held, covering 108 clusters and
+them into A 18, B 13, C 8, D 3, and E 66 clusters. This register assigns every
+cluster: 108 decided plus 0 held, covering 108 clusters and
 all 134 matrix IDs exactly once. This is an exhaustive fixed-SHA claim, not a
 current-HEAD census; changes after the declared pair require a new delta.

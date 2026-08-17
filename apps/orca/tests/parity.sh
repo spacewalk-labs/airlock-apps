@@ -8,21 +8,71 @@ fail() { echo "FAIL orca parity: $*" >&2; exit 1; }
 contains() { grep -Fq -- "$2" "$1" || fail "${1#"$APP/"} missing: $2"; }
 
 bash -n "$APP/install.sh" "$APP/render.sh" "$APP/state.sh" \
-  "$APP/deactivate.sh" "$APP/smoke.sh" "$APP/bin/verify-web-bundle.sh" \
+  "$APP/deactivate.sh" "$APP/smoke.sh" "$APP/release-pin.sh" \
+  "$APP/bin/verify-web-bundle.sh" \
   "$APP/bin/refresh-web-bundle.sh"
 "$APP/bin/verify-web-bundle.sh" --quiet
 
-# OR-C4/OR-S4 hold: choice-dependent ownership and deactivation stay byte-simple.
+# OR-C4/OR-S4 selected: complete ledger ownership and public canonical paths.
 APP="$APP" python3 - <<'PY'
-import os, pathlib, tomllib
+import os, pathlib, re, subprocess, tomllib
 app = pathlib.Path(os.environ['APP'])
 m = tomllib.loads((app / 'airlock-app.toml').read_text())
 assert m['artifacts']['rooted'] == ['/etc/airlock/orca-loopback.nft', '${webroot_parent}/orca-web/']
 assert m['artifacts']['serve_ports'] == ['https_port']
+assert m['serve'] == {'https': {'https_port': 'gate_port'}}
 assert m['artifacts']['units'] == [
     'airlock-orca-xvfb.service', 'airlock-orca.service',
     {'name': 'airlock-orca-firewall.service', 'scope': 'system'}]
-assert (app / 'deactivate.sh').read_text().rstrip().endswith('exit 0')
+
+abi = tomllib.loads((app.parents[1] / 'abi/apps/orca.toml').read_text())
+assert abi['capabilities'] == ['rooted-artifact', 'system-unit']
+
+firewall = subprocess.check_output([
+    'bash', '-c', 'source "$1/render.sh"; render_orca_unit_firewall 18821 /etc/airlock/orca-loopback.nft',
+    '_', str(app)], text=True)
+assert 'ExecStart=/bin/sh -c \'/usr/sbin/nft delete table inet airlock_orca 2>/dev/null; /usr/sbin/nft -f /etc/airlock/orca-loopback.nft\'' in firewall
+assert 'ExecStop=/usr/sbin/nft delete table inet airlock_orca' in firewall
+
+# The app declares ownership; generic ledger preflight/removal remains the one
+# cleanup engine. No app-local privileged delete path may race or bypass it.
+deactivate = (app / 'deactivate.sh').read_text()
+executable = [line.strip() for line in deactivate.splitlines()
+              if line.strip() and not line.lstrip().startswith('#')]
+assert executable == ['set -euo pipefail', 'exit 0']
+
+operational = '\n'.join((app / name).read_text() for name in (
+    'airlock-app.toml', 'install.sh', 'render.sh', 'deactivate.sh', 'smoke.sh'))
+for legacy in ('/etc/dev-hub/orca-firewall.nft',
+               '/etc/nginx/devhub-orca-card.html', 'swk-orca'):
+    assert legacy not in operational
+assert 'NFT_FILE="/etc/airlock/orca-loopback.nft"' in operational
+assert 'ORCA_SERVE_ROOT="$(dirname "$WEBROOT")/orca-web"' in operational
+
+# A clean uninstall can be recovered from immutable package inputs.
+install = (app / 'install.sh').read_text()
+pin_values = subprocess.check_output([
+    'bash', '-c', 'source "$1/release-pin.sh"; printf "%s\\n%s\\n" "$VER" "$SHA256"',
+    '_', str(app)], text=True).splitlines()
+assert pin_values == [
+    '1.4.139',
+    '35ab8dc3b1427544ea1fc67f8c54a337f0b9b4d315abee4eedd9306006b43fb2',
+]
+assert install.count('. "$HERE/release-pin.sh"') == 1
+assert not re.search(r'(?m)^\s*(?:export\s+|readonly\s+|declare(?:\s+-\S+)*\s+)?(?:VER|SHA256)\s*(?:\+?=)', install)
+assert 'URL="https://github.com/stablyai/orca/releases/download/v${VER}/${ASSET}"' in install
+assert 'APPIMAGE="$ORCA_DIR/orca-${VER}.AppImage"' in install
+assert '[ "$got" = "$SHA256" ]' in install
+pin = dict(line.split(': ', 1) for line in (app / 'web-bundle/VERSION').read_text().splitlines()
+           if ': ' in line and not line.startswith('#'))
+assert pin == {
+    'orca-appimage-version': '1.4.139',
+    'web-source-commit': '5f2818525ff41e7d99345b788a1b5ae13d5bd5c2',
+    'web-index-asset': 'assets/web-index-7YTHIMhi.js',
+    'dist-file-count': '385',
+    'dist-tree-sha256': '14f5c2087f1996b5d9d6397387e323c8bccedf242406bd26d3c547688112f052',
+}
+assert pin_values[0] == pin['orca-appimage-version']
 PY
 
 # OR-N3: pure targeted restart matrix; an Orca-only edit never bounces Xvfb.
@@ -155,7 +205,7 @@ done
 # OR-C3 installer fails closed if the shipped verifier is missing/non-executable.
 fake_app="$tmp/fake-app"
 mkdir -p "$fake_app/bin"
-cp "$APP/install.sh" "$APP/render.sh" "$APP/state.sh" "$fake_app/"
+cp "$APP/install.sh" "$APP/render.sh" "$APP/state.sh" "$APP/release-pin.sh" "$fake_app/"
 ln -s "$APP/web-bundle" "$fake_app/web-bundle"
 printf '#!/bin/sh\nexit 0\n' >"$fake_app/bin/verify-web-bundle.sh"
 chmod 644 "$fake_app/bin/verify-web-bundle.sh"
@@ -208,4 +258,4 @@ if "$APP/bin/refresh-web-bundle.sh" --source "$fixture" --appimage-version 1.4.1
 fi
 grep -Fxq "web-source-commit: $source_sha" "$output/VERSION"
 
-echo 'ok: Orca parity (C2/C3/N3/N4/S2/S3 executable; C4/S4 hold preserved)'
+echo 'ok: Orca parity (C2/C3/C4/N3/N4/S2/S3/S4 executable)'
