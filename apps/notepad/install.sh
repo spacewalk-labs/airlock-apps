@@ -22,6 +22,8 @@ HERE="${AIRLOCK_APP_DIR:-$HERE}"
 AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-notepad}"
 # shellcheck source=/dev/null
 . "$ROOT/install/lib.sh"
+# shellcheck source=/dev/null
+. "$HERE/render.sh"
 
 # notepad's uploads use the publish backend — refuse to install a broken card.
 airlock_config apps | grep -qx publish \
@@ -29,6 +31,10 @@ airlock_config apps | grep -qx publish \
 
 airlock_load notepad   # (no per-app keys today; validates the app is enabled)
 WEBROOT="${AIRLOCK_WEBROOT:-/opt/airlock/hub}"
+CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
+if [ -n "${AIRLOCK_RENDER_DIR:-}" ]; then
+  CONFD="$AIRLOCK_RENDER_DIR/confd"
+fi
 
 # --- manager UI into the hub webroot (served by the hub's static location /) ---
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
@@ -38,6 +44,11 @@ else
   install -m644 "$HERE/frontend/notepad.html" "$WEBROOT/notepad/index.html"
 fi
 
-# No nginx fragment: /notepad/ is served by the hub's static location / (gated at
-# the server level), and its API calls hit /publish/api/* provided by publish.
+frag="$CONFD/hub-locations.d/notepad.conf"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
+  log "[dry] write notepad compatibility redirect -> $frag"
+else
+  install -d "$CONFD/hub-locations.d"
+  render_notepad_nginx > "$frag"
+fi
 log "notepad installed (owner: ${AIRLOCK_OWNER})"

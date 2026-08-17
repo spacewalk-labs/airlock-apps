@@ -1,0 +1,13 @@
+--- codex-app-server-agent.js
++++ codex-app-server-agent.js
+@@
++// [paseo-codex-strip-ambient-openai-key] Remove inherited billing credentials at the spawn boundary.
++// A non-empty runtimeSettings key is intentional configuration and must survive.
++function paseoAmbientOpenAIKeyOverlay(runtimeSettings) {
++    const explicitKey = runtimeSettings?.env?.OPENAI_API_KEY;
++    if (typeof explicitKey === "string" && explicitKey.trim()) return { OPENAI_API_KEY: explicitKey };
++    return { OPENAI_API_KEY: undefined };
++}
+@@
+-                overlays: [launchEnv],
++                overlays: [launchEnv, paseoAmbientOpenAIKeyOverlay(this.runtimeSettings)],

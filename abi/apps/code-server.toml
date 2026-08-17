@@ -2,12 +2,13 @@ id = "code-server"
 state = "stateful"
 quiesce = "stop-units"
 snapshot = "copy-slots-extensions-config"
-forward = "pending-parity"
-write_capture = "pending-parity"
-reverse = "pending-parity"
+forward = "copy-retained-paths"
+write_capture = "capture-post-cutover-writes"
+reverse = "restore-retained-paths"
 rpo = "0"
 paths = [
   "~/.local/share/airlock-code-server/",
+  "~/.config/airlock-code-server/tabs.json",
   "~/.config/code-server/",
 ]
 capabilities = []

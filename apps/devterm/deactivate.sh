@@ -5,8 +5,7 @@
 # "fragments" removes the servers.d nginx fragment; "files" removes ttyd,
 # devterm-shell, the optional claude-switch/claude-status tools, and the
 # web client's staged share dir; the ledger also retires the serve.https
-# tailscale mapping and the plaintext_redirect row (orchestrator-owned,
-# config-driven — nothing here to do for it either).
+# tailscale mapping.
 #
 # Live tmux sessions ttyd/devterm-shell have spawned are deliberately left
 # running, same call as dev-monitor's exec_session and for the same two

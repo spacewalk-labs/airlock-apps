@@ -59,6 +59,14 @@ render_markwand_nginx() {
   sed -e "s/@@MS@@/${MS_PORT}/g" -e "s/@@FB@@/${FB_PORT}/g" <<'NGINX'
 # These locations are included inside the hub server, which gates every request
 # at the server level ($hub_ok) — so they are plain proxies, no per-location guard.
+# Legacy editor entrypoints. Keep the redirect same-origin, preserve a nested
+# path/query, and make /markwand/edit/ the sole canonical editor prefix.
+location = /edit  { return 302 /markwand/edit/; }
+location = /edit/ { return 302 /markwand/edit/; }
+location ~ ^/edit/(.+)$ {
+    return 302 /markwand/edit/$1$is_args$args;
+}
+
 # filebrowser editor (baseURL=/markwand/edit) — longest prefix wins over /markwand/
 location /markwand/edit/ {
     proxy_pass http://127.0.0.1:@@FB@@;
@@ -80,6 +88,14 @@ location /markwand/edit/ {
 # try_files. This exact (=) match wins for the bare path; /markwand/<file> falls
 # through to the markserv prefix proxy below (the .md render fallback).
 location = /markwand/ {
+    try_files /__mw/markwand-split.html =404;
+    default_type text/html;
+    add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+}
+
+# Measured compatibility alias. The bare route is intentionally not canonical;
+# it renders the same split viewer without copying or redirecting user state.
+location = /markwand/split {
     try_files /__mw/markwand-split.html =404;
     default_type text/html;
     add_header Cache-Control "no-cache, no-store, must-revalidate" always;

@@ -19,6 +19,31 @@ CAPABILITIES = ("rooted-artifact", "system-unit", "plaintext-redirect")
 EXPECTED_CAPABILITIES = {
     "orca": ("rooted-artifact", "system-unit"),
 }
+EXPECTED_PATHS = {
+    "code-server": (
+        "~/.local/share/airlock-code-server/",
+        "~/.config/airlock-code-server/tabs.json",
+        "~/.config/code-server/",
+    ),
+    "dev-monitor": (
+        "~/.local/state/airlock/dev-monitor/",
+        "~/.local/share/airlock-dev-monitor/history.csv",
+    ),
+    "devterm": (
+        "~/.config/airlock-devterm/tabs.json",
+        "~/.local/state/airlock/devterm/codex-usage.json",
+    ),
+    "feedback": (),
+    "markwand": ("~/.config/filebrowser/fb.db",),
+    "notepad": (),
+    "orca": (),
+    "paseo": ("~/.paseo/",),
+    "publish": (
+        "/opt/airlock/share",
+        "~/uploads",
+        "~/.local/state/airlock/publish-public.json",
+    ),
+}
 
 
 def schema_drift(foundation: Path) -> list[str]:
@@ -78,6 +103,10 @@ def validate(foundation: Path, app_root: Path | None = None) -> list[str]:
                 not isinstance(item, str) or not item for item in doc["paths"]):
             errors.append(f"{name}: paths must be a list of non-empty strings")
             continue
+        if tuple(doc["paths"]) != EXPECTED_PATHS[name]:
+            errors.append(
+                f"{name}: paths {doc['paths']} != {list(EXPECTED_PATHS[name])}"
+            )
         if not isinstance(doc["capabilities"], list) or any(
                 item not in CAPABILITIES for item in doc["capabilities"]):
             errors.append(f"{name}: capabilities must be a list from {CAPABILITIES}")
@@ -93,6 +122,9 @@ def validate(foundation: Path, app_root: Path | None = None) -> list[str]:
         else:
             if doc["rpo"] != "0":
                 errors.append(f"{name}: stateful rpo must be \"0\"")
+            for key in ("forward", "write_capture", "reverse"):
+                if doc[key] == "pending-parity":
+                    errors.append(f"{name}: {key} is still pending-parity")
             if not doc["paths"]:
                 errors.append(f"{name}: stateful declaration needs at least one retained path")
             if all(doc[key] == "none" for key in NONE_FIELDS):

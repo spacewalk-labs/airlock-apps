@@ -45,10 +45,19 @@ AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-markwand}"
 . "$ROOT/install/lib.sh"
 # shellcheck source=/dev/null
 . "$HERE/render.sh"
+# shellcheck source=/dev/null
+. "$HERE/state.sh"
 
 airlock_load markwand
 MS_PORT="${AIRLOCK_MARKWAND_MARKSERV_PORT:?}"
 FB_PORT="${AIRLOCK_MARKWAND_FILEBROWSER_PORT:?}"
+HOME_ALIASES="${AIRLOCK_MARKWAND_HOME_ALIASES:-}"
+AGENT_CONFIG_ALIASES="${AIRLOCK_MARKWAND_AGENT_CONFIG_ALIASES:-false}"
+case "$AGENT_CONFIG_ALIASES" in
+  true) AGENT_ALIAS_NAMES="claude,codex" ;;
+  false) AGENT_ALIAS_NAMES="" ;;
+  *) die "AIRLOCK_MARKWAND_AGENT_CONFIG_ALIASES must be true or false" ;;
+esac
 # No fallback: this directory is served read+write to the owner AND every
 # collaborator, so it is stated in airlock.toml or nothing is installed. `validate`
 # rejects it first; this is the second line of defence for a direct run of this
@@ -97,6 +106,19 @@ MS_UNIT_PATH="${MS_UNIT_PATH}:/usr/local/bin:/usr/bin:/bin"
 
 # markserv wants its code_root to exist before it starts.
 airlock_run mkdir -p "$CODE_ROOT"
+
+# An empty list is intentionally a no-op except for reclaiming aliases recorded
+# by an earlier Markwand install. Agent-config aliases use a separate ledger and
+# explicit boolean because they expose credentials and session history.
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] reconcile Markwand home aliases under $CODE_ROOT: ${HOME_ALIASES:-<none>}"
+  log "[dry] reconcile Markwand agent-config aliases under $CODE_ROOT: ${AGENT_ALIAS_NAMES:-<none>}"
+else
+  reconcile_markwand_alias_sets "$CODE_ROOT" "$HOME_ALIASES" "$AGENT_ALIAS_NAMES" \
+    "$HOME/.config/airlock/markwand-home-aliases" \
+    "$HOME/.config/airlock/markwand-agent-config-aliases" \
+    || die "Markwand alias reconciliation failed"
+fi
 
 # --- 1. provision markserv (npm, no sudo — local prefix) ---
 # --ignore-scripts: markserv@1.17.4 declares snyk in runtime dependencies, and
@@ -207,6 +229,8 @@ if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
   baseurl="$(printf '%s\n' "$cfg" | awk '/Base URL:/ {print $3; exit}' || true)"
   if [ "$baseurl" != "/markwand/edit" ] || ! printf '%s\n' "$cfg" | grep -Fq "$FB_BRANDING_DIR"; then
     log "filebrowser baseURL + branding migration"
+    backup_markwand_filebrowser_db "$FB_DB" 3 \
+      || die "could not back up filebrowser DB; settings were not changed"
     "$FB_BIN" config set --baseURL /markwand/edit -d "$FB_DB" >/dev/null
     "$FB_BIN" config set --branding.name "Markwand Editor" --branding.files "$FB_BRANDING_DIR" -d "$FB_DB" >/dev/null
   fi
@@ -215,6 +239,7 @@ fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-markserv.service airlock-filebrowser.service
 airlock_run systemctl --user restart airlock-markserv.service airlock-filebrowser.service
+warn_markwand_linger "${USER:-}"
 
 # --- 4. static assets into the hub webroot (served by the hub's guarded location /) ---
 # Everything under /__mw/ is served by the hub server's `location /` (try_files from
@@ -229,6 +254,7 @@ else
   install -m644 "$HERE/static/edit-button.js"       "$WEBROOT/__mw/edit-button.js"
   # split-pane multitype viewer (default /markwand/ entry) + its self-hosted libs
   install -m644 "$HERE/static/markwand-split.html"  "$WEBROOT/__mw/markwand-split.html"
+  install -m644 "$HERE/static/markwand-manifest.json" "$WEBROOT/__mw/markwand-manifest.json"
   install -m644 "$HERE/static/hljs-theme.css"       "$WEBROOT/__mw/hljs-theme.css"
   install -m644 "$HERE/static/vendor/highlight.min.js" "$WEBROOT/__mw/highlight.min.js"
   install -m644 "$HERE/static/vendor/marked.min.js"    "$WEBROOT/__mw/marked.min.js"

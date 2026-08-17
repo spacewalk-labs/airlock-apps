@@ -196,6 +196,31 @@ else
   fi
 fi
 
+# Content: removing one known retained path must also be red. Otherwise a
+# lifecycle fixture could stay green by iterating only an incomplete ABI list.
+mkdir -p "$TMP/probe-omission/abi/apps"
+cp -a "$FOUNDATION/abi/." "$TMP/probe-omission/abi/"
+python3 - "$TMP/probe-omission/abi/apps/dev-monitor.toml" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+line = '  "~/.local/share/airlock-dev-monitor/history.csv",\n'
+text = path.read_text(encoding="utf-8")
+if text.count(line) != 1:
+    raise SystemExit("fixture anchor drift")
+path.write_text(text.replace(line, ""), encoding="utf-8")
+PY
+if python3 "$FOUNDATION/test/validate_lifecycle.py" "$TMP/probe-omission" "$APP_ROOT" \
+     >/dev/null 2>"$TMP/probe-omission.err"; then
+  bad "omitted retained lifecycle path was not detected"
+else
+  if grep -q 'history.csv' "$TMP/probe-omission.err"; then
+    ok "omitted retained lifecycle path is red"
+  else
+    bad "omission check failed for another reason: $(cat "$TMP/probe-omission.err")"
+  fi
+fi
+
 # digest_tree reuse: builder copy matches ledger on a fixture, when core exists
 if [[ -n "$CORE_ROOT" ]]; then
   mkdir -p "$TMP/fixture/sub"

@@ -16,6 +16,11 @@ messages = false
 slack_webhook_env = ""
 exec_cwd_root = ""
 exec_session = "devmon-exec"
+# Comma-separated airlock-* user units. Empty keeps the separately authenticated
+# restart mutation route absent; system services are never eligible.
+restart_services = ""
+# Optional execution-skill membership restriction. Empty preserves syntax-only validation.
+skill_allow = ""
 # Credential freshness. Off by default: the check reads files under the operator's home
 # that belong to other tools, so looking at them at all is an opt-in. On, the dashboard
 # grows a card and /api/tokens answers; the periodic half is a separate explicit act
@@ -59,14 +64,15 @@ note = "Smoke check"
 
 # Appendix: one user unit, one hub-locations fragment, the dashboard webroot
 # page, and the env file the unit's EnvironmentFile= line reads. The spool
-# (~/.local/state/airlock/dev-monitor/) is retained operator data — never
+# (~/.local/state/airlock/dev-monitor/) and observability history
+# (~/.local/share/airlock-dev-monitor/history.csv) are retained operator data — never
 # declared. backend_port is proxied by the hub's own nginx, never
 # tailscale-served directly, so it is NOT a serve_ports entry.
 [artifacts]
 units = ["airlock-dev-monitor.service"]
 fragments = ["hub-locations.d/dev-monitor.conf"]
 webroot = ["monitor/index.html"]
-files = ["~/.config/airlock/dev-monitor.env"]
+files = ["~/.config/airlock/dev-monitor.env", "~/.config/airlock/dev-monitor-restart.env"]
 
 # From hub/index.html's APPS table (dev-monitor row).
 [tile]

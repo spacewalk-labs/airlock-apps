@@ -2,9 +2,12 @@
 
 마스터가 사람에게 물을 항목입니다. 카드 세션은 고르지 않습니다.
 
-`D-DEVTERM-9900` 은 2026-08-17 에 답이 왔습니다. 보드 의견 `0ff93d05`.
-원문: 「retire — 평문 9900 을 바로 닫는다. 확인된 소비자 4종은 그 전에 옮기되, 세지 않은 사용자는 감수한다.」
-ABI 계약은 `abi/apps/devterm.toml` 의 `capabilities = []` 입니다. 라이브 차단은 이 파일이 아닙니다.
+`D-DEVTERM-9900`은 2026-08-17 taskboard 의견 `0ff93d05`에서 `retire`로
+결정됐습니다. 원문: 「평문 9900을 바로 닫는다. 확인된 소비자 4종은 그
+전에 옮기되, 세지 않은 사용자는 감수한다.」 ABI 계약은
+`abi/apps/devterm.toml`의 `capabilities = []`이며, 고정 census·패키지
+desired state·라이브 차단의 경계는
+[`census/devterm-9900.md`](census/devterm-9900.md)에 있습니다.
 
 ## D-REPO-NAME
 

@@ -1,0 +1,121 @@
+#!/usr/bin/env python3
+"""Copy legacy code-server state without changing existing destination metadata."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import shutil
+import stat
+
+
+HOME = Path.home()
+LEGACY_SLOTS = HOME / ".local/share/code-server-slots"
+LEGACY_TABS = HOME / ".config/code-server-tabs/tabs.json"
+LEGACY_SINGLE = HOME / ".local/share/code-server"
+CANONICAL_SHARE = HOME / ".local/share/airlock-code-server"
+CANONICAL_TABS = HOME / ".config/airlock-code-server/tabs.json"
+
+
+def exists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def ensure_real_directory(path: Path) -> None:
+    try:
+        relative = path.relative_to(HOME)
+    except ValueError as error:
+        raise RuntimeError(f"canonical path escapes HOME: {path}") from error
+    current = HOME
+    for part in relative.parts:
+        current /= part
+        if exists(current):
+            if current.is_symlink() or not current.is_dir():
+                raise RuntimeError(f"refusing non-directory canonical path: {current}")
+        else:
+            current.mkdir()
+
+
+def copy_leaf(source: Path, destination: Path) -> None:
+    if source.is_symlink() or not source.is_file():
+        return
+    ensure_real_directory(destination.parent)
+    if exists(destination):
+        return
+    shutil.copy2(source, destination, follow_symlinks=False)
+
+
+def copy_regular(source: Path, destination: Path) -> None:
+    if not source.is_file():
+        return
+    ensure_real_directory(destination.parent)
+    if exists(destination):
+        return
+    shutil.copy2(source, destination, follow_symlinks=True)
+
+
+def copy_tree(source: Path, destination: Path) -> None:
+    if not source.is_dir():
+        return
+    ensure_real_directory(destination.parent)
+    if exists(destination) and (destination.is_symlink() or not destination.is_dir()):
+        raise RuntimeError(f"refusing non-directory canonical path: {destination}")
+    preserved: dict[Path, os.stat_result] = {}
+    created: dict[Path, os.stat_result] = {}
+    if destination.is_dir() and not destination.is_symlink():
+        preserved[destination] = destination.stat()
+    else:
+        created[destination] = source.stat()
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        for root, directories, files in os.walk(source, followlinks=False):
+            source_root = Path(root)
+            relative = source_root.relative_to(source)
+            destination_root = destination / relative
+            if exists(destination_root) and (
+                destination_root.is_symlink() or not destination_root.is_dir()
+            ):
+                raise RuntimeError(f"refusing non-directory canonical path: {destination_root}")
+            if destination_root.is_dir() and destination_root not in preserved \
+                    and destination_root not in created:
+                preserved[destination_root] = destination_root.stat()
+            elif not exists(destination_root):
+                created[destination_root] = source_root.stat()
+            destination_root.mkdir(parents=True, exist_ok=True)
+            for name in list(directories):
+                source_child = source_root / name
+                if source_child.is_symlink():
+                    directories.remove(name)
+            for name in files:
+                copy_leaf(source_root / name, destination_root / name)
+    finally:
+        for path, metadata in reversed(tuple(preserved.items())):
+            if path.is_dir() and not path.is_symlink():
+                os.chmod(path, stat.S_IMODE(metadata.st_mode))
+                os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+        for path, metadata in reversed(tuple(created.items())):
+            if path.is_dir() and not path.is_symlink():
+                os.chmod(path, stat.S_IMODE(metadata.st_mode))
+                os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+
+
+def main() -> None:
+    if LEGACY_SLOTS.is_dir():
+        slot_sources = [source for source in LEGACY_SLOTS.iterdir()
+                        if source.is_dir() and source.name.isdigit()]
+        if slot_sources:
+            ensure_real_directory(CANONICAL_SHARE)
+            ensure_real_directory(CANONICAL_SHARE / "slots")
+        for source in slot_sources:
+            copy_tree(source, CANONICAL_SHARE / "slots" / source.name)
+    copy_tree(LEGACY_SLOTS / "extensions", CANONICAL_SHARE / "extensions")
+    copy_regular(LEGACY_TABS, CANONICAL_TABS)
+    if (LEGACY_SINGLE / "User").is_dir():
+        ensure_real_directory(CANONICAL_SHARE)
+        ensure_real_directory(CANONICAL_SHARE / "slots")
+        copy_tree(LEGACY_SINGLE / "User", CANONICAL_SHARE / "slots/1/User")
+    copy_tree(LEGACY_SINGLE / "extensions", CANONICAL_SHARE / "extensions")
+
+
+if __name__ == "__main__":
+    main()

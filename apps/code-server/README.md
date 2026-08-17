@@ -46,3 +46,8 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
 - User-data-dir per slot: `~/.local/share/airlock-code-server/slots/N`.
 - Shared extensions-dir: `~/.local/share/airlock-code-server/extensions`.
 - Tab prefs (names/colors/order): `~/.config/airlock-code-server/tabs.json`.
+
+On install, state from the former multi-slot paths (`~/.local/share/code-server-slots`
+and `~/.config/code-server-tabs/tabs.json`) and the older single-instance path
+(`~/.local/share/code-server`) is copied into these canonical paths. Existing
+canonical files always win; legacy files are never moved, deleted, or overwritten.

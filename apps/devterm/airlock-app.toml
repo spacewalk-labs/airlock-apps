@@ -3,10 +3,8 @@ id = "devterm"
 
 # Transcribed from the former APP_DEFAULTS["devterm"] entry.
 [config.defaults]
-public_port = 9900
 https_port = 8443
 gate_port = 9910
-redirect_port = 9913
 ttyd_port = 9911
 backend_port = 9912
 font_size = 15
@@ -80,13 +78,10 @@ note = "Privileged ingress setup"
 # import — they are installed to ~/.local/bin as standalone files and cannot
 # reach the copy in the repo, so it is staged inside the directory the ledger
 # already owns rather than declared as a fourth entry. Deliberately NOT declared
-# (retained operator data): ~/.config/airlock-devterm/tabs.json (user tabs).
-# serve_ports/[serve.https]: devterm is the one owner app of the four with a
-# PLAINTEXT redirect too (public_port -> redirect_port, 301 only, no
-# content) alongside its https mapping — both surfaces below (D2 amended in
-# child 4; plaintext_redirect is orchestrator-owned, serve.https is
-# ledger-owned). code-server/orca/paseo have no public_port at all (https
-# only), so this pairing is unique to devterm among the four.
+# (retained operator data): ~/.config/airlock-devterm/tabs.json (user tabs) and
+# ~/.local/state/airlock/devterm/codex-usage.json (last identity-bound usage reading).
+# serve_ports/[serve.https]: devterm is HTTPS-only. The retired plaintext
+# redirect is deliberately absent from both config and the artifact ledger.
 [artifacts]
 units = ["airlock-devterm.service", "airlock-devterm-gate.service"]
 fragments = ["servers.d/devterm.conf"]
@@ -97,9 +92,6 @@ serve_ports = ["https_port"]
 
 [serve.https]
 https_port = "gate_port"
-
-[plaintext_redirect]
-public_port = "redirect_port"
 
 # From hub/index.html's APPS table (devterm row).
 [tile]

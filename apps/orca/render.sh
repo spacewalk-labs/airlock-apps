@@ -10,13 +10,21 @@
 # procedural copy of the splicing logic rather than a single heredoc, since
 # the original assembly is itself several heredocs plus shell logic, not one.
 
+ORCA_RENDER_HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$ORCA_RENDER_HERE/state.sh"
+
 # render_orca_reap_script — no substitution: the source heredoc uses a quoted
 # delimiter ('REAP'), so $HOME/$f/etc. are literal in the installed script,
 # not expanded at render time. No args.
 render_orca_reap_script() {
-  cat <<'REAP'
+  cat <<'REAP_HEAD'
 #!/usr/bin/env bash
-# airlock-orca daemon reap — ExecStopPost for airlock-orca.service. PID-reuse safe.
+# airlock-orca daemon/scope reap — PID-reuse safe and live-scope preserving.
+set -u
+REAP_HEAD
+  declare -f orca_notice orca_scope_has_serve reconcile_orca_scopes
+  cat <<'REAP_BODY'
 for f in "$HOME"/.config/orca/daemon/daemon-v*.pid; do
     [ -f "$f" ] || continue
     p=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["pid"])' "$f" 2>/dev/null)
@@ -27,13 +35,11 @@ for f in "$HOME"/.config/orca/daemon/daemon-v*.pid; do
     esac
     rm -f "$f"
 done
-# Reclaim self-detached scopes: killing the daemon leaves its app-orca-*.scope and
-# the agent-browser child inside it, which otherwise accumulate one per restart.
-# orca is single-instance and this only runs while the service is down, so every
-# app-orca-* here belongs to the dying (or already-dead) instance -> stop them all.
-systemctl --user stop 'app-orca-*.scope' 2>/dev/null || true
+# Stop only scopes proven not to contain a live AppRun serve process. ExecStopPost and
+# unchanged installs share this same evidence boundary; unreadable evidence is kept.
+reconcile_orca_scopes
 exit 0
-REAP
+REAP_BODY
 }
 
 # render_orca_unit_xvfb XDISP
@@ -188,9 +194,9 @@ NGINX
 render_orca_nginx() {
   local GATE_PORT="$1" BACKEND_PORT="$2" WEBROOT="$3" ORCA_WEB_ENABLED="$4" \
         ORCA_DIST_SERVE="$5" WIDGET_MENU_ATTRS="$6" pairing_frag="$7"
-  local extra="" extra_arg=""
+  local extra="" extra_arg="" tmp_root="${AIRLOCK_RENDER_DIR:-${TMPDIR:-/tmp}}"
   if [ "$ORCA_WEB_ENABLED" = 1 ]; then
-    extra="$(mktemp)"; extra_arg="$extra"
+    extra="$(mktemp "$tmp_root/orca-nginx-extra.XXXXXX")"; extra_arg="$extra"
     render_orca_nginx_extra "$BACKEND_PORT" "$ORCA_DIST_SERVE" "$WIDGET_MENU_ATTRS" > "$extra"
   fi
   {

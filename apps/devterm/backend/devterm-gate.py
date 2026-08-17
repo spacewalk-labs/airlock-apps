@@ -160,6 +160,9 @@ _RE_SECRET_NAME = re.compile(r"^(?!\.)[A-Za-z0-9._-]{1,48}\Z")
 #      or browser sees the same layout. Owner is singular, so one file. ----
 PREFS_DIR = os.path.expanduser("~/.config/airlock-devterm")
 PREFS_PATH = os.path.join(PREFS_DIR, "tabs.json")
+# Pre-Airlock devterm used this path. It remains read-only compatibility input:
+# future saves always go to PREFS_PATH, and this file is never moved or rewritten.
+LEGACY_PREFS_PATH = os.path.expanduser("~/.config/devterm/tabs.json")
 PREFS_MAX = 256 * 1024
 
 # ---- last known Codex usage, kept across restarts ----
@@ -176,6 +179,7 @@ _CTYPES = {
     ".html": b"text/html; charset=utf-8", ".js": b"text/javascript; charset=utf-8",
     ".css": b"text/css; charset=utf-8", ".json": b"application/json; charset=utf-8",
     ".svg": b"image/svg+xml", ".png": b"image/png", ".ico": b"image/x-icon",
+    ".txt": b"text/plain; charset=utf-8",
     ".map": b"application/json; charset=utf-8", ".woff2": b"font/woff2",
 }
 _FORBIDDEN = (
@@ -1538,16 +1542,21 @@ async def _serve_pane(cr, headers, leftover, cw):
 
 
 async def _serve_get_prefs(cw):
-    """Read tab prefs ({} if none)."""
+    """Read canonical prefs, falling back to legacy state without mutating it."""
     data = b"{}"
-    try:
-        if os.path.isfile(PREFS_PATH):
-            with open(PREFS_PATH, "rb") as f:
-                raw = f.read(PREFS_MAX)
+    for path in (PREFS_PATH, LEGACY_PREFS_PATH):
+        try:
+            if not os.path.isfile(path):
+                continue
+            with open(path, "rb") as f:
+                raw = f.read(PREFS_MAX + 1)
+            if len(raw) > PREFS_MAX:
+                continue
             json.loads(raw.decode("utf-8"))          # validity check
             data = raw or b"{}"
-    except (OSError, ValueError, UnicodeDecodeError):
-        data = b"{}"
+            break
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
     cw.write(_resp(b"200 OK", data, b"application/json; charset=utf-8"))
     await cw.drain()
 
@@ -2515,12 +2524,24 @@ async def handle(cr, cw):
             await _serve_codex_usage(headers, cw)
         elif path == b"/acct-alert" and method == b"GET":
             await _serve_acct_alert(headers, cw)
-        elif path == b"/secret-put" and method == b"POST":
-            await _serve_secret_put(cr, headers, leftover, cw)
-        elif path == b"/secret-list" and method == b"GET":
-            await _serve_secret_list(headers, cw)
-        elif path == b"/secret-del" and method == b"POST":
-            await _serve_secret_del(cr, headers, leftover, cw)
+        elif path == b"/secret-put":
+            if method == b"POST":
+                await _serve_secret_put(cr, headers, leftover, cw)
+            else:
+                await _send_json(cw, b"405 Method Not Allowed",
+                                 {"ok": False, "error": "method not allowed"})
+        elif path == b"/secret-list":
+            if method == b"GET":
+                await _serve_secret_list(headers, cw)
+            else:
+                await _send_json(cw, b"405 Method Not Allowed",
+                                 {"ok": False, "error": "method not allowed"})
+        elif path == b"/secret-del":
+            if method == b"POST":
+                await _serve_secret_del(cr, headers, leftover, cw)
+            else:
+                await _send_json(cw, b"405 Method Not Allowed",
+                                 {"ok": False, "error": "method not allowed"})
         elif path == b"/acct-login-url" and method == b"POST":
             await _serve_acct_login_url(cw)
         elif path == b"/acct-login-code" and method == b"POST":

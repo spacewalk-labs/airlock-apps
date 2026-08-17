@@ -13,6 +13,7 @@
 # commit — a stale pin is worse than no pin.
 
 orca-appimage-version: 1.4.139
+web-source-commit: 5f2818525ff41e7d99345b788a1b5ae13d5bd5c2
 web-index-asset: assets/web-index-7YTHIMhi.js
 dist-file-count: 385
 dist-tree-sha256: 14f5c2087f1996b5d9d6397387e323c8bccedf242406bd26d3c547688112f052

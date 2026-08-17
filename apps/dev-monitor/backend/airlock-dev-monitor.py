@@ -11,6 +11,7 @@ process continues to serve observability.
 """
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -83,6 +84,7 @@ CORS_HOSTS = frozenset(
 # unavailable without touching the optional modules.
 OWNER_CONFIG = None
 EXEC_CONFIG = None
+RESTART_CONFIG = None
 _MESSAGES_STATE = 'off'
 _TMUX_LOCK = threading.Lock()
 # How long a run may sit in 'starting' with no window of its own name before the
@@ -287,6 +289,7 @@ def svc_info():
             'scope': 'user',
             'state': state,
             'uptime': uptime_from_timestamp(since_raw),
+            'restart_allowed': bool(RESTART_CONFIG and name in RESTART_CONFIG['allowed']),
         })
     for name in SYSTEM_SERVICES:
         state = run(['systemctl', 'is-active', name]) or 'unknown'
@@ -296,8 +299,32 @@ def svc_info():
             'scope': 'system',
             'state': state,
             'uptime': uptime_from_timestamp(since_raw),
+            'restart_allowed': False,
         })
     return out
+
+
+_USER_UNIT_RE = re.compile(r'^airlock-[a-z0-9][a-z0-9-]{0,62}\Z')
+
+
+def restart_svc(name):
+    """Restart one explicitly allowed, currently installed user service."""
+    if not isinstance(name, str) or not _USER_UNIT_RE.match(name):
+        return False, 'invalid user service name'
+    if name in SYSTEM_SERVICES:
+        return False, 'system services cannot be restarted'
+    if RESTART_CONFIG is None or name not in RESTART_CONFIG['allowed']:
+        return False, 'service is not in the restart allow-list'
+    if name not in _airlock_user_units():
+        return False, 'allowed user service is not installed'
+    try:
+        subprocess.check_call(['systemctl', '--user', 'restart', name], timeout=10,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True, f'restarted: {name}'
+    except subprocess.TimeoutExpired:
+        return False, 'restart timeout'
+    except subprocess.CalledProcessError as exc:
+        return False, f'restart failed: rc={exc.returncode}'
 
 
 def uptime_from_timestamp(ts):
@@ -781,6 +808,19 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
         path = self._strip_prefix(url.path)
+        if path == '/api/service/restart':
+            if not devmon_owner.check_mutating(self):
+                return
+            if RESTART_CONFIG is None:
+                self._json(404, {'ok': False, 'error': 'service restart not enabled'})
+                return
+            if not devmon_owner.require_owner(self, RESTART_CONFIG):
+                return
+            body = self._read_body()
+            name = body.get('name', '') if isinstance(body, dict) else ''
+            ok, message = restart_svc(name)
+            self._json(200 if ok else 400, {'ok': ok, 'name': name, 'message': message})
+            return
         if path.startswith('/api/owner/'):
             self._handle_owner_post(path)
             return
@@ -1322,11 +1362,15 @@ def _build_exec_config():
             os.chmod(directory, 0o700)
         except OSError:
             pass
+    allow_env = os.environ.get('DEV_MONITOR_SKILL_ALLOW', '').strip()
+    skill_allow = frozenset(name.strip() for name in allow_env.split(',')
+                            if name.strip()) if allow_env else None
     return {
         # `or HOME`, not a default= — a systemd EnvironmentFile writes an empty value for
         # an unset key, and canonical_plan reads a falsy root as 'no bound at all'.
         'cwd_root': os.environ.get('DEV_MONITOR_CWD_ROOT') or HOME,
         'session': os.environ.get('DEV_MONITOR_EXEC_SESSION', 'devmon-exec'),
+        'skill_allow': skill_allow,
         'runner': os.path.join(os.path.dirname(os.path.abspath(__file__)), 'action_runner.py'),
         'plan_dir': plan_dir,
         'sentinel_dir': sentinel_dir,
@@ -1335,6 +1379,16 @@ def _build_exec_config():
 
 def _messages_state():
     return _MESSAGES_STATE
+
+
+def _start_restart():
+    """Load the independent restart mutation gate without exposing a partial config."""
+    global RESTART_CONFIG
+    try:
+        RESTART_CONFIG = devmon_owner.load_restart_config()
+    except devmon_owner.ConfigError as exc:
+        RESTART_CONFIG = None
+        sys.stderr.write(f'[airlock-dev-monitor] service restart disabled: {exc}\n')
 
 
 def _start_messages():
@@ -1416,6 +1470,7 @@ def main():
     history_trim()
     threading.Thread(target=history_sampler, daemon=True, name='history_sampler').start()
     threading.Thread(target=_top_sampler, daemon=True, name='top_sampler').start()
+    _start_restart()
     _start_messages()
     print(f'[airlock-dev-monitor] listen=127.0.0.1:{PORT} messages={_messages_state()}', flush=True)
     with ThreadingHTTPServer(('127.0.0.1', PORT), Handler) as server:

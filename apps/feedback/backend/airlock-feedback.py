@@ -86,6 +86,8 @@ def _relay_intake(text, owner):
             res = json.loads(r.read().decode('utf-8'))
     except Exception as e:
         return False, f'unreachable: {e}'
+    if not isinstance(res, dict):
+        return False, 'invalid intake response'
     if not res.get('ok'):
         return False, res.get('error', 'intake error')
     return True, {'issue_url': res.get('issue_url')}
@@ -118,13 +120,15 @@ def _send_mail(text, owner):
 
 def submit_feedback(text, owner):
     """Deliver to every configured target. ok only if ALL of them succeeded."""
-    if not FEEDBACK_ENABLED:
-        return False, 'feedback not configured ([apps.feedback])'
-    text = (text or '').strip()
+    if not isinstance(text, str):
+        return False, 'text must be a string'
+    text = text.strip()
     if not text:
         return False, 'empty message'
     if len(text) > TEXT_MAX:
         return False, f'message too long (>{TEXT_MAX} chars)'
+    if not FEEDBACK_ENABLED:
+        return False, 'feedback not configured ([apps.feedback])'
 
     result, errors = {}, []
     if INTAKE_ENABLED:
@@ -153,7 +157,10 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _read_body(self):
-        n = int(self.headers.get('Content-Length', '0'))
+        try:
+            n = int(self.headers.get('Content-Length', '0'))
+        except (TypeError, ValueError):
+            return None
         if n <= 0:
             return {}
         try:
@@ -188,6 +195,9 @@ class Handler(BaseHTTPRequestHandler):
         path = self._strip(urllib.parse.urlparse(self.path).path)
         body = self._read_body()
         if path in ('/api/submit', '/submit'):
+            if not isinstance(body, dict):
+                self._json(400, {'ok': False, 'error': 'request body must be a JSON object'})
+                return
             ok, res = submit_feedback(body.get('text', ''), self._owner())
             self._json(200 if ok else 400,
                        {'ok': ok, **res} if ok else {'ok': ok, 'error': res})

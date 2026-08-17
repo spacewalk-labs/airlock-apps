@@ -53,6 +53,10 @@ Type=simple
 # Explicit PATH: npm global bin + provider CLI dirs + node + system. The daemon
 # spawns provider CLIs against this PATH — a mismatch is the #1 pilot gotcha.
 Environment=PATH=${UNIT_PATH}
+# Never inherit a manager/session-wide OpenAI API key into the daemon. A key
+# explicitly configured for a Paseo runtime is reintroduced only at that Codex
+# spawn boundary by the codex ambient-key patch below.
+UnsetEnvironment=OPENAI_API_KEY
 # Provider CLI credential paths (claude=~/.claude, codex/gemini=~/.config).
 Environment=HOME=${HOME}
 Environment=XDG_CONFIG_HOME=${HOME}/.config
@@ -80,6 +84,8 @@ ExecStartPre=-${PY} ${PID_GUARD} ${HOME}/.paseo/paseo.pid
 # --foreground: Type=simple. --no-relay: no upstream relay outbound. --web-ui: the
 # browser UI. --listen 127.0.0.1: loopback bind (the gate is the only ingress).
 ExecStart=${PASEO_BIN} daemon start --foreground --no-relay --web-ui --listen 127.0.0.1:${BACKEND_PORT}
+# Bound shutdown before systemd escalates to the unit cgroup sweep.
+TimeoutStopSec=20
 # always, not on-failure: the web UI's "restart daemon" is a websocket shutdown RPC
 # that exits the worker cleanly (status 0) and expects a supervisor to bring it back.
 # Under on-failure systemd reads that as an intended stop and leaves it dead — so the
@@ -166,6 +172,8 @@ server {
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
         proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        proxy_buffering off;
         # return-to-Airlock widget: uncompressed HTML so sub_filter applies (WS/JS
         # bundles are untouched — sub_filter only rewrites text/html).
         proxy_set_header Accept-Encoding "";

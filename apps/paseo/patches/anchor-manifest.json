@@ -63,6 +63,14 @@
       ]
     },
     {
+      "id": "codex-strip-ambient-openai-key",
+      "source": "apps/paseo/patches/codex-strip-ambient-openai-key.mjs",
+      "anchors": [
+        "export function buildCodexAppServerEnv(runtimeSettings, launchEnv) {",
+        "                overlays: [launchEnv],"
+      ]
+    },
+    {
       "id": "patch-web-ui",
       "source": "apps/paseo/browse-host/bin/patch-web-ui.js",
       "anchors": [

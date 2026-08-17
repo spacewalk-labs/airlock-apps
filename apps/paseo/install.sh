@@ -47,6 +47,8 @@ AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-paseo}"
 . "$ROOT/install/lib.sh"
 # shellcheck source=/dev/null
 . "$HERE/render.sh"
+# shellcheck source=/dev/null
+. "$HERE/state.sh"
 
 airlock_load paseo
 # Return-widget menu attributes. With devterm installed the widget's tap opens a small
@@ -67,6 +69,8 @@ CONFD="${AIRLOCK_CONFD:-/etc/airlock/nginx}"
 # route to the gate and run browse-host/install.sh at the end (warn-only).
 BROWSE="${AIRLOCK_PASEO_BROWSE:-false}"
 BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
+DESCENDANT_SUDO="${AIRLOCK_PASEO_DESCENDANT_SUDO:-false}"
+case "$DESCENDANT_SUDO" in true|false) ;; *) die "AIRLOCK_PASEO_DESCENDANT_SUDO must be true or false" ;; esac
 
 # ---- Resource backstop, sized from this box's RAM ----
 # The unit used to carry a flat MemoryMax=8G with no MemoryHigh. On a big box that
@@ -76,11 +80,18 @@ BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
 # would over-size the cap), MemTotal as the fallback.
 # Reserve = max(4GiB, 15%) for the OS and every other app on the box; MemoryHigh
 # = ~89% of max so there is a throttle band below the cliff (see render.sh).
-# AIRLOCK_PASEO_MEM_CAP_BYTES is a test seam (install/test-render-parity.sh pins
-# it so the golden does not bake in the RAM of whichever box ran the suite). It is
-# not a supported knob — the point of this block is that no box has to be told.
-_cap="${AIRLOCK_PASEO_MEM_CAP_BYTES:-$(cat /sys/fs/cgroup/memory.max 2>/dev/null || true)}"
-case "$_cap" in ''|max|*[!0-9]*) _cap=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) * 1024 )) ;; esac
+# AIRLOCK_PASEO_MEM_CAP_BYTES is also the deterministic test seam. In an
+# unbounded container, however, it is required operator input: /proc/meminfo
+# exposes shared-host RAM and would manufacture a budget the container does not
+# own. Bare metal may safely fall back to its physical MemTotal.
+_cap_override="${AIRLOCK_PASEO_MEM_CAP_BYTES:-}"
+_cgroup_cap="$(cat /sys/fs/cgroup/memory.max 2>/dev/null || true)"
+_memtotal_bytes=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) * 1024 ))
+_is_container=0
+if [ -e /run/systemd/container ] || [ -e /.dockerenv ]; then _is_container=1; fi
+_cap="$(paseo_memory_cap_bytes \
+  "$_cap_override" "$_cgroup_cap" "$_memtotal_bytes" "$_is_container")" \
+  || die "paseo install refused: no trustworthy memory budget. Use a finite cgroup memory.max, or set AIRLOCK_PASEO_MEM_CAP_BYTES to an operator-approved cap for an unbounded container."
 _cap_gib=$(( _cap / 1024 / 1024 / 1024 ))
 _reserve_gib=$(( (_cap_gib * 15 + 99) / 100 ))
 [ "$_reserve_gib" -lt 4 ] && _reserve_gib=4
@@ -159,6 +170,13 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 
 # write or systemctl — the same position, and the same shape, as the memory
 # refusal above.
 PASEO_NNP_BLOCK="NoNewPrivileges=yes"
+if [ "$DESCENDANT_SUDO" = true ]; then
+  printf -v PASEO_NNP_BLOCK '%s\n%s\n%s' \
+    "# NoNewPrivileges is deliberately OFF for this unit." \
+    "# descendant_sudo=true: spawned owner agents may use setuid sudo." \
+    "NoNewPrivileges=no"
+  log "WARNING: descendant_sudo=true — NoNewPrivileges is off for airlock-paseo only"
+fi
 _node_found="$(command -v node 2>/dev/null || true)"
 _node_real="$(readlink -f -- "$_node_found" 2>/dev/null || true)"
 _node_runtime="$(node -p 'process.execPath' 2>/dev/null || true)"
@@ -166,7 +184,9 @@ _snap_probes="$(airlock_snap_probe "$_node_found" "$_node_real" "$_node_runtime"
 if [ -n "$_snap_probes" ]; then
   _snap_detail="probes=[${_snap_probes}] found=${_node_found:-<none>} \
 resolved=${_node_real:-<none>} runtime=${_node_runtime:-<unreadable>}"
-  if [ "${AIRLOCK_ALLOW_SNAP_NODE:-0}" = 1 ]; then
+  if [ "$DESCENDANT_SUDO" = true ]; then
+    log "snap-wrapped node accepted because descendant_sudo already disables NoNewPrivileges — ${_snap_detail}"
+  elif [ "${AIRLOCK_ALLOW_SNAP_NODE:-0}" = 1 ]; then
     log "WARNING: paseo is being installed against a snap-wrapped node by explicit override \
 AIRLOCK_ALLOW_SNAP_NODE=1 — ${_snap_detail}. NoNewPrivileges is being turned OFF for the \
 airlock-paseo unit only, because snap's setuid-root re-exec cannot survive it. Nothing else \
@@ -554,6 +574,47 @@ else
   fi
 fi
 
+# --- 2h. strip ambient OPENAI_API_KEY from Codex spawns (idempotent) ---
+# The unit boundary below removes a manager/session-wide OPENAI_API_KEY from the
+# daemon. Defense in depth is still required at the actual Codex spawn because
+# Paseo composes runtime and launch overlays there. The patch adds a final
+# undefined overlay unless runtimeSettings explicitly carries a non-empty key;
+# custom OpenAI-compatible runtimes therefore keep their intentional key while
+# an ambient or incidental launch overlay cannot silently switch Codex to billing.
+CODEX_KEY_PATCHER="$HERE/patches/codex-strip-ambient-openai-key.mjs"
+CODEX_KEY_TEST="$HERE/patches/codex-strip-ambient-openai-key.test.mjs"
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  log "[dry] strip ambient OPENAI_API_KEY at Codex spawn in $CODEX_AGENT_JS"
+elif [ ! -f "$CODEX_AGENT_JS" ]; then
+  die "Codex provider not found ($CODEX_AGENT_JS) — cannot enforce ambient OPENAI_API_KEY isolation"
+elif [ ! -f "$CODEX_KEY_PATCHER" ]; then
+  die "Codex ambient-key patcher not found ($CODEX_KEY_PATCHER) — cannot enforce ambient OPENAI_API_KEY isolation"
+else
+  ck_rc=0
+  ck_out="$(node "$CODEX_KEY_PATCHER" "$CODEX_AGENT_JS")" || ck_rc=$?
+  case "$ck_rc" in
+    10) log "Codex ambient OPENAI_API_KEY spawn guard already applied" ;;
+    20) die "Codex ambient-key anchors missing or ambiguous (paseo version drift) — refusing an unguarded install" ;;
+    0)
+      CK_TMP="${CODEX_AGENT_JS}.paseo-new.mjs"
+      if node --check "$CK_TMP"; then
+        mv "$CK_TMP" "$CODEX_AGENT_JS" || die "Codex ambient-key guard mv failed"
+        need_restart=1
+        log "Codex ambient OPENAI_API_KEY spawn guard applied"
+      else
+        rm -f "$CK_TMP"
+        die "Codex ambient-key guard produced invalid JS — not applied"
+      fi
+      ;;
+    *) die "Codex ambient-key patcher error (rc=$ck_rc): $ck_out" ;;
+  esac
+  if [ -f "$CODEX_KEY_TEST" ] && grep -q 'paseo-codex-strip-ambient-openai-key' "$CODEX_AGENT_JS" 2>/dev/null; then
+    node "$CODEX_KEY_TEST" "$CODEX_AGENT_JS" >/dev/null 2>&1 \
+      || die "Codex ambient-key runtime check failed — patched spawn does not preserve only explicit runtime keys"
+    log "Codex ambient-key runtime check passed"
+  fi
+fi
+
 # --- 3. tailnet FQDN (for the gate Host header + the daemon hostname allowlist) ---
 # In dry-run, ts_fqdn may fail (no tailscale) — use a placeholder so the fragment
 # still renders. In a real install a failing ts_fqdn fails closed (as intended).
@@ -580,13 +641,29 @@ else
      | write_if_changed "$UNIT"
   then need_restart=1; fi
 fi
+# Read this BEFORE daemon-reload clears it. NeedDaemonReload=yes means an earlier
+# deployment wrote unit bytes but did not finish its restart transaction.
+prior_daemon_reload=no
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] \
+   && paseo_unit_needs_daemon_reload airlock-paseo.service; then
+  prior_daemon_reload=yes
+  log "airlock-paseo.service reports NeedDaemonReload=yes — recovery restart required"
+fi
 airlock_run systemctl --user daemon-reload
 airlock_run systemctl --user enable airlock-paseo.service
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  warn_paseo_linger "${USER:-}"
+fi
 # Restart only when something changed (or the service is down / dry-run). An
 # idempotent re-run with no changes must NOT restart — that would drop the owner's
 # live paseo agent sessions.
-if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] || [ "$need_restart" = 1 ] \
-   || ! systemctl --user is-active --quiet airlock-paseo.service; then
+unit_active=inactive
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] \
+   && systemctl --user is-active --quiet airlock-paseo.service; then
+  unit_active=active
+fi
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] \
+   || paseo_should_restart "$need_restart" "$prior_daemon_reload" "$unit_active"; then
   airlock_run systemctl --user restart airlock-paseo.service
 else
   log "paseo unchanged and active — not restarting (preserves live sessions)"

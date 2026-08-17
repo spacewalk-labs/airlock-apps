@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>devterm keytest — 한글 입력 진단</title>
+<style>
+  body { margin: 0; padding: 16px; background: #181b24; color: #e6eaf2; font: 15px system-ui, sans-serif; }
+  textarea { box-sizing: border-box; width: 100%; padding: 10px; border: 1px solid #555;
+             border-radius: 8px; background: #0d1017; color: #fff; font: 18px D2Coding, monospace; }
+  button { margin: 8px 6px 8px 0; padding: 8px 12px; border: 1px solid #555;
+           border-radius: 8px; background: #2b3140; color: #eee; }
+  pre { min-height: 40vh; padding: 10px; overflow: auto; white-space: pre-wrap;
+        word-break: break-all; border: 1px solid #333; border-radius: 8px; background: #0d1017; }
+</style>
+</head>
+<body>
+<h1>한글 입력 진단</h1>
+<p>아래 칸에 한글을 입력한 뒤 이벤트 로그를 복사해 주세요.</p>
+<textarea id="input" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+<div><button id="copy">로그 복사</button><button id="clear">지우기</button></div>
+<pre id="log"></pre>
+<script>
+  const input = document.getElementById('input');
+  const log = document.getElementById('log');
+  function append(event) {
+    const fields = [event.type];
+    if (event.type.startsWith('key')) fields.push('key=' + JSON.stringify(event.key), 'code=' + event.code);
+    if (event.type === 'input' || event.type === 'beforeinput' || event.type.startsWith('composition')) {
+      fields.push('inputType=' + event.inputType, 'data=' + JSON.stringify(event.data),
+                  'isComposing=' + event.isComposing);
+    }
+    fields.push('value=' + JSON.stringify(input.value));
+    log.textContent += fields.join('  ') + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+  ['keydown', 'keyup', 'compositionstart', 'compositionupdate', 'compositionend', 'beforeinput', 'input']
+    .forEach((name) => input.addEventListener(name, append));
+  document.getElementById('clear').onclick = () => { input.value = ''; log.textContent = ''; input.focus(); };
+  document.getElementById('copy').onclick = async function () {
+    try { await navigator.clipboard.writeText(log.textContent); this.textContent = '복사됨'; }
+    catch (_) { this.textContent = '복사 실패 — 로그를 직접 선택해 주세요'; }
+  };
+  log.textContent = 'UA=' + navigator.userAgent + '\nplatform=' + navigator.platform + '\n';
+  input.focus();
+</script>
+</body>
+</html>

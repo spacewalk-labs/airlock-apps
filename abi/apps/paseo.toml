@@ -2,9 +2,9 @@ id = "paseo"
 state = "stateful"
 quiesce = "stop-units"
 snapshot = "copy-paseo-home"
-forward = "pending-parity"
-write_capture = "pending-parity"
-reverse = "pending-parity"
+forward = "copy-retained-paths"
+write_capture = "capture-post-cutover-writes"
+reverse = "restore-retained-paths"
 rpo = "0"
 paths = [
   "~/.paseo/",

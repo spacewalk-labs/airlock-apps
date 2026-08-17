@@ -23,14 +23,17 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
   image paste + annotate, pane zoom / equalize), seamless auto-reconnect, a mobile key
   bar with forced Ctrl+C / touch scroll / CJK-IME handling, clickable URLs, and a
   return-to-Airlock affordance (origin derived from `location`, not hardcoded).
+- **Hangul diagnostics and font fallback**: owner-gated `/keytest.html` records browser
+  composition/key events. D2 Coding is bundled after the platform monospace stack for
+  Hangul coverage; provenance and the OFL redistribution notice are in `NOTICE` and
+  `web/vendor/D2Coding-OFL.txt`.
 - **ttyd** is provisioned automatically (sha256-pinned x86_64 and aarch64 releases) and is used
   only as the PTY backend; its built-in web UI is never served.
 
 ## Config (`[apps.devterm]`)
 
-`https_port` (secure-context, clipboard) · `public_port` (plaintext; 301s to
-`https_port` and serves nothing) · `redirect_port` (loopback server behind that
-301) · `gate_port` (loopback nginx gate) · `backend_port` (loopback devterm-gate) ·
+`https_port` (secure-context, clipboard) · `gate_port` (loopback nginx gate) ·
+`backend_port` (loopback devterm-gate) ·
 `ttyd_port` (loopback ttyd) · `font_size` · `lang`.
 
 ### Optional features (default off, degrade cleanly when their deps are absent)
