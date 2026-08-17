@@ -18,7 +18,6 @@ NONE_FIELDS = ("quiesce", "snapshot", "forward", "write_capture", "reverse")
 CAPABILITIES = ("rooted-artifact", "system-unit", "plaintext-redirect")
 EXPECTED_CAPABILITIES = {
     "orca": ("rooted-artifact", "system-unit"),
-    "devterm": ("plaintext-redirect",),
 }
 
 
