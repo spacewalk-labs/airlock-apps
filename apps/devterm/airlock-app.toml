@@ -2,6 +2,7 @@ contract = 1
 id = "devterm"
 
 # Transcribed from the former APP_DEFAULTS["devterm"] entry.
+# D-DEVTERM-9900 retired public_port/redirect_port. HTTPS only.
 [config.defaults]
 https_port = 8443
 gate_port = 9910
