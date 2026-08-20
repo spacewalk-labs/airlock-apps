@@ -7,12 +7,9 @@ id = "paseo"
 # operator config. TASKS_MAX is a genuine knob, deliberately left here rather than
 # promoted: it is read as a raw string with its own default, and declaring it as a
 # config key would export it and change what the installer sees. MEM_CAP_BYTES is
-# an explicit cap for an otherwise unbounded container; tests
-# also use it to make the renderer independent of the runner's RAM.
-# ALLOW_UNBACKED_MEM is compared against the literal `1` (install.sh:105), so
-# declaring it as a bool would export "true" and silently stop matching.
+# an explicit cap for an otherwise unbounded container; tests also use it to make
+# the renderer independent of the runner's RAM.
 runtime_env = [
-  "AIRLOCK_PASEO_ALLOW_UNBACKED_MEM",
   "AIRLOCK_PASEO_MEM_CAP_BYTES",
   "AIRLOCK_PASEO_TASKS_MAX",
 ]

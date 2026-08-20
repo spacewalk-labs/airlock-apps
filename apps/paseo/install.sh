@@ -49,6 +49,8 @@ AIRLOCK_APP_ID="${AIRLOCK_APP_ID:-paseo}"
 . "$HERE/render.sh"
 # shellcheck source=/dev/null
 . "$HERE/state.sh"
+# shellcheck source=/dev/null
+. "$HERE/resource-profile.sh"
 
 airlock_load paseo
 # Return-widget menu attributes. With devterm installed the widget's tap opens a small
@@ -72,64 +74,34 @@ BROWSE_WS_PORT="${AIRLOCK_PASEO_BROWSE_WS_PORT:-6768}"
 DESCENDANT_SUDO="${AIRLOCK_PASEO_DESCENDANT_SUDO:-false}"
 case "$DESCENDANT_SUDO" in true|false) ;; *) die "AIRLOCK_PASEO_DESCENDANT_SUDO must be true or false" ;; esac
 
-# ---- Resource backstop, sized from this box's RAM ----
-# The unit used to carry a flat MemoryMax=8G with no MemoryHigh. On a big box that
-# is a silent ceiling (sessions die at 8G on a 32GiB machine); on a small one the
-# same number is most of the machine. Derive it instead: cgroup memory.max first
-# (a container's own limit — /proc/meminfo leaks the host's total inside LXC and
-# would over-size the cap), MemTotal as the fallback.
-# Reserve = max(4GiB, 15%) for the OS and every other app on the box; MemoryHigh
-# = ~89% of max so there is a throttle band below the cliff (see render.sh).
-# AIRLOCK_PASEO_MEM_CAP_BYTES is also the deterministic test seam. In an
-# unbounded container, however, it is required operator input: /proc/meminfo
-# exposes shared-host RAM and would manufacture a budget the container does not
-# own. Bare metal may safely fall back to its physical MemTotal.
+# ---- Resource backstop: explicit guest-memory profiles ----
+# MemoryMax is a Paseo circuit breaker, not a reservation for the whole guest.
+# The former `cap - max(4GiB, 15%)` formula made up an OS reserve without workload
+# evidence, then treated it as the unit's usable memory. In particular, it denied
+# an 8GB Mac guest before Paseo could receive its known-good 6.5G / 6G profile.
+#
+# Select only from the memory the guest actually received: the lowest numeric
+# memory.max from this process through its cgroup ancestors (containers may see
+# the host's MemTotal). An unbounded container still needs an operator-approved
+# cap; bare metal may safely fall back to MemTotal.
 _cap_override="${AIRLOCK_PASEO_MEM_CAP_BYTES:-}"
-_cgroup_cap="$(cat /sys/fs/cgroup/memory.max 2>/dev/null || true)"
+_cgroup_cap="$(paseo_effective_memory_cap_bytes)"
 _memtotal_bytes=$(( $(awk '/^MemTotal:/{print $2}' /proc/meminfo) * 1024 ))
 _is_container=0
 if [ -e /run/systemd/container ] || [ -e /.dockerenv ]; then _is_container=1; fi
 _cap="$(paseo_memory_cap_bytes \
   "$_cap_override" "$_cgroup_cap" "$_memtotal_bytes" "$_is_container")" \
   || die "paseo install refused: no trustworthy memory budget. Use a finite cgroup memory.max, or set AIRLOCK_PASEO_MEM_CAP_BYTES to an operator-approved cap for an unbounded container."
-_cap_gib=$(( _cap / 1024 / 1024 / 1024 ))
-_reserve_gib=$(( (_cap_gib * 15 + 99) / 100 ))
-[ "$_reserve_gib" -lt 4 ] && _reserve_gib=4
-_memmax_gib=$(( _cap_gib - _reserve_gib ))
-# The pids backstop defaults to the box maximum (owner decision, 2026-08-07):
-# `infinity` on the unit defers to the enclosing user slice, which is the real
-# ceiling and differs per box. A finite value here puts a unit-level backstop
-# back — see the comment above TasksMax in render.sh for what that trades.
-PASEO_TASKSMAX="${AIRLOCK_PASEO_TASKS_MAX:-infinity}"
-# Below the reserve there is nothing left to back off to, and the derivation
-# inverts: at 4 GiB the reserve is the whole box and `usable` is 0. This used to
-# be papered over with `[ "$_memmax_gib" -lt 2 ] && _memmax_gib=2`, which handed
-# a 4 GiB box half of itself and a 2 GiB box all of itself — a number that reads
-# as a limit and is not one. Owner decision (2026-08-06): say why and refuse,
-# and let an operator who means it override explicitly. The override renders
-# `infinity` rather than a flattering figure, because "no memory backstop" is
-# what is true. TasksMax is unaffected by the memory decision, but note that it
-# now defaults to infinity too, so an overridden box has no unit-level backstop
-# of either kind — only the enclosing user slice.
-_min_memmax_gib=2
-if [ "$_memmax_gib" -lt "$_min_memmax_gib" ]; then
-  if [ "${AIRLOCK_PASEO_ALLOW_UNBACKED_MEM:-0}" = 1 ]; then
-    log "WARNING: paseo memory backstop disabled by explicit override AIRLOCK_PASEO_ALLOW_UNBACKED_MEM=1 \
-— this unit gets no memory limit at all: cap=${_cap} bytes (${_cap_gib} GiB), reserve=${_reserve_gib} GiB, \
-usable=${_memmax_gib} GiB; rendering MemoryMax=infinity and MemoryHigh=infinity. TasksMax=${PASEO_TASKSMAX} \
-— with the default that leaves the enclosing user slice as the only limit of any kind on this unit."
-    PASEO_MEMMAX=infinity
-    PASEO_MEMHIGH=infinity
-  else
-    die "paseo install refused: this box is too small to give paseo a memory slice that means anything. \
-cap=${_cap} bytes (${_cap_gib} GiB), reserve=${_reserve_gib} GiB, usable=${_memmax_gib} GiB, \
-minimum usable=${_min_memmax_gib} GiB. Writing a MemoryMax here would name a limit the unit does not have. \
-To install anyway with no memory backstop (TasksMax still applies), set AIRLOCK_PASEO_ALLOW_UNBACKED_MEM=1."
-  fi
+_gib=$((1024 * 1024 * 1024))
+# 24,576 leaves room for a wide agent tree without reverting to an unobservable
+# `infinity` unit limit. AIRLOCK_PASEO_TASKS_MAX remains an emergency override.
+PASEO_TASKSMAX="${AIRLOCK_PASEO_TASKS_MAX:-24576}"
+if ! _profile="$(paseo_resource_profile "$_cap" "$PASEO_TASKSMAX")"; then
+  die "paseo install refused: the guest needs at least 7 GiB effective memory for the 8GB Paseo profile. \
+cap=${_cap} bytes ($(( _cap / _gib )) GiB). Increase the VM or container memory first; \
+do not disable Paseo's memory backstop."
 else
-  _memhigh_gib=$(( _memmax_gib * 8 / 9 ))
-  PASEO_MEMMAX="${_memmax_gib}G"
-  PASEO_MEMHIGH="${_memhigh_gib}G"
+  read -r PASEO_MEMMAX PASEO_MEMHIGH PASEO_TASKSMAX <<<"$_profile"
 fi
 
 PASEO_PKG="@getpaseo/cli"
