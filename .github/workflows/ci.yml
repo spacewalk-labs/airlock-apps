@@ -20,6 +20,11 @@ jobs:
           bash test/all-app-artifacts.sh --parity --fixture-contract
           bash test/all-app-artifacts.sh --parity \
             --app devterm --app dev-monitor --app code-server
+  paseo-resource-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash apps/paseo/test-resource-profile.sh
   no-core-mix:
     runs-on: ubuntu-latest
     steps:

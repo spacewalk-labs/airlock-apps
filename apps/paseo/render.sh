@@ -17,9 +17,9 @@
 # PY/PID_GUARD: interpreter + apps/paseo/paseo-clear-stale-pid.py path, spliced
 # into an ExecStartPre that reaps a stale $HOME/.paseo/paseo.pid before start
 # (see that script's header for why: upstream never reaps it itself).
-# MEMMAX/MEMHIGH/TASKSMAX: resource backstop, sized from the box's RAM by the
-# caller (install.sh). Passed in rather than computed here so the rendered text
-# stays a pure function of its arguments — the golden-render tests depend on it.
+# MEMMAX/MEMHIGH/TASKSMAX: explicit resource profile selected from the guest's
+# effective memory by install.sh. Passed in rather than computed here so the
+# rendered text stays a pure function of its arguments.
 # NNP_BLOCK: normally the single line `NoNewPrivileges=yes`. When the installer
 # has been told to proceed on a snap-wrapped node it is that line turned off plus
 # the comment saying why — assembled by the caller and passed as ONE argument, on
@@ -95,12 +95,12 @@ TimeoutStopSec=20
 # be command substitution — the comment would RUN at install time and vanish.)
 Restart=always
 RestartSec=3
-# Backstop, not a reservation (idle ~440M). Sized from the box's RAM by the
-# installer: MemoryMax = total - max(4GiB, 15%), so a runaway multi-session tree
-# cannot take the machine down with it.
+# Backstop, not a reservation (idle ~440M). The installer selects a measured
+# profile from the guest's effective memory: 7–<16GiB gets 6.5G / 6G; 16GiB+
+# gets 14G / 12G. A runaway multi-session tree cannot take the guest down with it.
 #
-# MemoryHigh (~89% of max) is the part that matters in practice. MemoryMax alone
-# is a cliff: the cgroup runs flat out to the ceiling and then the allocation is
+# MemoryHigh is the part that matters in practice. MemoryMax alone is a cliff:
+# the cgroup runs flat out to the ceiling and then the allocation is
 # refused, and each runtime dies its own way there (node=SIGABRT, chrome=SIGTRAP,
 # python=SIGSEGV) with no warning first. MemoryHigh does not refuse — it forces
 # reclaim and throttles, so the result is a slowdown instead of a crash, and the
@@ -118,18 +118,10 @@ MemoryHigh=${MEMHIGH}
 # failing, and it surfaces as unrelated-looking tool errors rather than as a
 # resource limit. 24576 was the next guess, chosen on one box.
 #
-# Owner decision (2026-08-07): the default is the most this box can give, not a
-# number picked somewhere else. 'infinity' is not "unbounded" for a --user unit —
-# it is enclosed by user-<uid>.slice, whose pids.max is the real ceiling (339389
-# on the box this was measured on; systemd's DefaultTasksMax is 15% of
-# kernel.threads-max elsewhere). Deferring to that is the only spelling of
-# "maximum" that stays true when the box changes; a number derived here would
-# bake one kernel's limits into a golden, which is the mistake the memory block
-# above already had to unlearn.
-#
-# What it costs, stated plainly: this unit no longer carries a pids backstop of
-# its own, so 'pids.events' on the unit will never show 'max' climbing — the
-# slice's will instead. AIRLOCK_PASEO_TASKS_MAX puts a finite one back.
+# 24,576 is deliberately generous: wide agent trees need far more than the old
+# 1,024 ceiling, but the unit still records pids.events before a runaway tree can
+# exhaust the enclosing user slice. AIRLOCK_PASEO_TASKS_MAX sets a different
+# value only for a specifically measured host.
 TasksMax=${TASKSMAX}
 ${NNP_BLOCK}
 
