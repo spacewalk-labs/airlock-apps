@@ -88,12 +88,12 @@ reference / re-derivation copy of that edit.
 |---|---|---|
 | paseo daemon (`@getpaseo/cli`) | **AGPL-3.0** (upstream) | fetched via npm at install; not redistributed by Airlock |
 | `patches/` (our edits to paseo) | **AGPL-3.0** | derivative of paseo |
-| `install.sh`, `smoke.sh`, this README | MIT (Airlock core) | our glue; runs paseo as a separate process (mere aggregation) |
-| `browse-host/` sidecar | **MIT** | independent loopback-WS sidecar; does not import paseo |
+| `install.sh`, `smoke.sh`, this README | Apache-2.0 (Airlock core) | our glue; runs paseo as a separate process (mere aggregation) |
+| `browse-host/` sidecar | **Apache-2.0** | independent loopback-WS sidecar; does not import paseo |
 | `browse-host/bin/patch-web-ui.js` | **AGPL-3.0** | encodes derivative edits to paseo's web-ui bundle |
 
 See the repo `NOTICE` and `patches/README.md`. Airlock talks to paseo over a
-separate process boundary, so the Airlock core stays MIT (mere aggregation); only
+separate process boundary, so the Airlock core stays Apache-2.0 (mere aggregation); only
 the modifications **to paseo itself** are AGPL. *This is not legal advice.*
 
 ## browse-host live panels (config-gated)
@@ -114,4 +114,4 @@ Level-2 web-ui patch is SHA-pinned to `@getpaseo/cli`. See `browse-host/README.m
 | `install.sh` | provision + pin `@getpaseo/cli` · depth4 patch · systemd `--user` unit · nginx owner-gate fragment (direct, +3 headers) · `tailscale serve` · browse-host wiring when `browse = true` |
 | `smoke.sh` | gate health: backend reachable, owner 200/302, deny 403, no-header 403 |
 | `patches/` | the AGPL depth4 patch + its licensing note |
-| `browse-host/` | MIT sidecar for agent browser tools + live panels (wired in when `browse = true`) |
+| `browse-host/` | Apache-2.0 sidecar for agent browser tools + live panels (wired in when `browse = true`) |

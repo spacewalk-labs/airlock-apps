@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Smoke gate for the Paseo browse host sidecar (run as owner inside the box).
 # Asserts: unit active, registered with the live daemon (hello in daemon.log),
 # and a network-free executor round-trip against the installed Chromium

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 "use strict";
 // Live browser-panel stream transport (task doc §14.5). A loopback WS server the
 // patched paseo web-ui reaches at wss://<fqdn>:8447/browse-view/<browserId>,

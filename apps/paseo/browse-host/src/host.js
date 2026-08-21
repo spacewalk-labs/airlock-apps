@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 "use strict";
 // paseo-browse-host: a loopback WebSocket client that registers as a Paseo
 // browser automation host and drives headless Chromium via the executor.

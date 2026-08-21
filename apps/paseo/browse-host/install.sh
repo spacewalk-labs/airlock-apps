@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 # Install the Paseo server-side browse host sidecar (a loopback WS client that
 # registers a browser automation host with the paseo daemon and drives headless
 # Chromium).

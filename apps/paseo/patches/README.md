@@ -1,11 +1,11 @@
 # paseo patches — AGPL-3.0-only
 
-**License: `AGPL-3.0-only`** (not the repo's MIT).
+**License: `AGPL-3.0-only`** (not the repo's Apache-2.0).
 
 Paseo (`@getpaseo/cli`, upstream https://github.com/getpaseo/paseo) is licensed
 **AGPL-3.0**. The files in this directory modify Paseo's own bundle, so they are
 **derivative works of Paseo** and are licensed **AGPL-3.0-only**, independent of
-the MIT license that covers the rest of Airlock.
+the Apache-2.0 license that covers the rest of Airlock.
 
 ## What is here
 
@@ -127,14 +127,14 @@ the MIT license that covers the rest of Airlock.
 The browse-host sidecar carries one more AGPL derivative outside this directory:
 **`../browse-host/bin/patch-web-ui.js`** (`SPDX-License-Identifier:
 AGPL-3.0-only`), which encodes minimal edits to paseo's web-ui bundle for live
-panels. Everything else under `../browse-host/` is an independent MIT sidecar.
+panels. Everything else under `../browse-host/` is an independent Apache-2.0 sidecar.
 
-## Why the rest of Airlock can stay MIT
+## Why the rest of Airlock can stay Apache-2.0
 
 Airlock runs Paseo as a **separate process** and communicates with it over
 IPC/WebSocket. The Airlock core and the `apps/paseo/` installer + `browse-host/`
 sidecar (our own code) do not incorporate Paseo's source, so they are *mere
-aggregation* and remain MIT. Only the modifications **to Paseo itself** (here) are
+aggregation* and remain Apache-2.0. Only the modifications **to Paseo itself** (here) are
 AGPL-3.0.
 
 > This is not legal advice. Confirm against the AGPL-3.0 terms — and consider
