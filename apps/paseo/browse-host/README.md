@@ -69,10 +69,10 @@ questions it has not been asked.
 
 ## Licensing
 
-- **The sidecar is MIT.** `host.js`, `security.js`, `executor.js`,
+- **The sidecar is Apache-2.0.** `host.js`, `security.js`, `executor.js`,
   `stream-server.js`, `commands.js`, `bin/paseo-browse-host.js`, `web/*.js`, the
   tests, `install.sh`, and `smoke.sh` are an **independent** loopback-WS sidecar —
-  they do **not** import paseo. Each carries `SPDX-License-Identifier: MIT`.
+  they do **not** import paseo. Each carries `SPDX-License-Identifier: Apache-2.0`.
 - **`bin/patch-web-ui.js` is AGPL-3.0-only.** It encodes derivative edits to
   paseo's own web-ui bundle, so it carries `SPDX-License-Identifier:
   AGPL-3.0-only` (same basis as `../patches/`). See `../patches/README.md`.
@@ -81,16 +81,16 @@ questions it has not been asked.
 
 | Path | Role | License |
 |---|---|---|
-| `bin/paseo-browse-host.js` | entry point | MIT |
+| `bin/paseo-browse-host.js` | entry point | Apache-2.0 |
 | `bin/patch-web-ui.js` | paseo web-ui bundle patcher (live panel) | **AGPL-3.0-only** |
-| `src/host.js` | WS client: registers the browser host, answers execute requests | MIT |
-| `src/executor.js` | Playwright command executor (tabs, refs, redaction) | MIT |
-| `src/stream-server.js` | live-view CDP screencast + input transport | MIT |
-| `src/security.js` | proportionate URL policy (SSRF guard) | MIT |
-| `src/commands.js` | supported-command manifest | MIT |
-| `web/browse-view-client.js` | web-ui companion (canvas + toolbar + roster dock) | MIT |
-| `test/*` | unit + integration + e2e | MIT |
-| `install.sh` / `smoke.sh` | manual install + ship-gate smoke | MIT |
+| `src/host.js` | WS client: registers the browser host, answers execute requests | Apache-2.0 |
+| `src/executor.js` | Playwright command executor (tabs, refs, redaction) | Apache-2.0 |
+| `src/stream-server.js` | live-view CDP screencast + input transport | Apache-2.0 |
+| `src/security.js` | proportionate URL policy (SSRF guard) | Apache-2.0 |
+| `src/commands.js` | supported-command manifest | Apache-2.0 |
+| `web/browse-view-client.js` | web-ui companion (canvas + toolbar + roster dock) | Apache-2.0 |
+| `test/*` | unit + integration + e2e | Apache-2.0 |
+| `install.sh` / `smoke.sh` | manual install + ship-gate smoke | Apache-2.0 |
 
 ## Tests
 
