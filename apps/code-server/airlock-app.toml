@@ -11,10 +11,10 @@ runtime_env = [
 ]
 
 [config.defaults]
-https_port = 8444
-gate_port = 18808
-backend_port = 18811
-manager_port = 18810
+https_port = 19930
+gate_port = 19931
+backend_port = 19933
+manager_port = 19932
 slots = 4
 
 # D8: code-server actually binds backend_port .. backend_port+slots-1 (one
@@ -117,8 +117,9 @@ serve_ports = ["https_port"]
 [serve.https]
 https_port = "gate_port"
 
-# From hub/index.html's APPS table (code-server row). The app is HTTPS-only:
-# it has no public_port/redirect_port or [plaintext_redirect].
+# From hub/index.html's APPS table (code-server row). code-server has no
+# public_port/redirect_port at all (https only), so unlike devterm there is
+# no [plaintext_redirect] here.
 [tile]
 label = "code-server"
 sub = "browser IDE"

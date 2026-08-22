@@ -7,15 +7,8 @@ id = "markwand"
 # in install.sh (paths.code_root is not expressible in [config], the same
 # way notepad's publish dependency stays app-side per plan rev 3).
 [config.defaults]
-markserv_port = 18799
-filebrowser_port = 18801
-# Comma-separated names of non-hidden, top-level directories under $HOME to
-# expose as same-name aliases below [paths].code_root. Empty owns no aliases.
-home_aliases = ""
-# Exposes the complete ~/.claude and ~/.codex trees as non-hidden `claude` and
-# `codex` aliases below code_root. This includes credentials and session history,
-# so the measured compatibility capability is explicit and defaults off.
-agent_config_aliases = false
+markserv_port = 19920
+filebrowser_port = 19921
 
 # Transcribed from install/prerequisites.tsv's six markwand rows (F11).
 [[prerequisites]]
@@ -61,7 +54,7 @@ fix = "sudo apt-get update && sudo apt-get install -y systemd"
 note = "User services"
 
 # Appendix: two user units, one hub-locations fragment, the __mw/ static
-# asset directory (10 files, claimed as one directory the way every other
+# asset directory (9 files, claimed as one directory the way every other
 # webroot dir claim works), and the markserv/filebrowser binaries + npm
 # tree + npm's own staging-leftover sibling pattern + filebrowser's
 # branding dir. Deliberately NOT declared (retained data): CODE_ROOT (the
