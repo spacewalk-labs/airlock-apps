@@ -155,6 +155,14 @@ server {
     listen 127.0.0.1:@@LISTEN@@;
     server_name _;
 
+    # Uploads pass through this gate: pasted screenshots, attached files, anything
+    # the agent UI POSTs. Nobody set a size here, so nginx's built-in 1m applied and
+    # a normal screenshot (1-4 MB) came back 413. Unset is not a decision — the
+    # neighbours behind this same owner gate all made one, and orca and the browse
+    # box both chose 0. Match them: the gate already refuses everyone who is not the
+    # owner, so a body cap adds nothing here that $owner_ok does not already do.
+    client_max_body_size 0;
+
     # paseo serves an upstream web UI we cannot edit, so the gate serves + injects
     # the shared "return to Airlock" widget (floating, bottom-right).
     location = /airlock-return.js { alias @@WIDGET@@; default_type application/javascript; add_header Cache-Control "no-cache" always; access_log off; }
