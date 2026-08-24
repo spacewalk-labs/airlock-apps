@@ -1,7 +1,7 @@
 # shared by foundation-boundary.sh and app-release-isolation.sh
 # shellcheck shell=bash
 
-PUBLIC_APPS=(code-server dev-monitor devterm feedback markwand notepad notes orca paseo publish)
+PUBLIC_APPS=(code-server dev-monitor devterm feedback learning markwand notepad notes orca paseo publish)
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOUNDATION="$(cd "$HERE/.." && pwd)"

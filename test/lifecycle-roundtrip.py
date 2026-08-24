@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APPS = (
-    "code-server", "dev-monitor", "devterm", "feedback",
+    "code-server", "dev-monitor", "devterm", "feedback", "learning",
     "markwand", "notepad", "notes", "orca", "paseo", "publish",
 )
 PROCEDURES = {

@@ -1,0 +1,13 @@
+id = "learning"
+state = "stateful"
+quiesce = "stop-units"
+snapshot = "copy-library-and-state"
+forward = "copy-retained-paths"
+write_capture = "capture-post-cutover-writes"
+reverse = "restore-retained-paths"
+rpo = "0"
+paths = [
+  "~/learning/",
+  "~/.local/state/airlock-learning/",
+]
+capabilities = []
