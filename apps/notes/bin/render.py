@@ -166,6 +166,19 @@ security.limit_extensions = .php
 
 def render_jump() -> str:
     return r"""(() => {
+  document.title = 'Notes';
+  for (const [rel, href] of [
+    ['icon', '/assets/app-icons/notes.svg'],
+    ['apple-touch-icon', '/assets/app-icons/notes.png']
+  ]) {
+    let link = document.querySelector(`link[rel="${rel}"]`);
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = rel;
+      document.head.appendChild(link);
+    }
+    link.href = href;
+  }
   const cookie = Object.fromEntries(document.cookie.split(';').map(v => v.trim().split('=')));
   fetch('/notes/_obs/vaults.json', {credentials: 'same-origin'})
     .then(r => { if (!r.ok) throw new Error(`registry ${r.status}`); return r.json(); })

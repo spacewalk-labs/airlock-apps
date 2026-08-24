@@ -205,6 +205,7 @@ python3 "$HERE/bin/render.py" \
   --supervisor "$HERE/bin/editor-supervisor.py" --uid "$(id -u)" --gid "$(id -g)"
 install -m 644 "$run_stage/edit-jump.js" "$run_stage/obs/edit-jump.js"
 install -m 644 "$HERE/reader/raw.php" "$run_stage/obs/raw.php"
+install -m 644 "$HERE/reader/app.html" "$run_stage/obs/app.html"
 while IFS= read -r vault_id; do
   install -d -m 700 "$run_stage/sockets/$vault_id"
 done < <(python3 -c 'import json,sys; print("\n".join(v["id"] for v in json.load(open(sys.argv[1]))["vaults"]))' "$run_stage/server-plan.json")
