@@ -13,7 +13,7 @@ import unicodedata
 from pathlib import Path
 
 
-ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?\Z")
 ENTRY_KEYS = frozenset({"id", "label", "path", "home_file", "writable"})
 
 
