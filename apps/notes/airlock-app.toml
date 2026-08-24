@@ -59,6 +59,13 @@ fix = "sudo apt-get update && sudo apt-get install -y curl"
 note = "Pinned SilverBullet download and smoke probes"
 
 [[prerequisites]]
+command = "sha256sum"
+predicate = "present"
+expected = "-"
+fix = "sudo apt-get update && sudo apt-get install -y coreutils"
+note = "Pinned SilverBullet release verification"
+
+[[prerequisites]]
 command = "unzip"
 predicate = "present"
 expected = "-"
