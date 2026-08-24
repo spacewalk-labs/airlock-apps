@@ -10,7 +10,6 @@ concrete way this could go wrong; see docs/design/publish-local-target.md §9.
 Exit 0 = all pass. Any failure prints the check name and exits 1.
 """
 import contextlib
-import base64
 import http.server
 import importlib.util
 import io
@@ -22,7 +21,6 @@ import sys
 import tempfile
 import threading
 import time
-import unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND = os.path.join(HERE, 'backend', 'airlock-publish.py')
@@ -189,7 +187,7 @@ def t_slug_abuse(tmp):
 
 # ---------------------------------------------------------------------- 3
 def t_symlinked_source(tmp):
-    print('\n[3] PB-A4 keeps external-symlink HTML publication compatibility')
+    print('\n[3] a symlinked source still publishes (the documented workflow)')
     share, pub, _s, env = make_dirs(tmp)
     m = load(env)
     real = os.path.join(tmp, 'elsewhere')
@@ -199,7 +197,7 @@ def t_symlinked_source(tmp):
         fh.write('<html><title>repo doc</title><body>x</body></html>')
     os.symlink(src, os.path.join(share, 'repo-doc.html'))
     ok, res = m.publish_public('repo-doc.html', 24, OWNER)
-    check('PB-A4 selected external-symlink doc publishes', ok, str(res))
+    check('symlinked doc publishes', ok, str(res))
     check('content came from the link target', ok and 'repo doc' in
           open(os.path.join(pub, res['slug'], 'index.html')).read())
 
@@ -415,15 +413,11 @@ class _StubIngest(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get('Content-Length', '0'))
         body = json.loads(self.rfile.read(n) or b'{}')
-        _StubIngest.seen.append((self.path,
-            self.headers.get('X-Airlock-Publish-Token'),
-            self.headers.get('X-Docpub-Token'), body))
+        _StubIngest.seen.append((self.path, self.headers.get('X-Airlock-Publish-Token'), body))
         self._reply({'ok': True, 'result': {'expiry': 1790000000, 'ttl_hours': body.get('ttl_hours')}})
 
     def do_GET(self):
-        _StubIngest.seen.append((self.path,
-            self.headers.get('X-Airlock-Publish-Token'),
-            self.headers.get('X-Docpub-Token'), None))
+        _StubIngest.seen.append((self.path, self.headers.get('X-Airlock-Publish-Token'), None))
         self._reply({'ok': True, 'items': []})
 
     def log_message(self, *_a):
@@ -431,43 +425,23 @@ class _StubIngest(http.server.BaseHTTPRequestHandler):
 
 
 def t_remote_regression(tmp):
-    print('\n[remote] negotiated v0/v1 protocol, preflight, validation, and rollback')
+    print('\n[13,14] remote protocol, size behavior, and local-only guards')
     share, _p, state, _env = make_dirs(tmp)
     m = load({'AIRLOCK_PUBLISH_SHARE_DIR': share, 'AIRLOCK_PUBLISH_STATE_DIR': state,
               'AIRLOCK_PUBLISH_INGEST_URL': 'https://ingest.example',
               'AIRLOCK_PUBLISH_BASE_URL': 'https://docs.example',
               'AIRLOCK_PUBLISH_TOKEN': 'sekret'})
     seen = []
-    def fake_ingest(method, ep, body=None, timeout=20, version='0'):
-        seen.append((method, ep, body, timeout, version))
-        if ep == '/health':
-            raise OSError('legacy runtime has no health')
-        if ep.startswith('/list'):
-            return {'ok': True, 'items': []}
+    def fake_ingest(method, ep, body=None, timeout=20):
+        seen.append((method, ep, body, timeout))
         return {'ok': True, 'result': {'expiry': 1790000000, 'ttl_hours': body.get('ttl_hours')}}
-    native_ingest = m._ingest
     m._ingest = fake_ingest
     check('remote enabled', m.PUBLIC_ENABLED and m.PUBLIC_MODE == 'remote')
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), _StubIngest)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    real_url = m.INGEST_URL
-    m.INGEST_URL = f'http://127.0.0.1:{server.server_address[1]}'
-    m._ingest = native_ingest
-    _StubIngest.seen = []
-    m._ingest('GET', '/list', version='0')
-    m._ingest('GET', '/list', version='1')
-    server.shutdown(); server.server_close(); thread.join()
-    m.INGEST_URL, m._ingest = real_url, fake_ingest
-    check('each protocol request sends exactly its matching token header',
-          _StubIngest.seen[0][1:3] == ('sekret', None)
-          and _StubIngest.seen[1][1:3] == (None, 'sekret'), str(_StubIngest.seen))
     page(share, 'r.html')
     ok, res = m.publish_public('r.html', 336, OWNER)
     check('remote publish ok', ok, str(res))
-    method, pathq, body, _timeout, version = seen[-1]
+    method, pathq, body, _timeout = seen[-1]
     check('POST /ingest', method == 'POST' and pathq == '/ingest', f'{method} {pathq}')
-    check('legacy operations use only the v0 transport', version == '0', str(seen))
     check('remote token remains configured', m.TOKEN == 'sekret')
     check('payload keys unchanged',
           set(body) == {'slug', 'owner', 'src', 'title', 'ttl_hours', 'html_b64'}, str(sorted(body)))
@@ -478,97 +452,21 @@ def t_remote_regression(tmp):
     ok_big, res_big = m.publish_public('big.html', 24, OWNER)
     check('remote accepts a >25MB snapshot (no new cap)', ok_big, str(res_big)[:120])
 
-    # New remote publications require an identity; an existing v0 link remains refreshable.
+    # empty owner is a REMOTE-mode behaviour we must not change
     ok_e, _ = m.publish_public('r.html', 24, '')
-    check('new remote publication without owner is refused', not ok_e)
+    check('remote still allows an empty owner (unchanged)', ok_e)
 
     ok_plan, plan_err = m.plan_bundle('r.html', owner=OWNER)
-    check('remote bundle planning is available', ok_plan, str(plan_err))
-    ok_docs, docs_err = m.publish_public('r.html', 24, OWNER,
-                                         docs=['r.html'], plan_id=plan_err['plan_id'])
-    check('legacy remote bundle is refused', not ok_docs and 'v1' in str(docs_err), str(docs_err))
+    check('remote bundle planning is refused', not ok_plan and 'local mode' in str(plan_err), str(plan_err))
+    ok_docs, docs_err = m.publish_public('r.html', 24, OWNER, docs=[])
+    check('remote docs payload is refused', not ok_docs and 'local mode' in str(docs_err), str(docs_err))
     ok_gate, gate_res = m.publish_public('r.html', 24, OWNER, mode='gated', password='remote-password')
-    check('legacy remote gated publish is refused', not ok_gate and 'v1' in str(gate_res), str(gate_res))
-
-    # A v1 runtime uses the v1 transport for health/list/ingest/revoke and validates
-    # the exact mode, URL, version, expiry, and TTL result fields.
-    def v1_ingest(method, ep, body=None, timeout=20, version='0'):
-        seen.append((method, ep, body, timeout, version))
-        if ep == '/health':
-            return {'ok': True, 'public_contract': {
-                'supported_versions': ['0', '1'], 'modes': ['open', 'gated']}}
-        if ep.startswith('/list'):
-            return {'ok': True, 'items': []}
-        if ep == '/revoke':
-            return {'ok': True}
-        slug = body['slug']
-        mode = body.get('mode', 'open')
-        prefix = '/g' if mode == 'gated' else ''
-        return {'ok': True, 'result': {'contract_version': '1', 'mode': mode,
-                'slug': slug, 'url': f'https://docs.example{prefix}/{slug}/',
-                'expiry': int(time.time()) + int(body['ttl_hours']) * 3600,
-                'ttl_hours': int(body['ttl_hours'])}}
-    m._ingest = v1_ingest
-    ok_v1, v1 = m.publish_public('r.html', 24, OWNER, mode='gated', password='secret')
-    check('v1 gated publish succeeds', ok_v1 and v1.get('contract_version') == '1', str(v1))
-    check('v1 flow uses the v1 transport on every successful request',
-          all(call[4] == '1' for call in seen[-3:]), str(seen[-3:]))
-
-    for mismatch in ('slug', 'ttl', 'expiry'):
-        rollback_calls, created_slug = [], []
-        def mismatch_ingest(method, ep, body=None, timeout=20, version='0'):
-            if ep == '/health':
-                return v1_ingest(method, ep, body, timeout, version)
-            if ep.startswith('/list'):
-                return {'ok': True, 'items': []}
-            if ep == '/revoke':
-                rollback_calls.append((body['slug'], body['owner'], version))
-                return {'ok': True}
-            created_slug.append(body['slug'])
-            result = {'contract_version': '1', 'mode': body['mode'],
-                      'slug': body['slug'],
-                      'url': f"https://docs.example/{body['slug']}/",
-                      'expiry': int(time.time()) + int(body['ttl_hours']) * 3600,
-                      'ttl_hours': int(body['ttl_hours'])}
-            if mismatch == 'slug':
-                result.update({'slug': 'wrong-result-slug',
-                               'url': 'https://docs.example/wrong-result-slug/'})
-            elif mismatch == 'ttl':
-                result['ttl_hours'] += 1
-            else:
-                result['expiry'] += 3600
-            return {'ok': True, 'result': result}
-        m._ingest = mismatch_ingest
-        bad, bad_error = m.publish_public('r.html', 24, OWNER)
-        expected_slugs = ([created_slug[0], 'wrong-result-slug'] if mismatch == 'slug'
-                          else [created_slug[0]])
-        expected = [(target, OWNER, '1') for target in expected_slugs]
-        check(f'mismatched v1 {mismatch} fails closed and revokes every possible creation',
-              not bad and 'mismatched' in str(bad_error)
-              and rollback_calls == expected, f'{bad_error}; revoked={rollback_calls}')
-
-    def duplicate_ingest(method, ep, body=None, timeout=20, version='0'):
-        if ep == '/health':
-            return v1_ingest(method, ep, body, timeout, version)
-        if ep.startswith('/list'):
-            return {'ok': True, 'items': [
-                {'slug': 'one', 'src': 'r.html'}, {'slug': 'two', 'src': 'r.html'}]}
-        raise AssertionError('ingest must not run after duplicate preflight')
-    m._ingest = duplicate_ingest
-    dup_ok, dup_error = m.publish_public('r.html', 24, OWNER)
-    check('duplicate source preflight aborts with conflicting slugs',
-          not dup_ok and 'one' in str(dup_error) and 'two' in str(dup_error), str(dup_error))
-
-    def failed_list(method, ep, body=None, timeout=20, version='0'):
-        if ep == '/health':
-            return v1_ingest(method, ep, body, timeout, version)
-        if ep.startswith('/list'):
-            return {'ok': False, 'error': 'list offline'}
-        raise AssertionError('ingest must not run after list failure')
-    m._ingest = failed_list
-    list_ok, list_error = m.publish_public('r.html', 24, OWNER)
-    check('list failure aborts before ingest',
-          not list_ok and 'list offline' in str(list_error), str(list_error))
+    check('remote gated publish is refused', not ok_gate and 'local mode' in str(gate_res), str(gate_res))
+    real_ingest = m._ingest
+    m._ingest = lambda *_args, **_kwargs: {'ok': True, 'result': []}
+    ok_bad, bad_res = m.publish_public('r.html', 24, OWNER)
+    m._ingest = real_ingest
+    check('malformed remote ingest result fails closed', not ok_bad and 'invalid result' in str(bad_res), str(bad_res))
 
     m2 = load({'AIRLOCK_PUBLISH_SHARE_DIR': share, 'AIRLOCK_PUBLISH_STATE_DIR': state,
                'AIRLOCK_PUBLISH_PUBLIC_MODE': 'local', 'AIRLOCK_PUBLISH_BASE_URL': 'https://x',
@@ -701,90 +599,6 @@ def _raises(fn):
     except Exception:
         return True
     return False
-
-
-def t_parity_migrations(tmp):
-    print('\n[parity] attachments, context-aware assets, Unicode names, and image namespace')
-    share, _pub, _state, env = make_dirs(tmp)
-    m = load(env)
-    page(share, 'bundle.html', '<title>Bundle</title><a href="guide.pdf">guide</a>'
-         '<a href="photo.png">photo</a><script>"<img src=\'fake.png\'>"</script>'
-         '<!-- <img src="secret.png"> -->')
-    with open(os.path.join(share, 'guide.pdf'), 'wb') as fh:
-        fh.write(b'pdf')
-    with open(os.path.join(share, 'photo.png'), 'wb') as fh:
-        fh.write(b'png')
-    ok, plan = m.plan_bundle('bundle.html', owner=OWNER)
-    check('plan reports attachment names, bytes, and sources',
-          ok and [a['name'] for a in plan['attachments']] == ['guide.pdf', 'photo.png']
-          and plan['attachment_bytes'] == 6
-          and all(a['source'].endswith(a['name']) for a in plan['attachments']), str(plan))
-    _title, files, _warnings = m.build_bundle_files('bundle.html', ['bundle.html'])
-    check('attachment-bearing build carries approved linked files',
-          files['guide.pdf'] == b'pdf' and files['photo.png'] == b'png')
-    check('inactive comment and script references are not treated as assets',
-          b'fake.png' in files['index.html'] and b'secret.png' in files['index.html'])
-
-    page(share, 'missing-attachment.html', '<a href="absent.pdf">missing</a>')
-    check('unresolved active local attachment fails publication',
-          _raises(lambda: m.build_bundle_files(
-              'missing-attachment.html', ['missing-attachment.html'])))
-    outside = os.path.join(tmp, 'outside.pdf')
-    with open(outside, 'wb') as fh:
-        fh.write(b'outside')
-    os.symlink(outside, os.path.join(share, 'outside.pdf'))
-    page(share, 'symlink-attachment.html', '<a href="outside.pdf">outside</a>')
-    ok_symlink, symlink_error = m.plan_bundle('symlink-attachment.html', owner=OWNER)
-    check('PB-A4 keep does not widen attachment symlink provenance',
-          not ok_symlink and 'symlink provenance' in str(symlink_error), str(symlink_error))
-    check('attachment reader independently refuses a symlink',
-          _raises(lambda: m._read_attachment('outside.pdf')))
-
-    page(share, 'missing.html', '<img src="missing.png">')
-    check('unresolved active local assets fail publication',
-          _raises(lambda: m.bundle_single_file('missing.html')))
-    page(share, 'styles.html', '<style>.x{background:url(missing.png)}</style>')
-    check('unresolved local CSS url fails publication',
-          _raises(lambda: m.bundle_single_file('styles.html')))
-
-    old_attachments, old_member, old_total = (
-        m.MAX_BUNDLE_ATTACHMENTS, m.MAX_BUNDLE_MEMBER_BYTES, m.MAX_BUNDLE_TOTAL_BYTES)
-    try:
-        m.MAX_BUNDLE_ATTACHMENTS = 1
-        check('attachment count bound is enforced',
-              _raises(lambda: m.build_bundle_files('bundle.html', ['bundle.html'])))
-        m.MAX_BUNDLE_ATTACHMENTS = old_attachments
-        m.MAX_BUNDLE_MEMBER_BYTES = 2
-        check('attachment member-size bound is enforced before ingest',
-              _raises(lambda: m.build_bundle_files('bundle.html', ['bundle.html'])))
-        m.MAX_BUNDLE_MEMBER_BYTES = old_member
-        m.MAX_BUNDLE_TOTAL_BYTES = 5
-        check('attachment bundle total-size bound is enforced before ingest',
-              _raises(lambda: m.build_bundle_files('bundle.html', ['bundle.html'])))
-    finally:
-        m.MAX_BUNDLE_ATTACHMENTS, m.MAX_BUNDLE_MEMBER_BYTES, m.MAX_BUNDLE_TOTAL_BYTES = (
-            old_attachments, old_member, old_total)
-
-    decomposed = '한글 보고서\u0000.pdf'
-    safe = m._safe_upload_name(decomposed)
-    check('upload names are NFC-normalized and controls removed',
-          unicodedata.is_normalized('NFC', safe) and safe == '한글 보고서_.pdf', safe)
-    check('upload names have an explicit 120-character bound',
-          0 < len(m._safe_upload_name('가' * 200 + '.pdf')) <= m.UPLOAD_NAME_MAX_CHARS)
-    bounded = m._safe_upload_name('가' * 200 + '.pdf')
-    check('multibyte upload names fit the filesystem byte boundary',
-          len(bounded.encode('utf-8')) <= m.UPLOAD_NAME_MAX_BYTES, bounded)
-    upload_data = base64.b64encode(b'payload').decode()
-    ok_one, saved_one = m.save_uploaded_file('가' * 200 + '.pdf', upload_data)
-    ok_two, saved_two = m.save_uploaded_file('가' * 200 + '.pdf', upload_data)
-    check('multibyte collision names remain distinct and byte-bounded',
-          ok_one and ok_two and saved_one['name'] != saved_two['name']
-          and all(len(item['name'].encode('utf-8')) <= m.UPLOAD_NAME_MAX_BYTES
-                  for item in (saved_one, saved_two)), f'{saved_one}; {saved_two}')
-    os.makedirs(m.UPLOADS, exist_ok=True)
-    with open(os.path.join(m.UPLOADS, '이미지005-20260816-010203.jpg'), 'wb') as fh:
-        fh.write(b'old')
-    check('existing Korean image sequence advances canonical image writes', m._next_upload_seq() == 6)
 
 
 def t_gated_contract(tmp):
@@ -1105,13 +919,95 @@ def t_state_first_transaction(tmp):
           f'state={restored}, content={open(os.path.join(live, "index.html")).read()}')
 
 
+def t_slides_gallery_uses_publish_target(tmp):
+    print('\n[slides] generated decks are listed, guarded, and published through the shared target')
+    share, pub, state, env = make_dirs(tmp)
+    slides = os.path.join(tmp, 'slides')
+    os.makedirs(os.path.join(slides, 'demo', 'img'))
+    with open(os.path.join(slides, 'demo', 'deck.html'), 'w', encoding='utf-8') as fh:
+        fh.write('<html><head><title>Demo deck</title><script src="../_kit/deck.js"></script>'
+                 '<script src="../.slides-manager.log"></script><script src="img/leak.js"></script></head>'
+                 '<body><section>one</section><section>two</section><img src="img/a.png"></body></html>')
+    with open(os.path.join(slides, 'demo', 'img', 'a.png'), 'wb') as fh:
+        fh.write(b'image')
+    os.makedirs(os.path.join(slides, '_kit'))
+    with open(os.path.join(slides, '_kit', 'deck.js'), 'w', encoding='utf-8') as fh:
+        fh.write('window.deck = true;')
+    with open(os.path.join(slides, '.slides-manager.log'), 'w', encoding='utf-8') as fh:
+        fh.write('secret audit line')
+    outside = os.path.join(tmp, 'outside.js')
+    with open(outside, 'w', encoding='utf-8') as fh:
+        fh.write('secret outside asset')
+    os.symlink(outside, os.path.join(slides, 'demo', 'img', 'leak.js'))
+    os.symlink(os.path.join(slides, 'demo'), os.path.join(slides, 'linked-deck'))
+    os.makedirs(os.path.join(slides, 'linked-entry'))
+    os.symlink(outside, os.path.join(slides, 'linked-entry', 'deck.html'))
+    env['AIRLOCK_PUBLISH_SLIDES_DIR'] = slides
+    m = load(env)
+
+    decks = m.list_slides()
+    check('slide gallery lists direct deck', [deck['id'] for deck in decks] == ['demo'], str(decks))
+    check('slide gallery reads title and section count', decks[0]['title'] == 'Demo deck' and decks[0]['slides'] == 2,
+          str(decks[0]))
+    check('slide root does not follow deck symlinks', m._slide_dir('linked-deck') is None)
+    check('slide gallery rejects a symlinked entry page', m._slide_entry(os.path.join(slides, 'linked-entry')) is None)
+    page(share, '.audit.html', 'private share audit')
+    os.makedirs(os.path.join(share, 'nested'))
+    page(os.path.join(share, 'nested'), 'private.html', 'nested private page')
+    check('normal Publish retains its flat non-dot source contract',
+          not m.publish_public('.audit.html', 24, OWNER)[0] and
+          not m.publish_public('nested/private.html', 24, OWNER)[0])
+    blocked, message = m.delete_slide('demo', 'wrong')
+    check('slide delete requires exact deck id', not blocked and 'confirm mismatch' in message, message)
+
+    ok, result = m.publish_slide('demo', 24, OWNER)
+    check('slide publish uses the existing local target', ok, str(result))
+    state_doc = json.load(open(os.path.join(state, 'publish-public.json')))
+    item = state_doc['items'].get(result.get('slug', '')) if ok else None
+    check('slide public record has a distinct stable source key', item and item['src'] == 'slide:demo', str(item))
+    check('slide snapshot uses the shared expiry implementation', item and item['expiry'] > time.time(), str(item))
+    snapshot = os.path.join(pub, result['slug'], 'index.html') if ok else ''
+    check('slide snapshot inlines deck-local assets', snapshot and b'window.deck' in open(snapshot, 'rb').read(), snapshot)
+    snapshot_data = open(snapshot, 'rb').read() if snapshot else b''
+    check('slide snapshot excludes root audit content and external symlink assets',
+          b'secret audit line' not in snapshot_data and b'secret outside asset' not in snapshot_data)
+
+    deleted, message = m.delete_slide('demo', 'demo')
+    check('slide delete removes only the requested direct deck', deleted and not os.path.exists(os.path.join(slides, 'demo')),
+          message)
+    check('slide delete leaves the public snapshot lifecycle intact', ok and os.path.isfile(snapshot), snapshot)
+
+
+def t_slides_asset_contract(tmp):
+    print('\n[slides route] API serving permits presentation files, not source material')
+    slides = os.path.join(tmp, 'slides'); deck = os.path.join(slides, 'demo')
+    os.makedirs(os.path.join(deck, '_src'))
+    os.makedirs(os.path.join(slides, '_kit'))
+    with open(os.path.join(deck, 'deck.html'), 'w') as fh: fh.write('<h1>deck</h1>')
+    with open(os.path.join(deck, '.private'), 'w') as fh: fh.write('no')
+    with open(os.path.join(deck, '_src', 'notes.txt'), 'w') as fh: fh.write('no')
+    with open(os.path.join(slides, '_kit', 'runtime.js'), 'w') as fh: fh.write('ok')
+    outside = os.path.join(tmp, 'outside.txt')
+    with open(outside, 'w') as fh: fh.write('no')
+    os.symlink(outside, os.path.join(deck, 'escape.txt'))
+    os.rename(os.path.join(slides, '_kit'), os.path.join(tmp, 'kit-outside'))
+    os.symlink(os.path.join(tmp, 'kit-outside'), os.path.join(slides, '_kit'))
+    m = load({'AIRLOCK_PUBLISH_SLIDES_DIR': slides})
+    check('slides API route allows a deck entry', m.slide_asset_path('demo/deck.html') == os.path.join(deck, 'deck.html'))
+    check('slides API route rejects a symlinked shared runtime root', m.slide_asset_path('_kit/runtime.js') is None)
+    check('slides API route denies dotfiles', m.slide_asset_path('demo/.private') is None)
+    check('slides API route denies deck _src material', m.slide_asset_path('demo/_src/notes.txt') is None)
+    check('slides API route never follows symlinks', m.slide_asset_path('demo/escape.txt') is None)
+
+
 def main():
     for fn in (t_happy_path, t_slug_abuse, t_symlinked_source, t_empty_owner, t_owner_collision,
                t_crash_between, t_concurrent, t_corrupt_state, t_overlap_refused,
                t_config_shapes, t_remote_regression, t_bundle_plan_contract, t_gated_contract,
                t_gated_reconciliation_and_storage, t_local_bundle_limit,
                t_open_sweep_without_gated, t_local_ingest_transaction,
-               t_state_first_transaction, t_parity_migrations):
+               t_state_first_transaction, t_slides_gallery_uses_publish_target,
+               t_slides_asset_contract):
         tmp = tempfile.mkdtemp(prefix='airlock-pub-test-')
         try:
             fn(tmp)

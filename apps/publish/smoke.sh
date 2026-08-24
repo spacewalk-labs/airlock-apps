@@ -21,6 +21,7 @@ code() { curl -s -o /dev/null -w '%{http_code}' --max-time 6 "$@"; }
 c_be=$(code   "http://127.0.0.1:${BACKEND}/api/health")
 c_ui=$(code   -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${HUB}/publish/")
 c_list=$(code -H "${HDR}: ${OWNER}"           "http://127.0.0.1:${HUB}/publish/api/list")
+c_slides=$(code -H "${HDR}: ${OWNER}"         "http://127.0.0.1:${HUB}/publish/api/slides")
 c_files=$(code -H "${HDR}: ${OWNER}"          "http://127.0.0.1:${HUB}/publish/files/")
 c_deny=$(code -H "${HDR}: nobody@example.com" "http://127.0.0.1:${HUB}/publish/api/list")
 c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/api/list")
@@ -34,6 +35,8 @@ c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/
 # code-visible bound on its size at all, which is what makes it the same shape.
 list_body="$(curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list")"
 okjson=no; [[ "$list_body" =~ \"ok\":[[:space:]]*true ]] && okjson=yes
+slides_body="$(curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/slides")"
+slidesjson=no; [[ "$slides_body" =~ \"ok\":[[:space:]]*true ]] && slidesjson=yes
 overlaps() {
   local left right
   left="$(readlink -f "$1" 2>/dev/null)"; right="$(readlink -f "$2" 2>/dev/null)"
@@ -79,14 +82,16 @@ if [ "$PUB_MODE" = local ]; then
   fi
 fi
 
-echo "[publish smoke] backend=${c_be}/200 ui=${c_ui}/200 list=${c_list}/200 files=${c_files}/200 deny=${c_deny}/403 no-header=${c_no}/403 list-json=${okjson}/yes local-public=${localpub}"
+echo "[publish smoke] backend=${c_be}/200 ui=${c_ui}/200 list=${c_list}/200 slides=${c_slides}/200 files=${c_files}/200 deny=${c_deny}/403 no-header=${c_no}/403 list-json=${okjson}/yes slides-json=${slidesjson}/yes local-public=${localpub}"
 fail=0
 [ "$c_be"   = 200 ] || { echo "FAIL backend health"; fail=1; }
 [ "$c_ui"   = 200 ] || { echo "FAIL manager UI"; fail=1; }
 [ "$c_list" = 200 ] || { echo "FAIL list endpoint"; fail=1; }
+[ "$c_slides" = 200 ] || { echo "FAIL slides endpoint"; fail=1; }
 { [ "$c_files" = 200 ] || [ "$c_files" = 403 ] || [ "$c_files" = 404 ]; } || { echo "FAIL files location broken ($c_files)"; fail=1; }
 [ "$c_deny" = 403 ] || { echo "FAIL other identity not denied (GATE HOLE)"; fail=1; }
 [ "$c_no"   = 403 ] || { echo "FAIL missing header not denied (GATE HOLE)"; fail=1; }
 [ "$okjson" = yes ] || { echo "FAIL list did not return ok:true json"; fail=1; }
+[ "$slidesjson" = yes ] || { echo "FAIL slides did not return ok:true json"; fail=1; }
 { [ "$localpub" = n/a ] || [ "$localpub" = ok ]; } || { echo "FAIL local public target: $localpub"; fail=1; }
 [ "$fail" = 0 ]

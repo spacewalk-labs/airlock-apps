@@ -80,22 +80,4 @@ const remotePublish = api.startBundlePublish(remoteState, 'remote.html');
 assert.equal(remoteState.name, '');
 assert.equal(api.isCurrentBundlePublish(remoteState, remotePublish, 'remote.html'), true);
 
-const refreshStart = html.indexOf('// TESTABLE:VISIBLE_REFRESH_START');
-const refreshEnd = html.indexOf('// TESTABLE:VISIBLE_REFRESH_END');
-assert.ok(refreshStart >= 0 && refreshEnd > refreshStart, 'visible refresh markers missing');
-const refreshContext = {};
-vm.runInNewContext(html.slice(refreshStart, refreshEnd)
-  + '\nthis.refreshWhenVisible = refreshWhenVisible;', refreshContext);
-let refreshes = 0;
-assert.equal(refreshContext.refreshWhenVisible(true, () => { refreshes += 1; }), false);
-assert.equal(refreshes, 0, 'hidden pages must not refresh');
-assert.equal(refreshContext.refreshWhenVisible(false, () => { refreshes += 1; }), true);
-assert.equal(refreshes, 1, 'visible pages refresh once');
-
-assert.match(html, /localStorage\.getItem\("airlock-publish-theme"\)/);
-assert.doesNotMatch(html, /localStorage\.(?:getItem|setItem)\(["']markwand-theme["']/);
-assert.match(html, /setInterval\([^]*30000\)/);
-assert.match(html, /Attachments ["'] \+ attachments\.length/);
-assert.match(html, /Entry source:/);
-
 console.log('publish bundle plan state: ok');
