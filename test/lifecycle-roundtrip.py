@@ -21,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APPS = (
     "code-server", "dev-monitor", "devterm", "feedback",
-    "markwand", "notepad", "orca", "paseo", "publish",
+    "markwand", "notepad", "notes", "orca", "paseo", "publish",
 )
 PROCEDURES = {
     "forward": "copy-retained-paths",

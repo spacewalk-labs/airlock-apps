@@ -29,6 +29,13 @@ def bad(msg):
 sys.path.insert(0, str(foundation / "test"))
 from validate_lifecycle import APPS, validate
 
+# The transfer evidence is historical: these are the nine paths imported when
+# the public repository was created. Apps added later have ordinary PR history.
+HISTORY_APPS = (
+    "code-server", "dev-monitor", "devterm", "feedback", "markwand",
+    "notepad", "orca", "paseo", "publish",
+)
+
 # --- ABI files present -------------------------------------------------------
 for rel in ("abi/core-app-manifest.md", "abi/lifecycle.schema.json",
             "lock/schema.md", "builder/build-release.py",
@@ -38,13 +45,13 @@ for rel in ("abi/core-app-manifest.md", "abi/lifecycle.schema.json",
     else:
         bad(f"missing {rel}")
 
-# --- lifecycle declarations: 9/9, closed ------------------------------------
+# --- lifecycle declarations: current set, closed -----------------------------
 lifecycle_errors = validate(foundation, app_root)
 if lifecycle_errors:
     for item in lifecycle_errors:
         bad(item)
 else:
-    ok("lifecycle 9/9")
+    ok(f"lifecycle {len(APPS)}/{len(APPS)}")
 
 # --- foundation.json ---------------------------------------------------------
 pin_path = foundation / "foundation.json"
@@ -87,7 +94,7 @@ else:
     bad(f"lock rebuild input: {lock.get('rebuild_input')!r}")
 
 history = pin.get("history") if isinstance(pin.get("history"), dict) else {}
-if history.get("apps") == list(APPS):
+if history.get("apps") == list(HISTORY_APPS):
     ok("history app list")
 else:
     bad(f"history apps: {history.get('apps')!r}")
@@ -263,7 +270,7 @@ if git -C "$APP_ROOT/.." rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     fi
   done
   if [[ "$hist_ok" -eq 1 ]]; then
-    ok "git history exists for all 9 app paths"
+    ok "git history exists for all ${#PUBLIC_APPS[@]} app paths"
   fi
 else
   ok "skip history count (not a git checkout)"

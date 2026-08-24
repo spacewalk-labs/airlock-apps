@@ -8,7 +8,7 @@ from pathlib import Path
 
 APPS = (
     "code-server", "dev-monitor", "devterm", "feedback", "markwand",
-    "notepad", "orca", "paseo", "publish",
+    "notepad", "notes", "orca", "paseo", "publish",
 )
 EXPECTED_UNITS = {
     "code-server": ("airlock-code-server@.service", "airlock-code-server-manager.service"),
@@ -17,11 +17,14 @@ EXPECTED_UNITS = {
     "feedback": ("airlock-feedback.service",),
     "markwand": ("airlock-markserv.service", "airlock-filebrowser.service"),
     "notepad": (),
+    "notes": ("airlock-notes-editor.service",),
     "orca": ("airlock-orca-xvfb.service", "airlock-orca.service", "airlock-orca-firewall.service@system"),
     "paseo": ("airlock-paseo.service", "airlock-paseo-browse-host.service"),
     "publish": ("airlock-publish.service", "airlock-publish-cleanup.service", "airlock-publish-cleanup.timer"),
 }
-ARTIFACT_CLASSES = {"units", "fragments", "webroot", "files", "rooted", "serve_ports"}
+ARTIFACT_CLASSES = {
+    "units", "fragments", "webroot", "files", "rooted", "serve_ports", "containers",
+}
 
 
 def unit_key(value: object) -> str:
@@ -76,7 +79,7 @@ def main() -> None:
             raise SystemExit(f"{app}: {error}") from error
         if units != EXPECTED_UNITS[app]:
             raise SystemExit(f"{app}: unit ownership drift: {units} != {EXPECTED_UNITS[app]}")
-    print("ok: 9/9 manifests contract/id/artifacts/unit ownership")
+    print(f"ok: {len(APPS)}/{len(APPS)} manifests contract/id/artifacts/unit ownership")
 
 
 if __name__ == "__main__":
