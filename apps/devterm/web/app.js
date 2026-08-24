@@ -119,7 +119,7 @@ const TABS_KEY = 'devterm-tabs';
 function savedThemeKey() { try { const p = JSON.parse(localStorage.getItem(TABS_KEY)) || {}; return THEMES[p.theme] ? p.theme : DEFAULT_THEME; } catch (e) { return DEFAULT_THEME; } }
 
 const term = new Terminal({
-  fontFamily: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "DejaVu Sans Mono", "Liberation Mono", "D2Coding", monospace',
+  fontFamily: 'ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "DejaVu Sans Mono", "Liberation Mono", "D2Coding", "Symbols Nerd Font Mono", monospace',
   fontSize: 14,
   lineHeight: 1.2,                 // starting placeholder — applyLineHeight() snaps to an integer CSS-px cell height per device dpr (wide spacing + crisp)
   cursorBlink: true,

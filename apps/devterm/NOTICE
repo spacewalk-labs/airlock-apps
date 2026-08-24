@@ -17,3 +17,17 @@ License: SIL Open Font License, Version 1.1.
 The WOFF2 files above are copied unmodified from the upstream source commit.
 The required copyright notice and full license text are distributed alongside
 them at web/vendor/D2Coding-OFL.txt.
+
+Symbols Nerd Font Mono
+----------------------
+
+Files:
+  web/vendor/symbols-nerd-font-mono.woff2
+
+Source: https://github.com/ryanoasis/nerd-fonts
+Copyright (c) 2014, Ryan L McIntyre (https://ryanlmcintyre.com).
+License: SIL Open Font License, Version 1.1.
+
+The font is copied unmodified from the Orca package already distributed in
+this repository. The full license text is distributed alongside it at
+web/vendor/SymbolsNerdFontMono-OFL.txt.

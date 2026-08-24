@@ -75,6 +75,8 @@ def test_font_and_notice():
         "d2coding-400.woff2": "49a1a380c1079bc74950acf6152cbfc4fd69101813e18127e1be45bd8bb15063",
         "d2coding-700.woff2": "7e03de7314d7a2d5a8a275531c760902c71494ac1c7d1fde0dab4f2f318f0ca0",
         "D2Coding-OFL.txt": "1807e8dec4d65f474cbf9be39f5e2254ecb81702babc320749e272ea66ffcc69",
+        "symbols-nerd-font-mono.woff2": "8efa6ba89f0a1f3eefde028f36aa64a13e36282e15ea0ca6929c664501037467",
+        "SymbolsNerdFontMono-OFL.txt": "cf7e117fa08dc292484a0d087caaf6dfc339d912837b18a43af9bc410446390f",
     }
     for name, digest in expected.items():
         path = APP / "web" / "vendor" / name
@@ -85,8 +87,10 @@ def test_font_and_notice():
     index = (APP / "web" / "index.html").read_text()
     client = (APP / "web" / "app.js").read_text()
     assert "d2coding-400.woff2" in index and "d2coding-700.woff2" in index
+    assert "symbols-nerd-font-mono.woff2" in index
     family = next(line for line in client.splitlines() if "fontFamily:" in line)
-    assert family.index("ui-monospace") < family.index("D2Coding") < family.rindex("monospace")
+    assert (family.index("ui-monospace") < family.index("D2Coding")
+            < family.index("Symbols Nerd Font Mono") < family.rindex("monospace"))
 
 
 def test_keep_contracts():
@@ -160,6 +164,15 @@ render_devterm_nginx 9910 9912
 
 
 async def test_gate_routes(gate):
+    writer = Writer()
+    await gate.handle(Reader(request("GET", "/vendor/symbols-nerd-font-mono.woff2")), writer)
+    head, font = bytes(writer.data).split(b"\r\n\r\n", 1)
+    assert head.startswith(b"HTTP/1.1 200 OK\r\n")
+    assert b"\r\nContent-Type: font/woff2\r\n" in head
+    assert hashlib.sha256(font).hexdigest() == (
+        "8efa6ba89f0a1f3eefde028f36aa64a13e36282e15ea0ca6929c664501037467"
+    )
+
     writer = Writer()
     await gate.handle(Reader(request("GET", "/keytest.html")), writer)
     status, body = response(writer)
