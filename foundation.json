@@ -5,7 +5,7 @@
     "id": "public-app-split/v1",
     "core_contract": [1],
     "lifecycle_required_by": "airlock-apps-release-gate",
-    "digest": "49785990a9dc15dadeb52aa2e7990e83833dfb8e44fc107f921890813e920b3f"
+    "digest": "a9ff62035aba76a22898eb2c772a915d8034afe1cdfa8e1f383a1dcf9c3923c4"
   },
   "repository": {
     "planned_name": "airlock-apps",

@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 
 APPS = (
-    "code-server", "dev-monitor", "devterm", "feedback",
+    "code-server", "dev-monitor", "devterm", "feedback", "learning",
     "markwand", "notepad", "notes", "orca", "paseo", "publish",
 )
 REQUIRED = (
@@ -34,6 +34,7 @@ EXPECTED_PATHS = {
         "~/.local/state/airlock/devterm/codex-usage.json",
     ),
     "feedback": (),
+    "learning": ("~/learning/", "~/.local/state/airlock-learning/"),
     "markwand": ("~/.config/filebrowser/fb.db",),
     "notepad": (),
     "notes": (),
