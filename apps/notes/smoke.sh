@@ -79,17 +79,17 @@ PY
   [ -f "$tmp/extracted/index.php" ] && [ -f "$tmp/extracted/helper.php" ] \
     && [ ! -e "$tmp/extracted/old" ] || fail=1
   python3 "$HERE/bin/config-plan.py" --entries-json "$entries" --default-vault main \
-    --home "$home" --reader-port 19940 --editor-port-base 19941 --vault-slots 2 > "$plan" \
+    --home "$home" --reader-port 19960 --editor-port-base 19961 --vault-slots 2 > "$plan" \
     || fail=1
   python3 "$HERE/bin/config-plan.py" --entries-json "$entries" --default-vault main \
-    --home "$home" --reader-port 19940 --editor-port-base 19941 --vault-slots 2 \
+    --home "$home" --reader-port 19960 --editor-port-base 19961 --vault-slots 2 \
     --format client > "$client" || fail=1
   python3 - "$plan" "$client" <<'PY' || fail=1
 import json, sys
 server=json.load(open(sys.argv[1])); client=json.load(open(sys.argv[2]))
 assert server["router_container"] == "airlock-notes-router"
 assert server["vaults"][0]["reader_container"] == "airlock-notes-reader-main"
-assert server["vaults"][0]["editor_port"] == 19941
+assert server["vaults"][0]["editor_port"] == 19961
 assert all("path" not in vault for vault in client["vaults"])
 assert client["vaults"][0]["editor_path"] == "/notes/editor/main/"
 PY
@@ -100,7 +100,7 @@ PY
     --runtime-plan "$plan" --silverbullet "$tmp/silverbullet" \
     --supervisor "$tmp/supervisor.py" --uid "$(id -u)" --gid "$(id -g)" || fail=1
   [ "$(grep -Fc 'if ($owner_ok = 0) { return 403; }' "$out/notes.conf")" -eq 2 ] || fail=1
-  grep -Fq 'listen 127.0.0.1:19940;' "$out/router.conf" || fail=1
+  grep -Fq 'listen 127.0.0.1:19960;' "$out/router.conf" || fail=1
   for temp_kind in client_body proxy fastcgi uwsgi scgi; do
     grep -Fq "${temp_kind}_temp_path /tmp/${temp_kind};" "$out/router.conf" || fail=1
   done
@@ -115,8 +115,8 @@ PY
   cat > "$tmp/fake-config.py" <<'PY'
 import json, os, sys
 if sys.argv[1:] == ["env", "notes"]:
-    print("export AIRLOCK_NOTES_READER_PORT=19940")
-    print("export AIRLOCK_NOTES_EDITOR_PORT_BASE=19941")
+    print("export AIRLOCK_NOTES_READER_PORT=19960")
+    print("export AIRLOCK_NOTES_EDITOR_PORT_BASE=19961")
     print("export AIRLOCK_NOTES_VAULT_SLOTS=2")
     if os.environ.get("AIRLOCK_DRY_RUN") != "1":
         print("export AIRLOCK_CONTAINER_RECONCILE_MODE=" + os.environ.get("FAKE_RECONCILE_MODE", "fresh"))
@@ -352,8 +352,8 @@ provider = "tailscale"
 owner = "owner@example.com"
 [apps.hub]
 [apps.notes]
-reader_port = 19940
-editor_port_base = 19941
+reader_port = 19960
+editor_port_base = 19961
 vault_slots = 2
 [apps.notes.vaults]
 default_vault = "main"

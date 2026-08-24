@@ -15,8 +15,8 @@ Example:
 
 ```toml
 [apps.notes]
-reader_port = 19940
-editor_port_base = 19941
+reader_port = 19960
+editor_port_base = 19961
 vault_slots = 2
 
 [apps.notes.vaults]

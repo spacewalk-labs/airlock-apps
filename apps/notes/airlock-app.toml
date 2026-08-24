@@ -8,11 +8,11 @@ id = "notes"
 [config.defaults]
 # The hub proxies one same-origin reader endpoint to this loopback-only router.
 # It is config because another local service may already own the default port.
-reader_port = 19940
+reader_port = 19960
 # Each writable vault needs one loopback SilverBullet listener. Reserving a
 # configurable base keeps the whole derived range visible to Airlock's global
 # port-collision check.
-editor_port_base = 19941
+editor_port_base = 19961
 # This is both the maximum registry size and the number of editor ports Airlock
 # reserves. It is config so small boxes can reserve a smaller, explicit range.
 vault_slots = 10
