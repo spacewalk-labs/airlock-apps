@@ -8,7 +8,7 @@ from pathlib import Path
 
 APPS = (
     "code-server", "dev-monitor", "devterm", "feedback",
-    "markwand", "notepad", "orca", "paseo", "publish",
+    "markwand", "notepad", "notes", "orca", "paseo", "publish",
 )
 REQUIRED = (
     "id", "state", "quiesce", "snapshot", "forward",
@@ -36,6 +36,7 @@ EXPECTED_PATHS = {
     "feedback": (),
     "markwand": ("~/.config/filebrowser/fb.db",),
     "notepad": (),
+    "notes": (),
     "orca": (),
     "paseo": ("~/.paseo/",),
     "publish": (
