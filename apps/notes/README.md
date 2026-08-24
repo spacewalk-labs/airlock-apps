@@ -33,6 +33,13 @@ over the image's declared `VOLUME` so Docker does not create an anonymous one.
 Vault mounts are read-only in every reader container. Vault directories are
 retained operator data and are never package artifacts.
 
+A reconcile of the same package revision preserves the ledger's committed
+container IDs. If the vault plan changes while Notes is installed, the
+installer therefore fails before any Docker mutation. Run
+one normal install with the complete `[apps.notes]` subtree temporarily
+removed, then restore the changed subtree and install again. The first run
+reclaims the recorded runtime; the second records a fresh nonce and object set.
+
 The only public route is the hub's same-origin `/notes/` subtree. Every reader
 and editor location explicitly returns 403 when `$owner_ok = 0`; the package
 does not create a Tailscale serve mapping. Container removal belongs to the

@@ -118,10 +118,19 @@ if sys.argv[1:] == ["env", "notes"]:
     print("export AIRLOCK_NOTES_READER_PORT=19940")
     print("export AIRLOCK_NOTES_EDITOR_PORT_BASE=19941")
     print("export AIRLOCK_NOTES_VAULT_SLOTS=2")
+    if os.environ.get("AIRLOCK_DRY_RUN") != "1":
+        print("export AIRLOCK_CONTAINER_RECONCILE_MODE=" + os.environ.get("FAKE_RECONCILE_MODE", "fresh"))
+        print("export AIRLOCK_CONTAINER_DAEMON_IDENTITY=docker:fake-engine")
+        print("export AIRLOCK_INSTALL_NONCE=fake-runtime-nonce-0001")
 elif sys.argv[1:] == ["get", "apps.notes.vaults.default_vault"]:
     print("main")
 elif sys.argv[1:] == ["get", "apps.notes.vaults.entries"]:
-    print(json.dumps([{"id":"main","label":"Main","path":"$HOME/vault","home_file":"README","writable":True}]))
+    print(json.dumps([{"id":"main","label":"Main","path":"$HOME/vault",
+                       "home_file":os.environ.get("FAKE_HOME_FILE", "README"),
+                       "writable":True}]))
+elif sys.argv[1:] == ["container-admit", "notes"]:
+    print("\t".join((os.environ.get("FAKE_RECONCILE_MODE", "fresh"),
+                     "fake-runtime-nonce-0001", "docker:fake-engine")))
 else:
     raise SystemExit(2)
 PY
@@ -137,38 +146,90 @@ PY
   fakebin="$tmp/fakebin"; mkdir -p "$fakebin"
   fake_state="$tmp/fake-docker-state.json"
   printf '[]\n' > "$fake_state"
-  cat > "$fakebin/docker" <<'SH'
-#!/usr/bin/env bash
-case "${1:-}" in
-  info) exit 0 ;;
-  image)
-    case "${2:-}" in
-      inspect)
-        case "$*" in *--format*) echo sha256:fake-perlite ;; esac
-        exit 0 ;;
-      *) exit 90 ;;
-    esac ;;
-  ps)
-    python3 - "$DOCKER_STATE" <<'PY'
-import json, sys
-for obj in json.load(open(sys.argv[1])):
-    print(obj["Id"])
+  cat > "$fakebin/docker" <<'PY'
+#!/usr/bin/env python3
+import json, os, pathlib, sys
+
+state_path=pathlib.Path(os.environ["DOCKER_STATE"])
+log_path=pathlib.Path(os.environ["DOCKER_LOG"])
+argv=sys.argv[1:]
+objects=json.loads(state_path.read_text())
+
+def save():
+    state_path.write_text(json.dumps(objects, sort_keys=True))
+
+def log():
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(argv) + "\n")
+
+if argv == ["info"]:
+    raise SystemExit(0)
+if argv == ["info", "--format", "{{.ID}}"]:
+    print(os.environ.get("FAKE_ENGINE_ID", "fake-engine"))
+    raise SystemExit(0)
+if argv[:2] == ["image", "inspect"]:
+    if "--format" in argv:
+        print("sha256:fake-perlite")
+    raise SystemExit(0)
+if argv and argv[0] == "ps":
+    filters=[]
+    for i, value in enumerate(argv[:-1]):
+        if value == "--filter": filters.append(argv[i+1])
+    for obj in objects:
+        labels=obj["Config"]["Labels"]
+        if all(not f.startswith("label=") or labels.get(f[6:].split("=",1)[0]) == f[6:].split("=",1)[1]
+               for f in filters):
+            print(obj["Id"])
+    raise SystemExit(0)
+if argv and argv[0] == "inspect":
+    fmt=None
+    ids=[]
+    i=1
+    while i < len(argv):
+        if argv[i] == "--format": fmt=argv[i+1]; i += 2
+        else: ids.append(argv[i]); i += 1
+    selected=[obj for obj in objects if obj["Id"] in ids]
+    if len(selected) != len(ids):
+        missing=next(ident for ident in ids if not any(obj["Id"] == ident for obj in selected))
+        print(f"Error: No such object: {missing}", file=sys.stderr)
+        raise SystemExit(1)
+    if fmt is not None:
+        for obj in selected:
+            labels=obj["Config"]["Labels"]
+            print(obj["Id"], labels.get("io.airlock.package", ""),
+                  labels.get("io.airlock.install-nonce", ""))
+    else:
+        print(json.dumps(selected))
+    raise SystemExit(0)
+if argv and argv[0] == "run":
+    log()
+    prior=sum(1 for line in log_path.read_text().splitlines()
+              if line and json.loads(line)[0] == "run")
+    if prior == int(os.environ.get("DOCKER_FAIL_RUN_AT", "0")):
+        raise SystemExit(1)
+    name=argv[argv.index("--name")+1]
+    labels={}
+    for i, value in enumerate(argv[:-1]):
+        if value == "--label":
+            key, label_value=argv[i+1].split("=", 1); labels[key]=label_value
+    ident=f"{len(objects)+1:064x}"
+    objects.append({
+        "Id": ident, "Name": "/"+name, "State": {"Running": True},
+        "Config": {"Labels": labels}, "Mounts": [],
+        "HostConfig": {"NetworkMode": argv[argv.index("--network")+1]},
+    })
+    save(); print(ident)
+    raise SystemExit(0)
+if argv[:2] == ["rm", "-f"] and len(argv) == 3:
+    log()
+    ident=argv[2]
+    if len(ident) != 64: raise SystemExit(2)
+    remaining=[obj for obj in objects if obj["Id"] != ident]
+    if len(remaining) == len(objects): raise SystemExit(1)
+    objects[:]=remaining; save()
+    raise SystemExit(0)
+raise SystemExit(91)
 PY
-    ;;
-  inspect)
-    cat "$DOCKER_STATE"
-    ;;
-  run)
-    python3 - "$DOCKER_LOG" "$@" <<'PY'
-import json, sys
-with open(sys.argv[1], "a", encoding="utf-8") as handle:
-    handle.write(json.dumps(sys.argv[2:]) + "\n")
-PY
-    echo fake-container-id
-    exit 0 ;;
-  *) exit 91 ;;
-esac
-SH
   cat > "$fakebin/curl" <<'SH'
 #!/usr/bin/env bash
 exit 0
@@ -214,27 +275,75 @@ assert router[router.index("--network")+1]=="host"
 assert not any("/vaults/" in value for value in router)
 PY
 
-  python3 - "$fake_state" <<'PY'
-import json, sys
-objects=[]
-for name in ("airlock-notes-reader-main", "airlock-notes-router"):
-    objects.append({
-        "Id": ("1" if name.endswith("main") else "2") * 64,
-        "Name": "/" + name,
-        "State": {"Running": True},
-        "Config": {"Labels": {
-            "io.airlock.package": "notes",
-            "io.airlock.install-nonce": "fake-runtime-nonce-0001",
-        }},
-    })
-json.dump(objects, open(sys.argv[1], "w"))
+  python3 - "$fake_state" <<'PY' || fail=1
+import json, re, sys
+objects=json.load(open(sys.argv[1]))
+assert {o["Name"] for o in objects} == {
+    "/airlock-notes-reader-main", "/airlock-notes-router"}
+assert len({o["Id"] for o in objects}) == 2
+assert all(re.fullmatch(r"[0-9a-f]{64}", o["Id"]) for o in objects)
+assert all(o["Config"]["Labels"] == {
+    "io.airlock.package": "notes",
+    "io.airlock.install-nonce": "fake-runtime-nonce-0001",
+} for o in objects)
 PY
   : > "$tmp/docker.log"
   DOCKER_LOG="$tmp/docker.log" DOCKER_STATE="$fake_state" PATH="$fakebin:$PATH" \
+    FAKE_RECONCILE_MODE=reuse-required \
     AIRLOCK_CONFIG_BIN="$tmp/fake-config.py" AIRLOCK_ROOT="$ROOT" AIRLOCK_APP_DIR="$HERE" \
     AIRLOCK_CONFD="$tmp/live-confd" AIRLOCK_INSTALL_NONCE=fake-runtime-nonce-0001 \
     HOME="$home" bash "$HERE/install.sh" >/dev/null 2>&1 || fail=1
   [ ! -s "$tmp/docker.log" ] || fail=1
+
+  # Same code digest + changed vault config is not an upgrade. D9 requires the
+  # committed ids to survive such a reconcile, so the installer must refuse
+  # before issuing any Docker mutation instead of recreating with the same
+  # nonce and failing at ledger commit afterwards.
+  : > "$tmp/docker.log"
+  changed_err="$tmp/changed-plan.err"
+  if DOCKER_LOG="$tmp/docker.log" DOCKER_STATE="$fake_state" PATH="$fakebin:$PATH" \
+    FAKE_HOME_FILE=INDEX FAKE_RECONCILE_MODE=reuse-required \
+    AIRLOCK_CONFIG_BIN="$tmp/fake-config.py" AIRLOCK_ROOT="$ROOT" AIRLOCK_APP_DIR="$HERE" \
+    AIRLOCK_CONFD="$tmp/live-confd" AIRLOCK_INSTALL_NONCE=fake-runtime-nonce-0001 \
+    HOME="$home" bash "$HERE/install.sh" >/dev/null 2>"$changed_err"; then
+    fail=1
+  fi
+  grep -Fq 'remove the [apps.notes] subtree and run the normal installer once' \
+    "$changed_err" || fail=1
+  [ ! -s "$tmp/docker.log" ] || fail=1
+
+  : > "$tmp/docker.log"
+  identity_err="$tmp/identity.err"
+  if DOCKER_LOG="$tmp/docker.log" DOCKER_STATE="$fake_state" PATH="$fakebin:$PATH" \
+    FAKE_RECONCILE_MODE=reuse-required FAKE_ENGINE_ID=other-engine \
+    AIRLOCK_CONFIG_BIN="$tmp/fake-config.py" AIRLOCK_ROOT="$ROOT" AIRLOCK_APP_DIR="$HERE" \
+    AIRLOCK_CONFD="$tmp/live-confd" AIRLOCK_INSTALL_NONCE=fake-runtime-nonce-0001 \
+    HOME="$home" bash "$HERE/install.sh" >/dev/null 2>"$identity_err"; then
+    fail=1
+  fi
+  grep -Fq 'Docker daemon identity changed during Notes lifecycle' "$identity_err" || fail=1
+  [ ! -s "$tmp/docker.log" ] || fail=1
+
+  # A partial create must be rolled back by immutable full id, and success is
+  # the runtime-observed absence of the exact two-label set rather than rm's rc.
+  printf '[]\n' > "$fake_state"
+  : > "$tmp/docker.log"
+  rollback_err="$tmp/rollback.err"
+  if DOCKER_LOG="$tmp/docker.log" DOCKER_STATE="$fake_state" DOCKER_FAIL_RUN_AT=2 \
+    PATH="$fakebin:$PATH" \
+    AIRLOCK_CONFIG_BIN="$tmp/fake-config.py" AIRLOCK_ROOT="$ROOT" AIRLOCK_APP_DIR="$HERE" \
+    AIRLOCK_CONFD="$tmp/live-confd" AIRLOCK_INSTALL_NONCE=fake-runtime-nonce-0001 \
+    HOME="$home" bash "$HERE/install.sh" >/dev/null 2>"$rollback_err"; then
+    fail=1
+  fi
+  python3 - "$fake_state" "$tmp/docker.log" <<'PY' || fail=1
+import json, re, sys
+assert json.load(open(sys.argv[1])) == []
+calls=[json.loads(line) for line in open(sys.argv[2]) if line.strip()]
+assert [call[0] for call in calls] == ["run", "run", "rm"], calls
+assert calls[-1][:2] == ["rm", "-f"]
+assert re.fullmatch(r"[0-9a-f]{64}", calls[-1][2])
+PY
 
   cfg="$tmp/airlock.toml"
   cat > "$cfg" <<EOF

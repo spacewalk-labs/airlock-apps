@@ -16,9 +16,18 @@ READER_PORT="${AIRLOCK_NOTES_READER_PORT:?}"
 EDITOR_PORT_BASE="${AIRLOCK_NOTES_EDITOR_PORT_BASE:?}"
 VAULT_SLOTS="${AIRLOCK_NOTES_VAULT_SLOTS:?}"
 NONCE="${AIRLOCK_INSTALL_NONCE:-}"
+RECONCILE_MODE="${AIRLOCK_CONTAINER_RECONCILE_MODE:-}"
+EXPECTED_DAEMON_IDENTITY="${AIRLOCK_CONTAINER_DAEMON_IDENTITY:-}"
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "$NONCE" ]; then NONCE="dry-run-nonce-0001"; fi
+if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
+  RECONCILE_MODE="${RECONCILE_MODE:-fresh}"
+  EXPECTED_DAEMON_IDENTITY="${EXPECTED_DAEMON_IDENTITY:-docker:dry-run}"
+fi
 [[ "$NONCE" =~ ^[A-Za-z0-9_-]{16,128}$ ]] \
   || die "AIRLOCK_INSTALL_NONCE is missing or invalid"
+case "$RECONCILE_MODE" in fresh|reuse-required) ;; *) die "container reconcile mode is missing or invalid" ;; esac
+[[ "$EXPECTED_DAEMON_IDENTITY" =~ ^docker:[A-Za-z0-9][A-Za-z0-9:_-]{0,255}$ ]] \
+  || die "Docker daemon identity is missing or invalid"
 
 PERLITE_IMAGE="sec77/perlite@sha256:e4912b9a014b5f68b0f29386244e5600e935de09e66906fb13e849f54d2b300c"
 NGINX_IMAGE="nginx@sha256:46ccc48fbb1f5a43167f2ee2c279c122b96eec5d976e7f4e1e0780f59a51b4d6"
@@ -62,6 +71,27 @@ if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] && ! docker info >/dev/null 2>&1; then
   docker_cmd=(sudo -n docker)
 fi
 docker_run() { "${docker_cmd[@]}" "$@"; }
+assert_docker_identity() {
+  local engine_id actual
+  engine_id="$(docker_run info --format '{{.ID}}')" || die "Docker daemon identity query failed"
+  actual="docker:$engine_id"
+  [ "$actual" = "$EXPECTED_DAEMON_IDENTITY" ] \
+    || die "Docker daemon identity changed during Notes lifecycle"
+}
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then assert_docker_identity; fi
+
+container_is_absent() {
+  local object_id="$1" inspect_error
+  if inspect_error="$(docker_run inspect "$object_id" 2>&1 >/dev/null)"; then
+    return 1
+  fi
+  case "$inspect_error" in
+    "Error: No such object: $object_id"|\
+    "Error response from daemon: No such container: $object_id") ;;
+    *) return 1 ;;
+  esac
+  assert_docker_identity
+}
 
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] verify immutable images already present: $PERLITE_IMAGE $NGINX_IMAGE"
@@ -111,6 +141,7 @@ run_final="$RUNTIME/runs/$NONCE"
 can_reuse_containers() {
   local current_plan="$RUNTIME/current/server-plan.json" ids inspect_file
   local -a id_args=()
+  assert_docker_identity
   [ -f "$current_plan" ] && cmp -s "$current_plan" "$stage/server-plan.json" || return 1
   ids="$(docker_run ps -aq --no-trunc --filter "label=io.airlock.package=notes" \
     --filter "label=io.airlock.install-nonce=$NONCE")" || return 1
@@ -132,17 +163,33 @@ for obj in objects:
     actual.add(obj.get("Name", "").removeprefix("/"))
 raise SystemExit(0 if actual == expected and len(objects) == len(expected) else 1)
 PY
+  local result=$?
+  assert_docker_identity
+  return "$result"
 }
 
-if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ] && can_reuse_containers; then
-  [ -f "$run_final/airlock-notes-editor.service" ] \
-    && [ -f "$run_final/notes.conf" ] || die "reusable container set has no runtime render"
-  install -m 644 "$run_final/airlock-notes-editor.service" "$UNIT_DIR/airlock-notes-editor.service"
-  install -m 644 "$run_final/notes.conf" "$CONFD/hub-locations.d/notes.conf"
-  systemctl --user daemon-reload
-  systemctl --user enable --now airlock-notes-editor.service
-  log "notes unchanged; retained committed container ids (nonce=$NONCE)"
-  exit 0
+if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
+  admission="$(airlock_config container-admit notes)" \
+    || die "container runtime admission changed before Notes mutation"
+  IFS=$'\t' read -r admitted_mode admitted_nonce admitted_identity extra <<< "$admission"
+  [ -z "${extra:-}" ] && [ "$admitted_mode" = "$RECONCILE_MODE" ] \
+    && [ "$admitted_nonce" = "$NONCE" ] \
+    && [ "$admitted_identity" = "$EXPECTED_DAEMON_IDENTITY" ] \
+    || die "container runtime admission no longer matches the loaded intent"
+  assert_docker_identity
+  if [ "$RECONCILE_MODE" = reuse-required ]; then
+    if can_reuse_containers; then
+      [ -f "$run_final/airlock-notes-editor.service" ] \
+        && [ -f "$run_final/notes.conf" ] || die "reusable container set has no runtime render"
+      install -m 644 "$run_final/airlock-notes-editor.service" "$UNIT_DIR/airlock-notes-editor.service"
+      install -m 644 "$run_final/notes.conf" "$CONFD/hub-locations.d/notes.conf"
+      systemctl --user daemon-reload
+      systemctl --user enable --now airlock-notes-editor.service
+      log "notes unchanged; retained committed container ids (nonce=$NONCE)"
+      exit 0
+    fi
+    die "the committed Notes container set is not reusable; remove the [apps.notes] subtree and run the normal installer once, then restore the changed subtree and install again"
+  fi
 fi
 
 run_stage="$RUNTIME/runs/.${NONCE}.$$"
@@ -163,18 +210,31 @@ while IFS= read -r vault_id; do
 done < <(python3 -c 'import json,sys; print("\n".join(v["id"] for v in json.load(open(sys.argv[1]))["vaults"]))' "$run_stage/server-plan.json")
 
 cleanup_nonce() {
-  local ids id package_label nonce_label failed=0
-  ids="$(docker_run ps -aq --filter "label=io.airlock.package=notes" \
+  local ids listed_id inspected package_label nonce_label full_id remaining failed=0
+  assert_docker_identity
+  ids="$(docker_run ps -aq --no-trunc \
+    --filter "label=io.airlock.package=notes" \
     --filter "label=io.airlock.install-nonce=$NONCE")" || return 1
-  for id in $ids; do
-    package_label="$(docker_run inspect --format '{{index .Config.Labels "io.airlock.package"}}' "$id")" || { failed=1; continue; }
-    nonce_label="$(docker_run inspect --format '{{index .Config.Labels "io.airlock.install-nonce"}}' "$id")" || { failed=1; continue; }
-    if [ "$package_label" != notes ] || [ "$nonce_label" != "$NONCE" ]; then
+  while IFS= read -r listed_id; do
+    [ -n "$listed_id" ] || continue
+    [[ "$listed_id" =~ ^[0-9a-f]{64}$ ]] || { failed=1; continue; }
+    inspected="$(docker_run inspect --format '{{.Id}} {{index .Config.Labels "io.airlock.package"}} {{index .Config.Labels "io.airlock.install-nonce"}}' "$listed_id")" \
+      || { failed=1; continue; }
+    read -r full_id package_label nonce_label <<< "$inspected"
+    if [ "$full_id" != "$listed_id" ] || [ "$package_label" != notes ] \
+      || [ "$nonce_label" != "$NONCE" ]; then
       failed=1
       continue
     fi
-    docker_run rm -f "$id" >/dev/null || failed=1
-  done
+    assert_docker_identity
+    docker_run rm -f "$full_id" >/dev/null || failed=1
+    container_is_absent "$full_id" || failed=1
+  done <<< "$ids"
+  remaining="$(docker_run ps -aq --no-trunc \
+    --filter "label=io.airlock.package=notes" \
+    --filter "label=io.airlock.install-nonce=$NONCE")" || return 1
+  [ -z "$remaining" ] || failed=1
+  assert_docker_identity
   return "$failed"
 }
 
@@ -202,6 +262,7 @@ if [ "${AIRLOCK_DRY_RUN:-0}" != 1 ]; then
   }
   trap on_install_exit EXIT
   while IFS=$'\t' read -r vault_id vault_path home_file container; do
+    assert_docker_identity
     docker_run run -d --pull=never --name "$container" \
       --label io.airlock.package=notes \
       --label "io.airlock.install-nonce=$NONCE" \
@@ -228,6 +289,7 @@ for v in json.load(open(sys.argv[1]))["vaults"]:
     --mount "type=bind,src=$run_final/router.conf,dst=/etc/nginx/nginx.conf,readonly"
     --mount "type=bind,src=$run_final/sockets,dst=/run/airlock-notes,readonly")
   router_args+=(--entrypoint nginx "$NGINX_IMAGE" -c /etc/nginx/nginx.conf -g "daemon off;")
+  assert_docker_identity
   docker_run "${router_args[@]}" >/dev/null
 
   ready=0
