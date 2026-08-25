@@ -43,9 +43,39 @@ assert executable == ['set -euo pipefail', 'exit 0']
 
 operational = '\n'.join((app / name).read_text() for name in (
     'airlock-app.toml', 'install.sh', 'render.sh', 'deactivate.sh', 'smoke.sh'))
-for legacy in ('/etc/dev-hub/orca-firewall.nft',
-               '/etc/nginx/devhub-orca-card.html', 'swk-orca'):
-    assert legacy not in operational
+# The internal tree kept orca's firewall and card under its own hub directories
+# and named its units with its own prefix. Matched by shape rather than by the
+# three strings somebody remembered: a list spells internal identifiers in a
+# public tree and misses the fourth one.
+#
+# Anchored on units and /etc paths, NOT on the bare token `-orca` — the sprite
+# id `app-orca` is a legitimate `<word>-orca` and an unanchored rule fails on it.
+import re as _re
+for pattern, why in (
+        (r'/etc/(?!airlock/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]*orca',
+         'orca file under an /etc directory that is not /etc/airlock/'),
+        (r'(?<![A-Za-z0-9_-])(?!airlock-)[A-Za-z0-9]+-orca[A-Za-z0-9_-]*\.(?:service|nft)',
+         'orca unit whose prefix is not airlock-'),
+        (r'\.local/share/(?!airlock-orca)(?!orca)[A-Za-z0-9_-]*orca',
+         'orca state directory under a non-airlock name'),
+):
+    hit = _re.search(pattern, operational)
+    assert hit is None, f'{why}: {hit.group(0)!r}'
+# Positive controls — each rule must actually fire on the shape it denies, or
+# the three asserts above are three ways of matching nothing.
+for probe, pattern in (('/etc/some-hub/orca-firewall.nft', 0),
+                       ('legacy-orca-daemon.service', 1),
+                       ('~/.local/share/legacy-orca', 2)):
+    pat = (r'/etc/(?!airlock/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]*orca',
+           r'(?<![A-Za-z0-9_-])(?!airlock-)[A-Za-z0-9]+-orca[A-Za-z0-9_-]*\.(?:service|nft)',
+           r'\.local/share/(?!airlock-orca)(?!orca)[A-Za-z0-9_-]*orca')[pattern]
+    assert _re.search(pat, probe), f'rule {pattern} never fires: {probe}'
+# ...and must NOT fire on what this tree legitimately ships.
+for benign in ('app-orca', 'airlock-orca-firewall.service', '~/.local/share/airlock-orca'):
+    for pat in (r'/etc/(?!airlock/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]*orca',
+                r'(?<![A-Za-z0-9_-])(?!airlock-)[A-Za-z0-9]+-orca[A-Za-z0-9_-]*\.(?:service|nft)',
+                r'\.local/share/(?!airlock-orca)(?!orca)[A-Za-z0-9_-]*orca'):
+        assert not _re.search(pat, benign), f'false positive on {benign!r}: {pat}'
 assert 'NFT_FILE="/etc/airlock/orca-loopback.nft"' in operational
 assert 'ORCA_SERVE_ROOT="$(dirname "$WEBROOT")/orca-web"' in operational
 
@@ -251,7 +281,17 @@ if "$APP/bin/refresh-web-bundle.sh" --source "$fixture" --appimage-version 1.4.1
 fi
 grep -Fxq "web-source-commit: $source_sha" "$output/VERSION"
 git -C "$fixture" checkout -q HEAD~1 -- dist
-printf ' josh-dev\n' >>"$fixture/dist/assets/web-index-Fixture.js"
+# A fabricated name in the shape the scanner denies (<word>-dev), not a real
+# box: this is the positive control that says the scanner is running, so it has
+# to match the pattern without publishing an identifier.
+# Positive control for verify-web-bundle.sh's denied-identifier scan. It has to
+# MATCH what that scan denies, so it uses the internal artifact prefix rather
+# than a hostname: same effect, no identifier published.
+# Positive control for verify-web-bundle.sh's denied-identifier scan: it must
+# MATCH what that scan denies. Assembled at runtime rather than written out —
+# a literal match here would trip test/no-internal-names.sh, which scans this
+# file. Two halves that are each harmless.
+printf ' /home/tester/%s/leaked\n' 'workspace' >>"$fixture/dist/assets/web-index-Fixture.js"
 git -C "$fixture" add dist && git -C "$fixture" -c core.hooksPath=/dev/null commit -q -m pii
 if "$APP/bin/refresh-web-bundle.sh" --source "$fixture" --appimage-version 1.4.139 --output "$output" >/dev/null 2>&1; then
   fail "PII-bearing source was accepted"
