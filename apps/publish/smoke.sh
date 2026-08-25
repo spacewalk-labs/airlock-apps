@@ -28,8 +28,8 @@ c_no=$(code                                    "http://127.0.0.1:${HUB}/publish/
 # Captured and matched in-shell, never `curl | grep -q`: grep -q closes the pipe
 # at the first match, curl takes SIGPIPE, and under `set -o pipefail` the pipeline
 # reports FAILURE — so okjson would read `no` exactly when the answer is yes, and
-# only on the boxes whose list is big enough to fill a pipe buffer. markwand hit
-# this on an HTTP body and wrote it down (apps/markwand/smoke.sh:37-41); orca hit
+# only on the boxes whose list is big enough to fill a pipe buffer. fileview hit
+# this on an HTTP body and wrote it down (apps/fileview/smoke.sh:37-41); orca hit
 # it again on `ldconfig -p` and lost two installs to it. A list endpoint has no
 # code-visible bound on its size at all, which is what makes it the same shape.
 list_body="$(curl -s --max-time 6 -H "${HDR}: ${OWNER}" "http://127.0.0.1:${HUB}/publish/api/list")"

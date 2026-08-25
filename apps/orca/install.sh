@@ -109,7 +109,7 @@ provision_runtime_deps() {
   # 64 KB pipe buffer) takes SIGPIPE, and `set -o pipefail` reports the pipeline as
   # failed. Measured 2026-08-07 on a box where libgtk-3-0t64 was installed and in
   # the cache: this guard said "missing", the reinstall was a no-op, and the check
-  # below said "libgtk-3 install failed". apps/markwand/smoke.sh:39 hit the same
+  # below said "libgtk-3 install failed". apps/fileview/smoke.sh:39 hit the same
   # race on a ~64 KB HTTP body and wrote it down; it did not reach here.
   local _libs; _libs="$(ldconfig -p 2>/dev/null || true)"
   if command -v Xvfb >/dev/null 2>&1 && [[ "$_libs" == *"libgtk-3.so.0"* ]]; then

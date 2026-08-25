@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # apps/learning/render.sh — sourceable render library. Functions only, no
-# top-level execution, matching apps/markwand/render.sh and apps/publish/render.sh.
+# top-level execution, matching apps/fileview/render.sh and apps/publish/render.sh.
 
 # render_learning_unit_server LIBRARY PUBLISH_SHARE STATE_DIR PORT PROVIDER BACKEND_DIR UNIT_PATH
 render_learning_unit_server() {

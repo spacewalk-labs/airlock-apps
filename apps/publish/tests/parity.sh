@@ -43,7 +43,7 @@ for marker in (
     'Entry source:',
 ):
     assert marker in frontend, marker
-assert 'markwand-theme' not in frontend
+assert 'fileview-theme' not in frontend
 assert 'path = "/publish/"' in manifest
 print('ok: Publish static parity contracts')
 PY

@@ -59,9 +59,8 @@ browser --https--> tailscale serve :https_port --(identity)--> nginx owner-gate
 - **Fleet usage store** (`fleet_store` / `fleet_store_url`): annotates the account
   popup with utilization from a shared store. No host is hardcoded; unset = no usage
   numbers (the list still works).
-- **markwand file-open**: click a file path in the terminal to open it in markwand.
-  Turns on automatically when `[apps.markwand]` is enabled and `[paths].code_root`
-  is set.
+- **fileview file-open**: click a file path in the terminal to open it in fileview.
+  Turns on automatically when `[apps.fileview]` is enabled.
 - **Orca worktree sidebar** (`orca_shim`): an experimental layout showing Orca's
   worktrees with per-worktree agent launchers. Needs the Orca CLI shim; falls back to
   the top-tab layout otherwise.

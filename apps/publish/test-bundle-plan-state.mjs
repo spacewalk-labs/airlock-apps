@@ -93,7 +93,7 @@ assert.equal(refreshContext.refreshWhenVisible(false, () => { refreshes += 1; })
 assert.equal(refreshes, 1, 'visible pages refresh once');
 
 assert.match(html, /localStorage\.getItem\("airlock-publish-theme"\)/);
-assert.doesNotMatch(html, /localStorage\.(?:getItem|setItem)\(["']markwand-theme["']/);
+assert.doesNotMatch(html, /localStorage\.(?:getItem|setItem)\(["']fileview-theme["']/);
 assert.match(html, /setInterval\([^]*30000\)/);
 assert.match(html, /Attachments ["'] \+ attachments\.length/);
 assert.match(html, /Entry source:/);

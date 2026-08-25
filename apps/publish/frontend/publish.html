@@ -404,7 +404,7 @@ function refreshWhenVisible(hidden, refresh) {
 }
 // TESTABLE:VISIBLE_REFRESH_END
 
-// Publish owns its preference key; changing this app must not alter Markwand.
+// Publish owns its preference key; changing this app must not alter File Viewer.
 var theme = "system";
 try { theme = localStorage.getItem("airlock-publish-theme") || "system"; } catch (_) {}
 function setTheme(value) {

@@ -22,7 +22,7 @@ with `Connection: close` (one request per connection = one identity check); a
 WebSocket upgrade dedicates its connection.
 
 Everything site-specific comes from the environment (set by the installer from
-airlock.toml). Optional features (Claude account pool, Codex login, the markwand
+airlock.toml). Optional features (Claude account pool, Codex login, the fileview
 file-open, the Orca worktree sidebar) are gated on config + tool presence and
 degrade to a clean "disabled" response when their dependencies are absent.
 
@@ -32,8 +32,7 @@ Env:
   DEVTERM_LISTEN_HOST/PORT this gate's loopback bind (default 127.0.0.1:9912)
   DEVTERM_TTYD_HOST/PORT   ttyd backend (default 127.0.0.1:9911)
   DEVTERM_WEB              web root to serve (the custom client)
-  AIRLOCK_CODE_ROOT        code root for the markwand file-open (optional)
-  DEVTERM_MARKWAND         "true" to enable the terminal file-path -> markwand link
+  DEVTERM_FILEVIEW         "true" to enable the terminal file-path -> fileview link
   DEVTERM_ACCOUNTS         "true" to enable the Claude account pool UI
   DEVTERM_CLAUDE_SWITCH    path to the claude-switch CLI (the installer points this at
                            apps/devterm/bin/claude-switch unless overridden)
@@ -79,9 +78,7 @@ TTYD_PORT = int(os.environ.get("DEVTERM_TTYD_PORT", "9911"))
 WEB_ROOT = os.path.realpath(os.environ.get("DEVTERM_WEB", os.path.expanduser("~/.local/share/airlock-devterm/web")))
 
 # ---- optional feature config (all degrade to disabled when unset/absent) ----
-CODE_ROOT = os.path.realpath(os.path.expanduser(os.environ["AIRLOCK_CODE_ROOT"])) \
-    if os.environ.get("AIRLOCK_CODE_ROOT") else ""
-MARKWAND = os.environ.get("DEVTERM_MARKWAND", "false").lower() == "true" and bool(CODE_ROOT)
+FILEVIEW = os.environ.get("DEVTERM_FILEVIEW", "false").lower() == "true"
 ACCOUNTS = os.environ.get("DEVTERM_ACCOUNTS", "false").lower() == "true"
 CLAUDE_SWITCH = os.path.expanduser(os.environ.get("DEVTERM_CLAUDE_SWITCH", ""))
 CLAUDE_STATUS = os.path.expanduser(os.environ.get("DEVTERM_CLAUDE_STATUS", ""))
@@ -146,8 +143,10 @@ FILE_MAX_BYTES = 200 * 1024 * 1024            # file upload save cap (arbitrary 
 # The value is typed into a modal and written to a file here; what leaves is the PATH,
 # never the value. An agent (or a shell) reads it by path when it needs it, which keeps
 # the secret out of chat scrollback, terminal history and any log.
-# Deliberately NOT under code_root: markwand serves that tree read+write, so a secret
-# there would be readable through a viewer. Directory is 0700, files 0600, TTL-swept.
+# Kept out of ~/uploads and off any shared path. Directory is 0700, files 0600,
+# TTL-swept. Note what the rename changed: fileview serves the filesystem read+write
+# (filebrowser --root /), so this store's protection is the mode bits and the
+# owner-only gate in front of it, not an unserved location.
 SECRETS = os.path.expanduser("~/.devterm-secrets")
 SECRET_TTL_SEC = int(os.environ.get("DEVTERM_SECRET_TTL", "1800"))     # 30 min default
 SECRET_SWEEP_SEC = min(60, max(1, SECRET_TTL_SEC // 4))
@@ -1132,21 +1131,18 @@ async def _serve_list_dir(cr, headers, leftover, cw):
     await _send_json(cw, b"200 OK", payload)
 
 
-# ---- terminal file-path click -> open in markwand (/markwand/...) — optional ----
-def _map_to_code(realpath):
-    """absolute realpath (file) -> markserv-relative '<code symlink>/<rest>'. None if outside code_root."""
-    if not CODE_ROOT or not realpath or not os.path.isfile(realpath):
+# ---- terminal file-path click -> open in fileview — optional ----
+def _map_to_viewer(realpath):
+    """absolute realpath -> the same path, if it is a file. None otherwise.
+
+    This used to walk code_root's entries to express the file as a path relative to
+    whichever symlink contained it, and returned None for anything outside. fileview
+    serves the filesystem now (filebrowser --root /), so a file's absolute path IS
+    its address and "outside" no longer names anything.
+    """
+    if not realpath or not os.path.isfile(realpath):
         return None
-    try:
-        entries = os.listdir(CODE_ROOT)
-    except OSError:
-        return None
-    for entry in entries:
-        base = os.path.realpath(os.path.join(CODE_ROOT, entry))
-        if realpath == base or realpath.startswith(base + os.sep):
-            rel = os.path.relpath(realpath, base)
-            return entry + "/" + rel.replace(os.sep, "/")
-    return None
+    return realpath
 
 
 async def _pane_prop(session, fmt):
@@ -1297,12 +1293,14 @@ def _claude_log_window(cwd, visible, above=150, below=3, fallback=250):
     return "\n".join(rows[-fallback:])
 
 
-def _mw(rel):
-    return "/markwand/" + urllib.parse.quote(rel)
+def _mw(path):
+    # ?path=<urlencoded absolute path> — the viewer's own deep-link shape. Encoded
+    # whole (quote with no safe chars) so a name containing '#', '?' or '%' survives.
+    return "/fileview/?path=" + urllib.parse.quote(path, safe="")
 
 
 async def _find_map(root, flag, pat):
-    """find -L <root> <flag> <pat> -> [{rel, mtime}] (markserv-relative + mtime).
+    """find -L <root> <flag> <pat> -> [{rel, mtime}] (absolute path + mtime).
     Depth / time / count limited; heavy dirs pruned so broad searches stay fast."""
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -1317,7 +1315,7 @@ async def _find_map(root, flag, pat):
     hits, seen = [], set()
     for line in out.decode("utf-8", "replace").splitlines():
         real = os.path.realpath(line)
-        rel = _map_to_code(real)
+        rel = _map_to_viewer(real)
         if rel and rel not in seen:
             seen.add(rel)
             try:
@@ -1351,9 +1349,9 @@ async def _repo_parent(cwd):
     return parent
 
 
-async def _resolve_to_markwand(p, session):
-    """Clicked file path -> markwand URL. absolute / ~ / session-pane-cwd-relative ->
-    map into code_root. Relative paths are searched under the session cwd (the working
+async def _resolve_to_fileview(p, session):
+    """Clicked file path -> fileview URL. absolute / ~ / session-pane-cwd-relative
+    resolve directly. Relative paths are searched under the session cwd (the working
     repo). Several matches -> newest-first candidate list (client picks)."""
     if not p:
         return {"ok": False, "reason": "empty"}
@@ -1367,7 +1365,7 @@ async def _resolve_to_markwand(p, session):
     elif cwd:
         cands.append(os.path.join(cwd, p))
     for c in cands:
-        rel = _map_to_code(os.path.realpath(c))
+        rel = _map_to_viewer(os.path.realpath(c))
         if rel:
             return {"ok": True, "url": _mw(rel), "rel": rel}
     # search fallback — under cwd (current repo) first (fast); if empty, widen one
@@ -1387,9 +1385,9 @@ async def _resolve_to_markwand(p, session):
         hits.sort(key=lambda h: h["mtime"], reverse=True)                  # newest first
         return {"ok": False, "reason": "ambiguous", "count": len(hits),
                 "hits": [{"rel": h["rel"], "url": _mw(h["rel"])} for h in hits[:20]]}
-    # subdivide notfound so the client can show 'why'
-    if cands and any(os.path.exists(os.path.realpath(c)) for c in cands):
-        return {"ok": False, "reason": "outside_code", "path": p}          # exists but outside code_root (markwand root)
+    # subdivide notfound so the client can show 'why'. The old 'outside_code' branch
+    # is gone with the boundary it reported: a path that exists is now openable, so
+    # a candidate that resolved would already have returned above.
     if not cwd and not (p.startswith("~") or p.startswith("/")):
         return {"ok": False, "reason": "no_cwd", "path": p}                # relative but the session pane cwd was unreadable
     return {"ok": False, "reason": "notfound",
@@ -1397,13 +1395,13 @@ async def _resolve_to_markwand(p, session):
 
 
 async def _serve_resolve(head, cw):
-    if not MARKWAND:
+    if not FILEVIEW:
         await _send_json(cw, b"200 OK", {"ok": False, "reason": "disabled"})
         return
     params = urllib.parse.parse_qs(_request_query(head).decode("latin1"))
     p = (params.get("path") or [""])[0]
     session = (params.get("session") or [""])[0]
-    await _send_json(cw, b"200 OK", await _resolve_to_markwand(p, session))
+    await _send_json(cw, b"200 OK", await _resolve_to_fileview(p, session))
 
 
 # ---- pane layout (equal horizontal width etc) ----
@@ -2646,7 +2644,7 @@ async def main():
     server = await asyncio.start_server(handle, LISTEN_HOST, LISTEN_PORT)
     where = ", ".join(str(s.getsockname()) for s in server.sockets)
     print(f"devterm-gate on {where} -> ttyd {TTYD_HOST}:{TTYD_PORT}; web={WEB_ROOT}; "
-          f"accounts={_accounts_enabled()}; markwand={MARKWAND}; orca={bool(ORCA_SHIM)}; "
+          f"accounts={_accounts_enabled()}; fileview={FILEVIEW}; orca={bool(ORCA_SHIM)}; "
           f"secret_ttl={SECRET_TTL_SEC}s", flush=True)
     async with server:
         await server.serve_forever()
