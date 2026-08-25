@@ -22,8 +22,10 @@ At that point no other shipped app declared `public_port = 9900`. A colour liter
 Live unit/port observations are company-ops evidence and are **not**
 copied into this public tree. The immutable dated mapping is the private
 company record
-[`devterm-9900-bounded-census-20260814.md`](https://github.com/TeamSPWK/swk-infra/blob/8227aca0c7c565e164fc78a19f1585f378cd79db/docs/tasks/active/airlock-universal-platform/01-fleet-census-target.task.logs/devterm-9900-bounded-census-20260814.md),
-merged by `TeamSPWK/swk-infra` PR #659. It separates configured selectors,
+`devterm-9900-bounded-census-20260814.md`, held in the private infrastructure
+repository at commit `8227aca0c7c565e164fc78a19f1585f378cd79db` and merged by
+its PR #659. The repository is named there, not here: this file is public and
+the line above is the reason. It separates configured selectors,
 topology nodes, positively observed automated callers, responding endpoints,
 the configured same-origin browser surface, and the explicitly unknown
 human/browser-principal count.

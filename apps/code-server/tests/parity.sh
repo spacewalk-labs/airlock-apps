@@ -322,8 +322,15 @@ grep -Fxq 'After=network.target' "$manager_unit" || fail "manager unit network o
 ! grep -Fxq 'After=default.target' "$slot_unit" || fail "slot unit has target cycle"
 ! grep -Fxq 'After=default.target' "$manager_unit" || fail "manager unit has target cycle"
 contains "$APP/manager/manager.py" 'UNIT_TEMPLATE = "airlock-code-server@%d.service"'
-! grep -FRq -- 'swk-codeserver' "$APP/install.sh" "$APP/bin" "$APP/manager" "$APP/render.sh" \
-  || fail "runtime retains internal unit identity"
+# CS-N1 said the internal tree owned differently-named units for the same roles.
+# The check used to name the old prefix; that spelled an internal identifier in a
+# public tree, and it only ever caught the one name somebody thought of. Assert
+# the shape instead: every code-server unit this runtime touches is an
+# `airlock-` unit. Any other prefix — the retired one or a new one — fails.
+foreign_units="$(grep -RhoE '[A-Za-z0-9_@.-]+\.service' \
+  "$APP/install.sh" "$APP/bin" "$APP/manager" "$APP/render.sh" 2>/dev/null \
+  | grep -vE '^(airlock-|%d\.service$)' | grep -iE 'code[-_]?server' | sort -u || true)"
+[ -z "$foreign_units" ] || fail "runtime retains a non-airlock unit identity: $foreign_units"
 
 # CS-N3: changed content restarts; unchanged content only ensures services start.
 contains "$APP/install.sh" 'if [ "$changed" = 1 ]; then'

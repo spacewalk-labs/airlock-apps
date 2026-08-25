@@ -57,8 +57,32 @@ got_n="$(find "$DIST" -type f | wc -l | tr -d ' ')"
 got_sha="$(cd "$DIST" && find . -type f | LC_ALL=C sort | xargs sha256sum | sha256sum | cut -d' ' -f1)"
 [ "$got_sha" = "$want_sha" ] || fail "tree sha256 $got_sha != $want_sha (pinned)"
 
+# The list this replaces was its own leak — it spelled the company, the tailnet,
+# a box and an operator address in a public file, which is exactly what it
+# existed to stop, and it only ever caught the names somebody had thought of.
+#
+# 🔴 What it is NOT is a general shape scan. The input here is a VENDORED
+# third-party web bundle: minified identifiers, i18n strings and example paths.
+# Measured on the pinned dist, `<word>-dev`, `/home/<user>/` and an
+# email-shaped token each match by accident in it, so a shape scan over this
+# input is noise, not a gate. The rules below are anchors that cannot occur in
+# a bundle by accident:
+#
+#   /home/<user>/workspace/    the checkout layout these boxes use, not a path
+#                              an upstream bundle would embed
+#   install-canary-gate.sh     an internal helper by name
+#   orca-web.                  an internal artifact prefix
+#
+# The tailnet suffix is deliberately NOT one of them here. Upstream Orca has
+# Tailscale as a feature and ships example tailnet hostnames as placeholder text
+# in six of its i18n bundles, so the suffix cannot separate our tailnet from
+# theirs on
+# this input. It is denied repo-wide instead (.github/workflows/ci.yml), where
+# the input is our own files and this vendored tree is excluded.
+# The box-hostname SHAPE is likewise enforced on our own prose, in
+# test/parity-c-measurement.py.
 if LC_ALL=C grep -RInaE --binary-files=without-match \
-  'spacewalk|sparrow-spectrum|josh-dev|cho@|swk-|TeamSPWK|install-canary-gate\.sh|orca-web\.' \
+  '/home/[a-z][a-z0-9_-]*/workspace/|install-canary-gate\.sh|orca-web\.' \
   "$DIST" >/dev/null; then
   fail "dist contains a denied internal/operator identifier"
 fi

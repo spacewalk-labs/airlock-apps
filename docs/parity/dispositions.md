@@ -41,7 +41,7 @@ These eighteen rows need no person decision and can proceed now.
 | dev-monitor service restart surface | DM-R2, DM-U2 | migrate | Carry the allow-listed user-service restart API/UI into a separately authenticated mutation path; system services remain rejected. Keep the public discovered-user-service log selector instead of copying the internal fixed list. |
 | dev-monitor spool firewall | DM-N3 | keep | Keep the public operator-owned `0700` spool boundary and do not carry the internal low-trust spool UID or its root-owned firewall unit into an app with `capabilities = []`. |
 | dev-monitor executable-skill allow-list | DM-C2 | migrate | Add an optional membership allow-list; unset keeps the current syntax validation and set adds membership validation. |
-| dev-monitor message-console activation | DM-C3 | keep | Keep the explicit `messages` setting and retire the `hostname == josh-dev` activation rule. |
+| dev-monitor message-console activation | DM-C3 | keep | Keep the explicit `messages` setting and retire the internal `hostname == <one specific box>` activation rule. |
 | Markwand PWA installation metadata | MW-U1 | migrate | Add app-scoped Markwand manifest metadata without copying the internal `SWK Dev Hub` identity or root `/` scope. |
 | Markwand top-level home aliases | MW-S1 | migrate | Add an explicit, default-empty alias allow-list under the configured code root; reconcile only links owned by that list. |
 | Notepad attachment-token syntax | NP-U1 | migrate | Accept both English and Korean token vocabularies; keep English generation canonical and preserve each recognized vocabulary's copy expansion. |

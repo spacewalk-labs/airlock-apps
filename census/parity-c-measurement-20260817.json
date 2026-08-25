@@ -2,7 +2,7 @@
   "schema": "airlock.public-app-parity.c-measurement/v1",
   "observed_at": "2026-08-17T00:08:57Z",
   "private_evidence": {
-    "repository": "TeamSPWK/swk-infra",
+    "repository": "private-infrastructure-repository",
     "commit": "e9cd24840f612cc94c2ddeaab70f56fc53987af1",
     "path": "docs/tasks/active/airlock-universal-platform/04-public-app-parity.task.logs/phase-8-c-measurement.log",
     "review": "L2 REFUTE PASS"

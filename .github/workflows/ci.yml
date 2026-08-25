@@ -20,6 +20,15 @@ jobs:
           bash test/all-app-artifacts.sh --parity --fixture-contract
           bash test/all-app-artifacts.sh --parity \
             --app devterm --app dev-monitor --app code-server
+  no-internal-names:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: rules still match what they deny
+        run: bash test/no-internal-names.sh --self-test
+      - name: no internal host, tailnet or checkout path
+        run: bash test/no-internal-names.sh
+
   no-core-mix:
     runs-on: ubuntu-latest
     steps:

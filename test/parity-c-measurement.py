@@ -73,7 +73,7 @@ def main() -> None:
 
     evidence = data["private_evidence"]
     assert evidence == {
-        "repository": "TeamSPWK/swk-infra",
+        "repository": "private-infrastructure-repository",
         "commit": "e9cd24840f612cc94c2ddeaab70f56fc53987af1",
         "path": (
             "docs/tasks/active/airlock-universal-platform/"
@@ -87,8 +87,14 @@ def main() -> None:
         "nginx_request_lines": 374037,
         "raw_records": "private",
     }
-    for private_name in ("josh-dev", "henna-dev", "jay-dev", "suri-dev", "sue-dev"):
-        assert private_name not in raw
+    # The point of this assertion is that no box hostname reached the public
+    # record. It used to list the five names, which put them in a public file to
+    # prove they were not in a public file — and it could only ever catch the
+    # names somebody had already written down. Matched by shape: any
+    # `<word>-dev` or `<word>-mgmt` token fails, including a sixth box nobody
+    # here knows about yet.
+    leaked = re.findall(r"\b[a-z0-9]+-(?:dev|mgmt)\b", raw)
+    assert not leaked, leaked
 
     measured = data["measurements"]
     assert measured == EXPECTED_MEASUREMENTS
