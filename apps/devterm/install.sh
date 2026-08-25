@@ -7,7 +7,7 @@
 #                                        --> serves web/ + API, proxies /ws,/token --> ttyd --> tmux
 #
 # Config comes from airlock.toml ([apps.devterm]). Optional features (Claude account
-# pool, Codex login, markwand file-open, Orca worktree sidebar) turn on only when their
+# pool, Codex login, fileview file-open, Orca worktree sidebar) turn on only when their
 # config + tools are present; otherwise they no-op cleanly.
 # Honors AIRLOCK_DRY_RUN=1 (print system-mutating steps instead of running them).
 set -euo pipefail
@@ -45,7 +45,6 @@ CLAUDE_STATUS="${AIRLOCK_DEVTERM_CLAUDE_STATUS:-}"
 FLEET_STORE="${AIRLOCK_DEVTERM_FLEET_STORE:-}"
 FLEET_STORE_URL="${AIRLOCK_DEVTERM_FLEET_STORE_URL:-}"
 ORCA_SHIM_CFG="${AIRLOCK_DEVTERM_ORCA_SHIM:-}"
-CODE_ROOT="${AIRLOCK_CODE_ROOT:-}"
 WEB_ROOT="$HOME/.local/share/airlock-devterm/web"
 # claude-switch/claude-status are installed as standalone files in ~/.local/bin, so
 # the shared bin_discovery module they import cannot stay a repo sibling — it is
@@ -71,9 +70,11 @@ PY="$(command -v python3)"
 app_enabled() { airlock_config apps | grep -qx "$1"; }
 
 # --- resolve optional feature wiring ---
-# markwand file-open: on only when [apps.markwand] is enabled AND a code_root is set.
-MARKWAND=false
-if app_enabled markwand && [ -n "$CODE_ROOT" ]; then MARKWAND=true; fi
+# fileview file-open: on whenever [apps.fileview] is enabled. It used to also
+# require a code_root; fileview serves the filesystem now, so there is no second
+# condition and no path to thread through.
+FILEVIEW=false
+if app_enabled fileview; then FILEVIEW=true; fi
 # Orca worktree sidebar: use the configured shim path, else the conventional one when
 # [apps.orca] is enabled, else empty (feature off). The gate checks the file at runtime.
 ORCA_SHIM=""
@@ -128,7 +129,7 @@ if [ "$ACCOUNTS" = true ]; then
 fi
 
 # --- 3. custom web client into WEB_ROOT (index.html templated with runtime config) ---
-CFG_JSON="{\"accounts\":${ACCOUNTS},\"markwand\":${MARKWAND},\"orca\":$([ -n "$ORCA_SHIM" ] && echo true || echo false)}"
+CFG_JSON="{\"accounts\":${ACCOUNTS},\"fileview\":${FILEVIEW},\"orca\":$([ -n "$ORCA_SHIM" ] && echo true || echo false)}"
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] install web/ -> $WEB_ROOT (index.html config=${CFG_JSON}, + ui.js/popup.css/panel.html)"
 else
@@ -208,8 +209,7 @@ add_env DEVTERM_TTYD_PORT "$TTYD_PORT"
 add_env DEVTERM_WEB "$WEB_ROOT"
 add_env AIRLOCK_IDENTITY_HEADER "$IDENTITY_HEADER"
 add_env AIRLOCK_OWNER "$AIRLOCK_OWNER"
-add_env AIRLOCK_CODE_ROOT "$CODE_ROOT"
-add_env DEVTERM_MARKWAND "$MARKWAND"
+add_env DEVTERM_FILEVIEW "$FILEVIEW"
 add_env DEVTERM_ACCOUNTS "$ACCOUNTS"
 add_env DEVTERM_REMOTE_HOSTS "$REMOTE_HOSTS"
 add_env DEVTERM_SECRET_TTL "$SECRET_TTL"
@@ -227,7 +227,7 @@ changed_gate=0
 # install/lib.sh's fail-closed guard (RENDER_DIR without DRY_RUN=1 never reaches
 # this line) and apps/feedback/install.sh's identical comment.
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ] && [ -z "${AIRLOCK_RENDER_DIR:-}" ]; then
-  log "[dry] write $UNIT_DIR/airlock-devterm-gate.service (127.0.0.1:$BACKEND_PORT; accounts=$ACCOUNTS markwand=$MARKWAND orca=$([ -n "$ORCA_SHIM" ] && echo true || echo false))"
+  log "[dry] write $UNIT_DIR/airlock-devterm-gate.service (127.0.0.1:$BACKEND_PORT; accounts=$ACCOUNTS fileview=$FILEVIEW orca=$([ -n "$ORCA_SHIM" ] && echo true || echo false))"
 else
   if render_devterm_unit_gate "$BACKEND_PORT" "$gate_env" "$PY" "$GATE_PY" \
      | write_if_changed "$UNIT_DIR/airlock-devterm-gate.service"
@@ -261,4 +261,4 @@ log "wrote nginx fragment: $frag"
 # to the direct call this used to make (install/test-serve-https-parity.sh
 # proved the two productions equal before this line was removed).
 # NOTE: smoke runs from the orchestrator AFTER nginx is rendered + reloaded.
-log "devterm installed (owner: ${AIRLOCK_OWNER}; accounts=${ACCOUNTS}, markwand=${MARKWAND}, orca=$([ -n "$ORCA_SHIM" ] && echo true || echo false))"
+log "devterm installed (owner: ${AIRLOCK_OWNER}; accounts=${ACCOUNTS}, fileview=${FILEVIEW}, orca=$([ -n "$ORCA_SHIM" ] && echo true || echo false))"

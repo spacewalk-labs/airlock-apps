@@ -7,8 +7,8 @@ import tomllib
 from pathlib import Path
 
 APPS = (
-    "code-server", "dev-monitor", "devterm", "feedback", "learning",
-    "markwand", "notepad", "notes", "orca", "paseo", "publish",
+    "code-server", "dev-monitor", "devterm", "feedback",
+    "fileview", "learning", "notepad", "notes", "orca", "paseo", "publish",
 )
 REQUIRED = (
     "id", "state", "quiesce", "snapshot", "forward",
@@ -35,7 +35,7 @@ EXPECTED_PATHS = {
     ),
     "feedback": (),
     "learning": ("~/learning/", "~/.local/state/airlock-learning/"),
-    "markwand": ("~/.config/filebrowser/fb.db",),
+    "fileview": ("~/.config/airlock-fileview/",),
     "notepad": (),
     "notes": (),
     "orca": (),

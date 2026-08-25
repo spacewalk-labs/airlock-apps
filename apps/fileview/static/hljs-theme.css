@@ -1,16 +1,24 @@
-/* markwand highlight.js theme — aligned with the design tokens (markwand-tokens.css),
-   auto light/dark/system. The parent page colours code with hljs.highlight() and
+/* highlight.js theme — the one palette in this app that Airlock does not own.
+   The design system has no opinion about the colour of a Python keyword, so
+   these seven values are declared here and are the single exemption in
+   install/test-design-review.py's no-raw-colour rule. That exemption is not a
+   free pass: the same gate measures every one of them against the code surface
+   they are painted on. Auto light/dark/system. The parent page colours code with hljs.highlight() and
    injects the static markup into a sandboxed srcdoc; this CSS paints the colours.
    Colours map span classes -> --syn-* variables; only the variables swap per theme. */
 
 :root, :root[data-theme="light"] {
   --syn-kw:   #b5006b;  /* keyword / literal — magenta */
-  --syn-str:  #0a7a4a;  /* string — green (readable on the beige surface) */
-  --syn-num:  #a15c00;  /* number / bullet — amber */
+  --syn-str:  #0a7a4a;  /* string — green */
+  --syn-num:  #955300;  /* number / bullet — amber */
   --syn-key:  #1560b0;  /* attr (key) / title / tag — blue */
   --syn-var:  #7a3fb0;  /* variable / symbol / regexp — purple */
-  --syn-cmt:  #8a8f98;  /* comment — grey */
-  --syn-pun:  #6b7280;  /* punctuation — muted grey */
+  /* The greys were tuned against Markwand's beige code surface and measured
+     2.82:1 and 4.19:1 on Airlock's light one; the amber measured 4.50:1, which
+     is the bar to two decimals and under it to four. All three are darkened, and
+     the gate computes them now rather than trusting the eye. */
+  --syn-cmt:  #646469;  /* comment — grey */
+  --syn-pun:  #57606a;  /* punctuation — muted grey */
 }
 :root[data-theme="dark"] {
   --syn-kw:   #ff7ab2;
