@@ -1,4 +1,4 @@
-id = "markwand"
+id = "fileview"
 state = "stateful"
 quiesce = "stop-units"
 snapshot = "copy-filebrowser-db"
@@ -7,6 +7,6 @@ write_capture = "capture-post-cutover-writes"
 reverse = "restore-retained-paths"
 rpo = "0"
 paths = [
-  "~/.config/filebrowser/fb.db",
+  "~/.config/airlock-fileview/",
 ]
 capabilities = []

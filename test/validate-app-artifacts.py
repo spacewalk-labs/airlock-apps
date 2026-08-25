@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 APPS = (
-    "code-server", "dev-monitor", "devterm", "feedback", "learning",
-    "markwand", "notepad", "notes", "orca", "paseo", "publish",
+    "code-server", "dev-monitor", "devterm", "feedback",
+    "fileview", "learning", "notepad", "notes", "orca", "paseo", "publish",
 )
 EXPECTED_UNITS = {
     "code-server": ("airlock-code-server@.service", "airlock-code-server-manager.service"),
@@ -16,7 +16,7 @@ EXPECTED_UNITS = {
     "devterm": ("airlock-devterm.service", "airlock-devterm-gate.service"),
     "feedback": ("airlock-feedback.service",),
     "learning": ("airlock-learning.service", "airlock-learning-ingest.service"),
-    "markwand": ("airlock-markserv.service", "airlock-filebrowser.service"),
+    "fileview": ("airlock-fileview.service",),
     "notepad": (),
     "notes": ("airlock-notes-editor.service",),
     "orca": ("airlock-orca-xvfb.service", "airlock-orca.service", "airlock-orca-firewall.service@system"),
