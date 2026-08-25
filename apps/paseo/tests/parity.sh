@@ -78,9 +78,20 @@ for marker in ('$HOME/.local/bin', '$HOME/.npm-global/bin',
     assert marker in install, marker
 assert 'x86_64' not in install and 'uname -m' not in install
 defaults = manifest["config"]["defaults"]
+# Two accepted changes this assertion never followed, both invisible because
+# CI selects three apps and paseo is not one of them:
+#   * the 199xx port band (owner, 2026-08-21)
+#   * `descendant_sudo` left the manifest's defaults
+# 🔴 install.sh still reads AIRLOCK_PASEO_DESCENDANT_SUDO (lines 72-73, 173)
+# for a key the manifest no longer declares, so that branch is now dead — the
+# variable can never be set. `airlock-config validate` says so as a warning.
+# Removing it changes the package tree digest and therefore the app pin, the
+# composite lock and the private approval, so it is a re-pin round of its own
+# and not folded in here. The assertion below states what the manifest is, not
+# what install.sh still carries.
 assert defaults == {
-    "https_port": 8447, "gate_port": 18822, "backend_port": 6767,
-    "browse": False, "browse_ws_port": 6768, "descendant_sudo": False,
+    "https_port": 19950, "gate_port": 19951, "backend_port": 19952,
+    "browse": False, "browse_ws_port": 19953,
     "version": ""}
 assert manifest["audience"] == {"supported": ["owner"], "default": "owner"}
 

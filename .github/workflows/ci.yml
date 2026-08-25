@@ -17,9 +17,33 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify directional fixtures and implemented parity apps
         run: |
+          set -euo pipefail
           bash test/all-app-artifacts.sh --parity --fixture-contract
-          bash test/all-app-artifacts.sh --parity \
-            --app devterm --app dev-monitor --app code-server
+          # Every app that HAS a parity suite runs it. This used to name three
+          # apps, and the other five rotted unseen: feedback and paseo were both
+          # red on main for pinning ports the owner moved to the 199xx band on
+          # 2026-08-21, and nothing said so until someone ran them by hand on
+          # 2026-08-26.
+          #
+          # The set of apps WITHOUT a suite is asserted rather than skipped, so
+          # publishing a tenth app without one fails here instead of quietly
+          # shrinking this job. learning and notes were published in #12 and #11
+          # and still owe theirs.
+          missing=""
+          have=""
+          for app in $(bash -c 'source test/lib.sh; printf "%s\n" "${PUBLIC_APPS[@]}"'); do
+            if [ -x "apps/$app/tests/parity.sh" ]; then have="$have --app $app"
+            else missing="$missing $app"; fi
+          done
+          echo "parity suites present:$have"
+          echo "parity suites missing:$missing"
+          [ "$(echo $missing)" = "learning notes" ] || {
+            echo "::error::the set of apps without a parity suite changed: '$(echo $missing)'"
+            echo "::error::add apps/<app>/tests/parity.sh, or update this list with the reason"
+            exit 1
+          }
+          # shellcheck disable=SC2086
+          bash test/all-app-artifacts.sh --parity $have
   no-internal-names:
     runs-on: ubuntu-latest
     steps:

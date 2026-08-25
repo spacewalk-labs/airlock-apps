@@ -138,8 +138,12 @@ assert feedback.MAIL_KEY not in error and 'request body' not in error
 # EnvironmentFile is the only secret-value boundary rendered into the unit.
 manifest = tomllib.loads((app / 'airlock-app.toml').read_text())
 defaults = manifest['config']['defaults']
+# 19924, not 18805: the owner moved every app onto the 199xx band
+# ("포트대역은 199xx로 해", 2026-08-21) and the manifest followed. This
+# assertion did not, and nothing noticed because CI runs the parity suites of
+# three apps only — this one is reachable but never selected.
 assert defaults == {
-    'backend_port': 18805,
+    'backend_port': 19924,
     'intake_url': 'https://your-intake.example',
     'token_env': 'AIRLOCK_FEEDBACK_TOKEN',
     'mail_to': '',
