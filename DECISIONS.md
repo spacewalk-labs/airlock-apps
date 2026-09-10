@@ -1,38 +1,12 @@
-# 사람 결정 질문지 — PUBLIC_APP_SPLIT
+# Public app split decisions
 
-마스터가 사람에게 물을 항목입니다. 카드 세션은 고르지 않습니다.
+Status: settled. This is a record, not an open questionnaire.
 
-`D-DEVTERM-9900`은 2026-08-17 taskboard 의견 `0ff93d05`에서 `retire`로
-결정됐습니다. 원문: 「평문 9900을 바로 닫는다. 확인된 소비자 4종은 그
-전에 옮기되, 세지 않은 사용자는 감수한다.」 ABI 계약은
-`abi/apps/devterm.toml`의 `capabilities = []`이며, 고정 census·패키지
-desired state·라이브 차단의 경계는
-[`census/devterm-9900.md`](census/devterm-9900.md)에 있습니다.
+| Decision | Outcome |
+|---|---|
+| `D-REPO-NAME` | `airlock-apps` |
+| `D-REPO-VISIBILITY` | Public repository in `spacewalk-labs` |
+| `D-REPO-PROTECTION` | Required status checks were selected for repository creation; `.github/workflows/ci.yml` is the source of truth for the checks themselves. |
+| `D-DEVTERM-9900` | Retire the plaintext endpoint after its known consumers migrate; the package desired state is HTTPS-only. |
 
-## D-REPO-NAME
-
-- ⓐ 공개 기본 앱을 담을 새 저장소 이름을 무엇으로 만듭니까?
-- ⓑ
-  - `airlock-apps` (문서가 지금까지 쓴 이름) — 이 이름 그대로 만듭니다.
-  - 다른 이름 — 문서와 보드가 가리키는 이름을 먼저 고친 뒤에 만듭니다.
-- ⓒ 안 고르면: 앱 소스를 새 저장소로 옮기는 일을 시작하지 않습니다. 이미 적어 둔 계약과 검사는 그대로 있습니다.
-- ⓓ 만들기 전에는 언제든 바꿀 수 있습니다. 만든 뒤에 이름을 바꾸는 것은 사실상 새 저장소를 만드는 일입니다.
-
-## D-REPO-VISIBILITY
-
-- ⓐ 그 저장소를 누구에게 보이게 만듭니까?
-- ⓑ
-  - 공개 org의 public 저장소 — 지금 공개 Airlock과 같은 울타리입니다. 이 체크아웃에서 앱 트리 누수 스캔은 clean 이었고, 접두 히트 1건은 이미 공개된 허용 식별자입니다.
-  - 회사 org의 private 저장소 — 내부에서만 옮기고 검수한 뒤, 공개는 나중에 따로 합니다.
-- ⓒ 안 고르면: 저장소를 만들지 않습니다. 앱을 옮기는 일도 시작하지 않습니다.
-- ⓓ 나중에 공개로 바꿀 수는 있습니다. 한 번 공개된 커밋은 회수되지 않습니다.
-
-## D-REPO-PROTECTION
-
-- ⓐ 기본 브랜치에 무엇이 통과해야 반영되게 하겠습니까?
-- ⓑ
-  - 앱을 바꾸는 모든 변경이 자동 검사(경계·격리·기존 컷라인)를 통과해야만 반영됩니다. 실수로 앱과 코어가 다시 섞이는 일을 막습니다.
-  - 검사를 필수로 걸지 않습니다. 실수로 바로 반영될 수 있습니다.
-  - 검사에 더해 특정 사람 승인·서명까지 요구합니다. 옮기는 첫 변경이 그 문턱에서 멈출 수 있습니다.
-- ⓒ 안 고르면: 저장소를 만들어도 보호 규칙을 걸지 못한 채로 둡니다. 그 사이 실수 반영을 막지 못합니다.
-- ⓓ 보호 규칙은 나중에 바꿀 수 있습니다.
+`foundation.json` is the machine-readable transfer pin. The fixed census and the boundary between package state and live deployment are documented in [`census/devterm-9900.md`](census/devterm-9900.md).

@@ -42,8 +42,9 @@ This repository fixes the second step's desired state and regression. It does
 not claim that the four external consumers have already migrated or that live
 `:9900` has already closed.
 
-## Visibility scan of the nine app trees
+## Historical visibility scan of the nine transferred app trees
 
-`bash install/check-internal-leaks.sh` on this checkout: clean.
+`bash install/check-internal-leaks.sh` on the source checkout at the fixed census
+revision: clean. That source-only script is not part of this repository.
 The one prefix hit inside `apps/devterm/web/panel.html` is the already
 public allowlisted identifier `swk-panel-close`.

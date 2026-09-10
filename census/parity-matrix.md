@@ -1,6 +1,9 @@
 # Public ↔ internal app behavior parity matrix
 
-Status: complete — 9/9 apps inventoried, 134 evidence-backed difference entries
+Status: historical snapshot — all nine apps in the fixed transfer-era inputs were
+inventoried, with 134 evidence-backed difference entries. This is not the live app
+inventory: use `test/lib.sh`. `markwand` below is the historical app name now carried
+by `fileview`; the fixed evidence names are intentionally preserved.
 
 This census records observable or operational differences only. It does not decide
 `keep`, `drop`, or `migrate`, and it does not add contracts or tests.
@@ -25,7 +28,8 @@ Inputs inspected:
 - API inventory records method, access, and response-contract differences as well as
   endpoint presence. UI inventory records user actions, not copy or translation alone;
   visual defaults such as fonts and installed themes/extensions are classified as config.
-- Evidence is current file content with 1-based line numbers. A one-sided feature is
+- Evidence is file content at the two pinned input commits, with 1-based line
+  numbers. A one-sided feature is
   counted only when its implementation is cited and the bounded opposite app-owned
   scope was checked. The zero-match probes below make those absence checks repeatable;
   they are not a substitute for the positive file-and-line evidence in each row.
@@ -413,13 +417,14 @@ Difference count: **26 entries**.
 
 ## Final total
 
-The nine apps contain **134 evidence-backed difference entries**:
+At the fixed census point, the nine apps contained **134 evidence-backed
+difference entries**:
 
 - `devterm`: 14
 - `dev-monitor`: 19
 - `code-server`: 11
 - `feedback`: 7
-- `markwand`: 14
+- `markwand` (historical name; current app id `fileview`): 14
 - `notepad`: 9
 - `orca`: 12
 - `paseo`: 22

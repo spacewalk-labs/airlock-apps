@@ -5,7 +5,7 @@
 | Layer | Accepts | Rejects |
 |---|---|---|
 | Airlock core today | `airlock-app.toml` `contract = 1` | any other `contract`, unknown keys (F10) |
-| airlock-apps release gate | contract 1 **plus** a complete `[lifecycle]` declaration (this ABI) | missing lifecycle, unknown lifecycle keys, tag used as a lock |
+| airlock-apps release gate | contract 1 manifest **plus** a complete `abi/apps/<id>.toml` lifecycle sidecar | missing sidecar, unknown lifecycle keys, tag used as a lock |
 | Future core extension | additive `[lifecycle]` table on contract 1 | a silent contract 2 bump that breaks existing boxes |
 
 Core `contract = 1` packages remain installable. Lifecycle is required by
@@ -25,13 +25,16 @@ Next compatible core change: add closed table `[lifecycle]` to
 - Airlock does not fetch remotes, resolve tags, or read a catalog.
 - Shipped apps resolve as `$ROOT/apps/<id>` until the physical split.
 
-## App package ABI additions
+## Lifecycle sidecar
 
-Every public app declares a `[lifecycle]` table. Stateless apps must say
-`none` on every field — omission is red.
+Every public app has an `abi/apps/<id>.toml` sidecar matching
+`abi/lifecycle.schema.json`. Stateless apps must say `none` on every procedure
+field — omission is red. This data does not enter the live manifest until the
+coordinated core parser extension described above lands.
 
 ```toml
-[lifecycle]
+id = "example"
+state = "stateless"
 quiesce = "none"          # or a named procedure
 snapshot = "none"
 forward = "none"          # forward migrate
@@ -50,8 +53,9 @@ Campaign cutover requires RPO=0 for stateful apps. A declared but
 unimplemented migrator is still a complete ABI row; implementation belongs
 to `PUBLIC_APP_PARITY`.
 
-Closed field set: `quiesce`, `snapshot`, `forward`, `write_capture`,
-`reverse`, `rpo`, `paths`. Unknown keys are fatal.
+Closed field set: `id`, `state`, `quiesce`, `snapshot`, `forward`,
+`write_capture`, `reverse`, `rpo`, `paths`, `capabilities`. Unknown keys are
+fatal.
 
 ## Lock provenance
 
