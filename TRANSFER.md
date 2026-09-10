@@ -31,10 +31,10 @@ git -C airlock-apps fast-import < /tmp/airlock-apps-apps.fi
 
 # 3. Add the foundation tree at the destination paths in a follow-up commit.
 #    history/public-apps/test/          -> test/
-#    history/public-apps/foundation.json -> docs/releases/foundation.json
-#    history/public-apps/abi/            -> docs/abi/
-#    history/public-apps/lock/           -> releases/
-#    history/public-apps/builder/        -> releases/builder/
+#    history/public-apps/foundation.json -> foundation.json
+#    history/public-apps/abi/            -> abi/
+#    history/public-apps/lock/           -> lock/
+#    history/public-apps/builder/        -> builder/
 
 # 4. Verify before the first push:
 #    - each apps/<id>/airlock-app.toml blob matches airlock-work HEAD

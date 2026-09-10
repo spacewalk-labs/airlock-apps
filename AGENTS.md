@@ -2,7 +2,7 @@
 
 ## Public boundary
 
-This repository is public: treat every tracked byte, diff, fixture, comment, and historical path as externally visible. Material derived from private sources requires file-by-file review before it enters this tree; never bulk-sync a private tree or publish internal hosts, paths, identifiers, credentials, or operational topology. The privacy scanner and its self-test are mandatory, but they supplement rather than replace that review; see `test/no-internal-names.sh` and the vendored-bundle checks.
+This repository is public: treat every tracked byte, diff, fixture, comment, and historical path as externally visible. Material derived from private sources requires file-by-file review before it enters this tree; never bulk-sync a private tree or publish private deployment identifiers, credentials, or operational topology. Necessary private-source provenance may be retained only after that review. The privacy scanner and its self-test are mandatory, but they supplement rather than replace that review; see `test/no-internal-names.sh` and the vendored-bundle checks.
 
 ## Scope and compatibility
 
