@@ -55,7 +55,8 @@ If the bundle is ever absent, `install.sh` falls back to serving the raw upstrea
 (`render_loopback_nft airlock_orca <backend_port>`, from `install/lib.sh`) drops any
 non-loopback traffic to the backend port, so the **only** route in is
 `tailscale serve` → the nginx owner gate. A small systemd oneshot re-applies the
-rule on boot (nft is not persistent by default). See `SECURITY.md`.
+rule on boot (nft is not persistent by default). See
+[`../../SECURITY.md`](../../SECURITY.md).
 
 ## Runtime prerequisites (handled by `install.sh`)
 

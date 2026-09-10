@@ -1,21 +1,22 @@
-# History-preserving transfer — method and rehearsal
+# History-preserving transfer — completed record
 
-Do not create the GitHub repository from this document. The rehearsal
-builds a disposable local repo and deletes it.
+The destination repository already exists. This document preserves the original
+transfer method and its nine-app evidence; it is not a creation or live-inventory
+playbook. The current app set is owned by `test/lib.sh`.
 
-## Destination (pending human decision)
+## Destination
 
-| Field | Planned default | Status |
+| Field | Value | Status |
 |---|---|---|
-| name | `airlock-apps` | uncreated |
-| owner | undecided (public org vs company private org) | blocked |
-| visibility | undecided (public vs private) | blocked |
-| default branch | `main` | assumed |
-| protection | undecided | blocked |
+| name | `airlock-apps` | created |
+| owner | `spacewalk-labs` | settled |
+| visibility | public | settled |
+| default branch | `main` | active |
+| protection | required status checks selected at creation | external live state |
 
 ## Method
 
-Once the empty destination exists:
+The empty destination was seeded with this method:
 
 ```bash
 # 1. Export only the nine app histories from the split source revision.
@@ -61,6 +62,6 @@ prefix.
 
 ## Verification the rehearsal already runs
 
-`rehearsal/transfer-dry-run.sh` does steps 1–2 into `$TMP`, checks the
-nine manifests byte-identical to this checkout, then deletes `$TMP`.
-It never talks to GitHub.
+The source repository's `rehearsal/transfer-dry-run.sh` performed steps 1–2
+inside `$TMP`, checked the nine manifests byte-identical to the transfer source,
+and then deleted `$TMP`. It did not talk to GitHub.
