@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Folio: 빨리 적고, 바로 다시 찾는 사용성 청사진</title>
+  <meta property="og:title" content="Folio: 빨리 적고, 바로 다시 찾는 사용성 청사진">
+  <meta property="og:description" content="기존 검색을 살려 제목과 본문으로 다시 찾고, 곧바로 이어 쓰는 Folio의 한글 사용성 청사진">
+  <meta name="swk-doc-label" content="Folio · 제품 청사진 · 개정 6">
+  <meta name="swk-project" content="Folio">
+  <meta name="swk-kind" content="제품 설계">
+  <meta name="swk-tags" content="folio,검색,notion,사용성,노트,markdown">
+  <link rel="stylesheet" href="/_assets/swk-doc.css">
+</head>
+<body>
+<nav class="doc-tabs" data-swk-tabs aria-label="문서 보기">
+  <button role="tab" data-target="pane-easy">쉬운 설명</button>
+  <button role="tab" data-target="pane-detail">상세</button>
+</nav>
+<main class="doc">
+<header data-bp-head data-rev="6" data-date="2026-09-14" data-status="채택 · 조건부 PASS"
+        data-delta="청사진 지도 사전에 레이어와 열 좌표를 넣어 브라우저 SVG 크기 오류를 제거함">
+  <p><strong>개정 6</strong> · 2026-09-14 · 채택 · 조건부 PASS</p>
+  <p>이번 판: 이미 있는 Search Space와 <code>Ctrl-K</code>를 출발점으로 삼고, 검색 합격선을 고정했습니다. 실제 휴대전화와 공개 패키징 검증은 구현 단계에 남깁니다.</p>
+</header>
+<div class="tab-pane" id="pane-easy" data-active role="tabpanel">
+<style>
+.folio-r2{color:var(--swk-text);font-family:var(--swk-font-sans)}
+.folio-r2 *{box-sizing:border-box}.folio-r2__hero{padding:clamp(3rem,9vw,7rem) 1rem;text-align:center;background:var(--swk-surface-soft);border-block:1px solid var(--swk-border-muted)}
+.folio-r2 h2{max-width:13ch;margin:0 auto 1rem;font-size:clamp(2.6rem,9vw,6rem);line-height:1.02;letter-spacing:-.055em}.folio-r2__lead{max-width:30ch;margin:auto;color:var(--swk-muted);font-size:clamp(1.1rem,3vw,1.55rem)}
+.folio-r2 section{max-width:980px;margin:clamp(4rem,10vw,8rem) auto;padding-inline:1rem}.folio-r2 h3{margin:0 0 2rem;text-align:center;font-size:clamp(1.8rem,5vw,3rem);line-height:1.15;letter-spacing:-.04em}
+.folio-r2__states{display:grid;grid-template-columns:1fr auto 1fr;gap:clamp(1rem,4vw,3rem);align-items:stretch}.folio-r2__state{padding:2rem 0;border-block:2px solid var(--swk-border-strong)}.folio-r2__state[data-kind=target]{border-color:var(--swk-accent)}
+.folio-r2__eyebrow{display:block;margin-bottom:.7rem;color:var(--swk-muted);font-size:var(--swk-fs-sm);font-weight:var(--swk-fw-bold);letter-spacing:.08em}.folio-r2__state strong{display:block;font-size:clamp(1.4rem,3.5vw,2.1rem);line-height:1.25}.folio-r2__state p{color:var(--swk-muted)}
+.folio-r2__tools{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:1.2rem}.folio-r2__tools span,.folio-r2__filters span{padding:.3rem .65rem;border-radius:var(--swk-r-pill);background:var(--swk-surface);border:1px solid var(--swk-border)}.folio-r2__arrow{display:grid;place-content:center;color:var(--swk-accent);font-size:clamp(2rem,5vw,4rem);font-weight:var(--swk-fw-bold)}
+.folio-r2__search-wrap{max-width:none!important;padding-block:clamp(4rem,9vw,7rem)!important;background:var(--swk-surface-soft);border-block:1px solid var(--swk-border-muted)}.folio-r2__surface{max-width:820px;margin:auto;background:var(--swk-surface);border:2px solid var(--swk-accent-border);border-radius:var(--swk-r-lg);box-shadow:var(--swk-shadow-lg);overflow:hidden}
+.folio-r2__query{padding:1.2rem 1.4rem;font-size:clamp(1.2rem,3vw,1.7rem);font-weight:var(--swk-fw-bold);border-bottom:1px solid var(--swk-border)}.folio-r2__query span{color:var(--swk-accent)}.folio-r2__filters{display:flex;gap:.45rem;padding:.8rem 1.4rem;overflow:auto;border-bottom:1px solid var(--swk-border-muted)}.folio-r2__filters span{flex:none;background:var(--swk-accent-bg);color:var(--swk-accent);border:0;font-size:var(--swk-fs-sm)}
+.folio-r2__stage{max-width:820px;margin:0 auto .7rem;color:var(--swk-muted);font-weight:var(--swk-fw-bold)}.folio-r2__stage:not(:first-of-type){margin-top:2rem}
+.folio-r2__results{margin:0;padding:0;list-style:none}.folio-r2__result{padding:1rem 1.4rem;border-bottom:1px solid var(--swk-border-muted)}.folio-r2__result:last-child{border:0}.folio-r2__result strong{display:block;font-size:1.1rem}.folio-r2__result span{display:block;margin-top:.2rem;color:var(--swk-muted)}.folio-r2__result mark{background:var(--swk-accent-bg);color:var(--swk-text)}.folio-r2__result[data-action=create] strong{color:var(--swk-accent)}.folio-r2__caption{max-width:34ch;margin:1.5rem auto 0;text-align:center;color:var(--swk-muted)}
+.folio-r2__lines{margin:0;padding:0;list-style:none}.folio-r2__line{display:grid;grid-template-columns:minmax(8rem,.5fr) minmax(0,1.5fr);gap:1.5rem;padding:1.4rem 0;border-top:1px solid var(--swk-border)}.folio-r2__line:last-child{border-bottom:1px solid var(--swk-border)}.folio-r2__line strong{font-size:1.25rem}.folio-r2__line>span{color:var(--swk-muted)}.folio-r2__done{display:inline-block;margin-left:.35rem;padding:.1rem .4rem;border-radius:var(--swk-r-pill);background:var(--swk-success-bg);color:var(--swk-success);font-size:var(--swk-fs-xs)}
+@media(max-width:680px){.folio-r2__states{grid-template-columns:1fr}.folio-r2__arrow{transform:rotate(90deg)}.folio-r2__line{grid-template-columns:1fr;gap:.25rem}}
+</style>
+<article class="folio-r2" aria-labelledby="folio-r2-title">
+ <header class="folio-r2__hero"><h2 id="folio-r2-title">빨리 적고,<br>바로 다시 찾는다</h2><p class="folio-r2__lead">Folio의 다음 목표는 “어디 적었지?”를 없애는 것입니다.</p></header>
+ <section aria-labelledby="folio-r2-now-target"><h3 id="folio-r2-now-target">있는 기능은 살리고, 찾는 길은 하나로</h3>
+  <div class="folio-r2__states" role="group" aria-label="현재 검색과 목표 검색의 비교">
+   <div class="folio-r2__state" data-bp="now"><span class="folio-r2__eyebrow">지금</span><strong>검색은 있지만<br>쉬운지는 아직 모릅니다</strong><p><code>Ctrl-K</code>와 Search Space가 있습니다.<br>터치 진입, 제목·본문 결과 품질은 미검증입니다.</p><div class="folio-r2__tools"><span>폴더</span><span>달력</span><span>@today</span><span>/due</span></div></div>
+   <div class="folio-r2__arrow" aria-hidden="true">→</div>
+   <div class="folio-r2__state" data-kind="target" data-bp="activation"><span class="folio-r2__eyebrow">목표</span><strong>한곳에서 찾고<br>없으면 바로 만듭니다</strong><p>검색 전에는 최근 수정 문서<br>검색 후에는 제목·본문과 미리보기</p></div>
+  </div>
+ </section>
+ <section class="folio-r2__search-wrap" aria-labelledby="folio-r2-search"><h3 id="folio-r2-search">검색창 하나면 충분해요</h3>
+  <p class="folio-r2__stage">검색 전 · 최근 수정한 문서</p>
+  <div class="folio-r2__surface" role="group" aria-label="검색어 입력 전 최근 수정 문서 예시">
+   <div class="folio-r2__query"><span aria-hidden="true">⌕</span> 문서 검색</div>
+   <ol class="folio-r2__results">
+    <li class="folio-r2__result"><strong>제품 주간 회의</strong><span>10분 전 수정</span></li>
+    <li class="folio-r2__result"><strong>출시 준비</strong><span>어제 수정</span></li>
+   </ol>
+  </div>
+  <p class="folio-r2__stage">입력 후 · 제목과 본문 검색</p>
+  <div class="folio-r2__surface" data-bp="search" role="group" aria-label="목요일 회의 검색 결과 예시">
+   <div class="folio-r2__query"><span aria-hidden="true">⌕</span> 목요일 회의</div>
+   <div class="folio-r2__filters" aria-label="선택 검색 필터"><span>폴더</span><span>날짜</span><span>할 일</span></div>
+   <ol class="folio-r2__results">
+    <li class="folio-r2__result"><strong>제품 주간 회의 · 열기</strong><span>…<mark>목요일 회의</mark>에서 검색 화면을 먼저 보기로 했다…</span></li>
+    <li class="folio-r2__result"><strong>출시 준비 · 열기</strong><span>…다음 <mark>목요일</mark>까지 확인할 항목…</span></li>
+    <li class="folio-r2__result" data-action="create"><strong>“목요일 회의” 새 문서 만들기</strong><span>찾는 글이 없으면 이 자리에서 시작</span></li>
+   </ol>
+  </div><p class="folio-r2__caption">제목, 본문 속 문장, 짧은 미리보기를 함께 보여줍니다.</p>
+ </section>
+ <section aria-labelledby="folio-r2-support"><h3 id="folio-r2-support">쓰는 흐름도 그대로 이어집니다</h3>
+  <ul class="folio-r2__lines">
+   <li class="folio-r2__line"><strong><code>@today</code><span class="folio-r2__done">이미 됨</span></strong><span>오늘 날짜를 바로 넣습니다.</span></li>
+   <li class="folio-r2__line" data-bp="link-page"><strong><code>[[</code> 페이지</strong><span>글을 찾아 연결하고, 없으면 만듭니다.</span></li>
+   <li class="folio-r2__line" data-bp="slash-task"><strong><code>/todo</code> · <code>/due</code></strong><span>할 일을 만들고 마감일을 정합니다.</span></li>
+   <li class="folio-r2__line" data-bp="markdown-safe"><strong>Markdown</strong><span>쉽게 써도 파일은 그대로 읽을 수 있습니다.</span></li>
+   <li class="folio-r2__line" data-bp="mobile"><strong>모바일</strong><span>터치로도 같은 검색과 입력을 씁니다.</span></li>
+   <li class="folio-r2__line" data-bp="public-release"><strong>공개 앱</strong><span>처음 설치한 사람도 도움말 없이 씁니다.</span></li>
+  </ul>
+ </section>
+</article>
+
+
+</div>
+<div class="tab-pane" id="pane-detail" role="tabpanel">
+<h1>Folio: Notion 사용성 청사진</h1>
+<h2>제품의 자리</h2>
+<p>Folio는 Markdown을 배우거나 Obsidian 플러그인을 설정하지 않아도 바로 쓸 수 있는 공용 노트
+제품이다. 파일은 사람이 읽을 수 있는 Markdown으로 남기고, 글을 쓰는 순간에는 Notion의 가장
+좋은 사용성을 가져온다. 설정 화면을 찾아다니는 대신 커서 자리에서 다음 행동을 발견한다.</p>
+<blockquote>
+<p>빨리 적고, 바로 다시 찾는다. 파일은 계속 단순하게 남는다.</p>
+</blockquote>
+<p>Notion의 블록 데이터베이스를 복제하지 않는다. Notion을 쉽게 만드는 입력 문법만 가져와
+로컬 우선 Markdown 편집기에 맞춘다.</p>
+<h2>지금 가진 것</h2>
+<ul>
+<li><code>@today</code>, <code>@tomorrow</code>, <code>@yesterday</code>로 글의 흐름을 끊지 않고 날짜를 넣는다.</li>
+<li><code>/due</code>로 저장 문법을 직접 쓰지 않고 할 일의 기간을 붙이거나 바꾼다.</li>
+<li>폴더 트리, 달력, 템플릿, 휴지통, 서식, 백링크, 아웃라인, 그래프, 태그, 읽기 화면이 있다.</li>
+<li>내용은 독자 포맷이 아니라 평범한 Markdown으로 남는다.</li>
+</ul>
+<p>다음 단계는 도구막대를 하나 더 만드는 일이 아니다. 먼저 어디에 적었는지 기억하지 않아도
+문서를 다시 찾게 만들고, 그다음 사용자가 타이핑하는 자리에서 기존 기능을 발견하게 한다.</p>
+<h2>지금과 목표</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>지금</th>
+<th>목표</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>다시 찾기</td>
+<td><code>Ctrl-K</code>와 <code>Search Space</code>는 있지만 터치 진입과 제목·본문 검색 품질을 재지 않았다</td>
+<td>제목과 본문을 한 검색창에서 찾는다</td>
+</tr>
+<tr>
+<td>결과 판단</td>
+<td>문서를 열어 봐야 원하는 내용인지 안다</td>
+<td>검색어가 나온 문장과 위치를 결과에서 미리 본다</td>
+</tr>
+<tr>
+<td>자주 쓰는 문서</td>
+<td>트리에서 다시 찾아간다</td>
+<td>검색 전부터 최근 수정 문서가 보인다</td>
+</tr>
+<tr>
+<td>없는 문서</td>
+<td>검색과 새 문서 만들기가 갈린다</td>
+<td>결과가 없으면 같은 자리에서 새 문서를 만든다</td>
+</tr>
+<tr>
+<td>날짜 입력</td>
+<td><code>@today</code> 등 세 가지가 이미 된다</td>
+<td>현재 기능을 유지하고 검색·페이지 연결에 집중한다</td>
+</tr>
+</tbody>
+</table>
+<h2>사용 경험 원칙</h2>
+<ol>
+<li><strong>다시 찾을 수 있어야 적는 것이 쌓인다.</strong> 제목을 몰라도 본문의 기억나는 말로 찾는다.</li>
+<li><strong>커서가 명령 화면이다.</strong> <code>@</code>, <code>/</code>, <code>[[</code>를 입력하면 그 문맥에 맞는 다음 행동이 나타난다.</li>
+<li><strong>사용자는 뜻을 고르고 Folio가 문법을 쓴다.</strong> 화면에서는 <code>내일</code>을 고르고 파일에는
+   <code>2026-09-12</code> 또는 <code>📅 2026-09-12</code>가 남는다.</li>
+<li><strong>결과를 언제나 사람이 확인할 수 있다.</strong> Folio가 없어도 파일을 읽고 고칠 수 있다.</li>
+<li><strong>키보드와 터치를 같은 길로 본다.</strong> hover나 데스크톱 단축키로만 되는 기능은 미완성이다.</li>
+<li><strong>설정보다 쓰면서 배운다.</strong> 빈 줄, 빈 페이지, 제안 메뉴가 사용 중에 제품을 가르친다.</li>
+</ol>
+<h2>문서 찾기</h2>
+<p><code>⌘K</code> 또는 <code>Ctrl-K</code>로 어디에서나 같은 검색 화면을 연다. 모바일에서는 홈 화면을 아래로
+당기거나 상단 검색을 누른다.</p>
+<p>기존 <code>Navigate: Search Space</code>와 <code>Ctrl-K</code>를 버리지 않고 새 검색 화면의 기반으로 삼는다. 먼저
+제목·본문 범위와 결과 순서를 실측하고, 키보드가 없는 화면에서도 검색에 들어갈 길을 복구한다.</p>
+<p>검색 전에는 최근 수정 문서를 보여준다. 입력을 시작하면 제목과 본문을 함께 찾고,
+결과마다 검색어가 나온 문장·폴더·수정 날짜를 보여준다. 첫 릴리스는 입력한 낱말과 문구가
+그대로 들어 있는 결과를 대상으로 하며, 오타 교정과 유사어 검색은 후속으로 둔다. 왜 나온
+결과인지 알 수 있도록 일치한 부분을 표시한다.</p>
+<pre><code class="language-text">무엇을 찾을까요?
+회의록 김수리
+
+최근 문서
+  주간 회의록
+
+검색 결과
+  킥오프 회의록
+  회의록/2026 · “…김수리에게 시안 확인 요청…”
+
+  제품 회의
+  회의록/2026 · “…회의록 작성 방식 결정…”
+</code></pre>
+<p>결과는 기본적으로 제목과 본문을 함께 찾는다. 선택 필터는 <code>폴더</code>, <code>날짜</code>, <code>할 일</code> 세 가지다.
+결과가 없으면
+입력한 말을 제목으로 새 문서를 만들 수 있다. 검색은 파일의 별도 복사본을 정본으로 만들지 않고,
+Markdown 볼트에서 다시 만들 수 있는 색인만 사용한다.</p>
+<h2>입력 문법</h2>
+<h3><code>@</code>: 이미 의미가 있는 것을 넣는다</h3>
+<p>날짜 자동완성은 이미 구현되어 있다. 새 작업은 현재 동작을 그대로 보존하고 발견하기 쉽게
+보여주는 것이다. 페이지 연결은 <code>@</code>에 추가하지 않는다.</p>
+<table>
+<thead>
+<tr>
+<th>입력</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@today</code>, <code>@tomorrow</code>, <code>@yesterday</code></td>
+<td>표준 형식의 날짜, <strong>이미 구현됨</strong></td>
+</tr>
+</tbody>
+</table>
+<p>날짜 후보의 이름과 설명은 한글로 보여준다. 날짜 범위를 늘리는 일은 후속이다. 페이지 연결은
+<code>[[</code> 하나로 통일해 초보자가 <code>@</code>와 <code>[[</code> 중
+무엇을 써야 할지 고르게 하지 않는다.</p>
+<h3><code>/</code>: 만들거나 실행한다</h3>
+<table>
+<thead>
+<tr>
+<th>묶음</th>
+<th>첫 명령</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>쓰기</td>
+<td><code>/text</code>, <code>/h1</code>, <code>/h2</code>, <code>/todo</code>, <code>/bullet</code>, <code>/quote</code>, <code>/code</code>, <code>/divider</code></td>
+</tr>
+<tr>
+<td>정리</td>
+<td><code>/link</code>, <code>/toc</code>, <code>/template</code>, <code>/move</code></td>
+</tr>
+<tr>
+<td>할 일</td>
+<td><code>/due</code>, <code>/repeat</code>, <code>/priority</code></td>
+</tr>
+</tbody>
+</table>
+<p>현재 SilverBullet의 슬래시 트리거는 ASCII 명령 이름만 받는다. 따라서 <code>/due</code>, <code>/todo</code>처럼
+입력하되 결과 이름과 설명은 한글로 보여준다. 한글 명령 입력을 지원하려면 기본 트리거를
+대체하는 별도 IME 입력 기반이 먼저 필요하며, 이번 캠페인에는 넣지 않는다. 현재 커서에서
+쓸 수 없는 명령은 숨긴다.</p>
+<h3><code>[[</code>: 페이지를 연결한다</h3>
+<p><code>[[</code>를 입력하면 기존 페이지를 찾고, 없으면 새 페이지를 만든다. 링크는 마우스를 올리거나
+키보드로 초점을 맞추거나 길게 눌렀을 때 간단한 미리보기를 보여준다. 백링크가 있으면 제목
+근처에 <code>3개 문서에서 언급</code>처럼 표시해 그래프 패널을 열지 않아도 관계를 발견하게 한다.</p>
+<h2>할 일 경험</h2>
+<p>파일에는 계속 읽을 수 있는 Markdown이 남는다.</p>
+<pre><code class="language-markdown">- [ ] 제안서 보내기 📅 2026-09-12
+</code></pre>
+<p>편집 화면에서는 날짜를 사람이 읽는 말로 보여준다. 할 일 줄에 커서를 두면 <code>오늘</code>, <code>내일</code>,
+<code>날짜</code>, <code>반복</code>, <code>더보기</code>가 작게 나타난다. <code>/due</code>를 다시 실행하면 기존 기간을 교체하고,
+완료 직후에는 실행 취소를 제공한다. 지난 날짜는 <code>3일 지남</code>처럼 읽힌다.</p>
+<p>반복과 우선순위는 단일 날짜와 기간이 안정된 다음에 추가한다. 새 표시를 만들더라도 원본
+Markdown에서 뜻을 짐작할 수 있어야 한다.</p>
+<h2>첫 사용과 빠른 메모</h2>
+<p>빈 줄에는 <code>내용을 입력하거나 '/'로 기능 열기</code>를 보여준다. 빈 페이지에서는 모달을 띄우지 않고
+문서 안에서 <code>빈 문서</code>, <code>템플릿</code>, <code>오늘 일지</code> 중 하나를 고르게 한다.</p>
+<p>빠른 메모는 전역 단축키나 모바일 하단 행동 영역에서 작은 입력창으로 열린다. 저장 위치는
+<code>받은 메모</code>, <code>할 일</code>, <code>오늘 일지</code>다. 기본값은 받은 메모로 두어 처음부터 폴더 구조를 결정하게
+하지 않는다. 정리는 나중에 <code>/move</code>로 한다.</p>
+<h2>구현 순서</h2>
+<h3>A. 문서 통합검색</h3>
+<ul>
+<li>제목과 본문을 한 검색창에서 찾는다.</li>
+<li>결과에 일치 문장·폴더·날짜를 보여준다.</li>
+<li>검색 전에는 최근 수정 문서를 보여준다.</li>
+<li>폴더·날짜·할 일 필터와 결과 없음에서 새 문서 만들기를 제공한다.</li>
+<li>데스크톱과 모바일에서 같은 검색 결과를 검증한다.</li>
+</ul>
+<h3>B. 일관된 입력 동작</h3>
+<ul>
+<li><code>@</code>, <code>/</code>, <code>[[</code>는 각자의 기존 트리거를 유지한다.</li>
+<li>메뉴 모양, 키보드 이동, 터치, 취소 동작과 한글 본문 조합 중 텍스트 보존 규칙을 맞춘다.</li>
+<li>한글 슬래시 별칭과 한글 명령 검색은 이번 캠페인에서 제외한다.</li>
+<li>텍스트 삽입과 기능 실행을 구분하고 안전한 실행 취소를 제공한다.</li>
+<li>기존 <code>@today</code>와 <code>/due</code>를 저장 형식 변경 없이 새 기반으로 옮긴다.</li>
+</ul>
+<h3>C. 매일 쓰는 기능</h3>
+<ul>
+<li>기존 <code>@날짜</code>를 유지한다.</li>
+<li><code>[[</code>에서 페이지 생성과 미리보기를 제공한다.</li>
+<li>기본 Markdown, 링크, 템플릿, 할 일 동작을 슬래시 메뉴에서 검색한다.</li>
+<li>기존 Markdown 형식을 보존하며 할 일 날짜를 화면에서 바꾼다.</li>
+</ul>
+<h3>D. 처음 쓰는 사람</h3>
+<ul>
+<li>빈 줄과 빈 페이지가 다음 행동을 알려준다.</li>
+<li>문서 안에서 템플릿을 고른다.</li>
+<li>받은 메모, 할 일, 오늘 일지로 빠르게 기록한다.</li>
+<li>모든 핵심 행동을 모바일에서도 같은 수준으로 제공한다.</li>
+</ul>
+<h3>E. 공개 릴리스</h3>
+<ul>
+<li>Folio 이름과 작업공간 기능을 하나의 공개 앱 산출물로 배포한다.</li>
+<li>설치, 업그레이드, 롤백, 제거, 기존 볼트 보존을 수명주기 테스트로 확인한다.</li>
+<li>처음 쓰는 사람이 도움말을 읽지 않고 인수 여정을 마친다.</li>
+</ul>
+<h2>인수 여정</h2>
+<p>처음 쓰는 사람이 데스크톱과 모바일에서 도움말을 열지 않고 다음을 끝낸다.</p>
+<ol>
+<li>빈 작업공간에서 페이지를 만든다.</li>
+<li>제목을 기억하지 못하는 문서를 본문의 단어로 검색해 찾는다.</li>
+<li>최근 문서를 열고 폴더·날짜 필터로 결과를 좁힌다.</li>
+<li><code>@today</code>를 입력한다.</li>
+<li><code>[[</code>로 기존 페이지를 연결한다.</li>
+<li><code>/todo</code>로 할 일을 만들고 날짜를 붙이고 바꾸고 완료한 뒤 취소한다.</li>
+<li><code>[[</code>로 없는 페이지를 만든 뒤 백링크를 따라 돌아온다.</li>
+<li>빠른 메모를 받은 메모에 저장한 뒤 폴더로 옮긴다.</li>
+<li>Folio를 닫았다 다시 열어 같은 Markdown 내용과 검색 결과를 확인한다.</li>
+</ol>
+<p>콘솔 오류, 글자 손실, 중복 입력이 없어야 한다. 터치 기기에서 hover가 필요한 기능도 없어야 한다.</p>
+<h2>이번에 하지 않는 것</h2>
+<ul>
+<li>Notion식 데이터베이스, 수식, 속성, 임의 블록 중첩</li>
+<li>실시간 공동 편집</li>
+<li>사람 언급, 댓글, 공유 받은함, 서버 푸시 알림</li>
+<li>마켓플레이스와 제3자 제공자 API</li>
+<li>AI 글쓰기</li>
+<li>메일 작성·수신·발송·메일함 연동</li>
+</ul>
+<p>필요해지면 각각 별도 캠페인으로 다룬다. 지금 처음 쓰는 개인 사용자의 경험을 완성하는 데에는
+필요하지 않다.</p>
+<h2>참고</h2>
+<ul>
+<li><a href="https://www.notion.com/help/keyboard-shortcuts">Notion 키보드 단축키와 <code>@</code> 명령</a></li>
+<li><a href="https://www.notion.com/help/guides/block-basics-build-the-foundation-for-your-teams-pages">Notion 블록과 슬래시 명령 기초</a></li>
+<li><a href="https://www.notion.com/en-gb/help/create-links-and-backlinks">Notion 링크와 백링크</a></li>
+</ul>
+<h2 id="bp-map-search">한 장으로 보는 목표</h2>
+<figure class="bp-map" data-bp-map="folio-search" data-bp-layout="layers">
+  <figcaption>있는 기능을 버리지 않고, 찾기에서 이어 쓰기와 공개 배포까지 연결합니다.</figcaption>
+  <script class="bp-dict" type="application/json">
+  {
+    "now": {"title":"현재 기반","layer":0,"col":0,"state":"built","detail":"Search Space와 Ctrl-K, 폴더, 달력, @날짜, /due가 이미 있다."},
+    "search": {"title":"문서 찾기","layer":1,"col":0,"state":"unverified","detail":"검색 전에는 최근 수정 문서, 검색 후에는 제목·본문 일치와 미리보기·위치를 보여준다."},
+    "link-page": {"title":"문서 연결","layer":2,"col":0,"state":"unverified","detail":"[[ 하나로 기존 문서를 연결하고 없는 문서는 만든다."},
+    "slash-task": {"title":"할 일 명령","layer":2,"col":1,"state":"unverified","detail":"/todo와 /due처럼 영문 명령 이름과 한글 설명을 함께 보여준다."},
+    "markdown-safe": {"title":"Markdown 보존","layer":3,"col":0,"state":"unverified","detail":"Markdown 파일을 정본으로 두고 검색 색인은 다시 만들 수 있게 한다."},
+    "activation": {"title":"첫 사용","layer":4,"col":0,"state":"unverified","detail":"빈 화면, 템플릿, 빠른 메모가 도움말 없이 다음 행동을 알려준다."},
+    "mobile": {"title":"모바일 동등성","layer":5,"col":0,"state":"unverified","detail":"키보드 단축키 없이도 터치로 검색과 핵심 입력에 들어간다."},
+    "public-release": {"title":"공개 앱 배포","layer":6,"col":0,"state":"unverified","detail":"설치, 업그레이드, 롤백, 제거와 기존 문서 보존을 확인한다."},
+    "e1": {"from":"now","to":"search"},
+    "e2": {"from":"search","to":"link-page"},
+    "e3": {"from":"search","to":"slash-task"},
+    "e4": {"from":"link-page","to":"markdown-safe"},
+    "e5": {"from":"slash-task","to":"markdown-safe"},
+    "e6": {"from":"markdown-safe","to":"activation"},
+    "e7": {"from":"activation","to":"mobile"},
+    "e8": {"from":"mobile","to":"public-release"}
+  }
+  </script>
+</figure>
+<h2 id="bp-unmeasured">아직 재지 않은 것</h2>
+<ul>
+  <li>현재 Search Space가 제목과 본문을 어디까지 찾는지, 결과 순위와 응답 시간의 기준값</li>
+  <li>기억나는 말로 찾는 고정 검색 질의·정답 문서 묶음과 상위 3개 성공률</li>
+  <li>실제 휴대전화에서 검색 진입, 입력기 조합, 결과 열기의 동작</li>
+  <li>공개 앱의 패키징 담당 경로와 설치·업그레이드·롤백 자동화 범위</li>
+</ul>
+<h2 id="bp-review">적대적 검토 기록</h2>
+<ul>
+  <li><strong>검토자:</strong> GPT-5.6 Sol · medium · 2026-09-14 · 개정 2~3</li>
+  <li><strong>반례:</strong> 실제 코드에 Search Space와 Ctrl-K가 있는데 없는 것처럼 썼는지, 한글 명령이 실제 파서와 맞는지, 같은 연결 기능을 두 문법으로 중복했는지 확인했습니다.</li>
+  <li><strong>발견과 수정:</strong> 기존 검색 누락, 노드 누락, <code>@page</code> 중복, 필터 불일치, 한글 명령 범위 충돌을 고쳤습니다. 검색 정답지는 제목 4·본문 낱말 4·본문 문구 4로 고정하고 오타·유사어·응답시간 합격선은 제외했습니다.</li>
+  <li><strong>재검토:</strong> 개정 3의 HTML·상세 문서·태스크 문서를 대조해 앞선 지적이 해소됐음을 확인했습니다.</li>
+  <li><strong>판정:</strong> 조건부 PASS. 실제 휴대전화 1대 이상의 터치 여정과 공개 패키징 소유 경로·수명주기 자동화 범위는 구현 착수 후 확인해야 합니다.</li>
+</ul>
+<h2 id="bp-history">개정 이력</h2>
+<ul>
+  <li><strong>개정 1:</strong> Notion식 입력 사용성을 중심으로 최초 발행.</li>
+  <li><strong>개정 2:</strong> 문서 찾기를 제품 약속의 앞부분으로 올리고 쉬운 설명을 한글로 재구성.</li>
+  <li><strong>개정 3:</strong> 코드 대조 결과를 반영해 현재 검색, 단일 문서 연결 문법, 영문 슬래시 명령, 측정 기준, 모바일과 공개 배포 수명주기를 명확히 함.</li>
+  <li><strong>개정 4:</strong> 적대적 재검토를 반영해 입력 범위와 필터를 통일하고, 12개 고정 검색 질의의 합격선과 구현 단계의 잔여 검증을 봉인함.</li>
+  <li><strong>개정 5:</strong> 발행 브라우저 검사에서 발견한 숨은 탭 SVG 초기화 오류를 고치고 상세 탭을 연 뒤 지도를 그리도록 함.</li>
+  <li><strong>개정 6:</strong> 지도 사전에 빠졌던 레이어·열 좌표를 보강해 모든 노드와 연결선을 유효한 SVG로 표시함.</li>
+</ul>
+</div>
+</main>
+  <script>
+  document.querySelector('[data-target="pane-detail"]').addEventListener('click', function () {
+    window.setTimeout(function () {
+      if (document.querySelector('script[data-folio-blueprint]')) return;
+      const script = document.createElement('script');
+      script.src = '/_assets/swk-blueprint.js';
+      script.dataset.folioBlueprint = 'true';
+      document.body.appendChild(script);
+    }, 0);
+  }, { once: true });
+  </script>
+  <script type="module" src="/_assets/swk-doc.js"></script>
+</body>
+</html>
