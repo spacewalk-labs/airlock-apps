@@ -65,6 +65,7 @@ def render_hub(plan: dict) -> str:
                 "    proxy_set_header Accept-Encoding \"\";",
                 "    sub_filter_once on;",
                 "    sub_filter '</head>' '<link rel=\"stylesheet\" href=\"/notes/_obs/suggestion-foundation.css\"><script src=\"/notes/_obs/suggestion-foundation.js\" defer></script></head>';",
+                "    sub_filter '<head>' '<head><link rel=\"icon\" type=\"image/png\" href=\"/assets/shortcut-icons/folio.png\"><link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/assets/shortcut-icons/folio-apple-180.png\">';",
                 "}",
             ]
         )
