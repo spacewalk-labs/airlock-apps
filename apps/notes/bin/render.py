@@ -62,6 +62,9 @@ def render_hub(plan: dict) -> str:
                 "    proxy_set_header Upgrade $http_upgrade;",
                 "    proxy_set_header Connection $connection_upgrade;",
                 "    proxy_read_timeout 86400s;",
+                "    proxy_set_header Accept-Encoding \"\";",
+                "    sub_filter_once on;",
+                "    sub_filter '<head>' '<head><link rel=\"icon\" type=\"image/png\" href=\"/assets/shortcut-icons/folio.png\"><link rel=\"apple-touch-icon\" sizes=\"180x180\" href=\"/assets/shortcut-icons/folio-apple-180.png\">';",
                 "}",
             ]
         )
