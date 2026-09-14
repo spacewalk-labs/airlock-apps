@@ -227,6 +227,21 @@ def render_jump() -> str:
       margin-left: auto; padding: 1px 5px; border: 1px solid var(--folio-line); border-radius: 5px;
       background: var(--folio-paper); color: var(--folio-muted); font: 12px/1.4 inherit;
     }
+    .folio-search-result {
+      display: block; width: 100%; min-height: 44px; padding: 9px 10px; border: 0;
+      border-radius: 8px; background: transparent; color: var(--folio-ink); text-align: left;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      cursor: pointer;
+    }
+    .folio-search-result:hover { background: var(--folio-hover); }
+    .folio-search-result:focus-visible { outline: 3px solid var(--folio-focus); outline-offset: -1px; }
+    .folio-search-title { display: block; overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .folio-search-location { display: block; margin-top: 2px; color: var(--folio-muted); font-size: 12px; }
+    .folio-search-snippet {
+      display: -webkit-box; overflow: hidden; margin-top: 3px; color: var(--folio-muted);
+      -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    }
+    .folio-search-empty { padding: 18px 10px; color: var(--folio-muted); line-height: 1.55; }
     .folio-reader-actions { justify-self: end; display: flex; align-items: center; gap: 6px; }
     .folio-reader-edit {
       display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px;
@@ -238,6 +253,29 @@ def render_jump() -> str:
       #folio-reader-search kbd { display: none; }
       #folio-reader-search { min-height: 42px; }
       .folio-reader-edit { min-height: 42px; padding-inline: 9px; }
+      #folio-reader-search-sheet {
+        position: fixed; inset: 50px 0 0; z-index: 2147482000; overflow-y: auto;
+        box-sizing: border-box; padding: 12px 10px 24px; background: var(--folio-paper);
+      }
+      .folio-search-sheet-head { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
+      #folio-search-sheet-input {
+        width: 100%; min-height: 44px; box-sizing: border-box; padding: 9px 11px;
+        border: 1px solid var(--folio-line); border-radius: 8px; background: var(--folio-quiet);
+        color: var(--folio-ink); font: inherit;
+      }
+      #folio-search-sheet-input:focus-visible { outline: 3px solid var(--folio-focus); outline-offset: 1px; }
+      #folio-reader-search-sheet .folio-search-sheet-close {
+        min-width: 44px; min-height: 44px; border: 0; border-radius: 8px;
+        background: var(--folio-quiet) !important; color: var(--folio-muted) !important; font: 20px/1 inherit;
+      }
+      .folio-search-sheet-close:focus-visible { outline: 3px solid var(--folio-focus); outline-offset: 1px; }
+      .folio-search-sheet-meta { margin: 8px 2px; color: var(--folio-muted); font-size: 12px; }
+      #folio-reader-search-sheet .folio-search-result {
+        display: block !important; height: auto !important; min-height: 72px;
+        padding: 9px 10px !important; background: transparent !important; color: var(--folio-ink) !important;
+      }
+      #folio-reader-search-sheet .folio-search-result:hover,
+      #folio-reader-search-sheet .folio-search-result:focus-visible { background: var(--folio-hover) !important; }
     }
     @media (prefers-reduced-motion: reduce) { #folio-reader-bar * { scroll-behavior: auto !important; transition: none !important; } }
   `;
@@ -254,7 +292,7 @@ def render_jump() -> str:
     <nav class="folio-reader-actions" aria-label="문서 행동"></nav>`;
   document.body.prepend(bar);
 
-  const searchInput = () => [...document.querySelectorAll('input')].find(input => {
+  const searchInput = () => document.querySelector('#folio-search-sheet-input') || [...document.querySelectorAll('input')].find(input => {
     const words = `${input.type} ${input.placeholder} ${input.getAttribute('aria-label') || ''}`.toLowerCase();
     return words.includes('search') || words.includes('검색');
   });
@@ -263,16 +301,148 @@ def render_jump() -> str:
     const words = `${control.textContent} ${control.title} ${control.getAttribute('aria-label') || ''}`.toLowerCase();
     return words.includes('search') || words.includes('검색');
   });
+  const searchResults = () => document.querySelector('#folio-reader-search-sheet .folio-search-results')
+    || document.querySelector('.search-results-children');
+  const searchInfo = () => document.querySelector('#folio-reader-search-sheet .folio-search-sheet-meta')
+    || document.querySelector('.search-info-container');
+  const closeSearchSurface = () => {
+    document.getElementById('folio-reader-search-sheet')?.remove();
+    document.body.classList.remove('folio-search-open');
+  };
+  const relativeDate = millis => {
+    const days = Math.floor((Date.now() - Number(millis)) / 86400000);
+    if (days <= 0) return '오늘 수정';
+    if (days === 1) return '어제 수정';
+    if (days < 8) return `${days}일 전 수정`;
+    return new Intl.DateTimeFormat('ko-KR', {month: 'short', day: 'numeric'}).format(new Date(millis));
+  };
+  let searchRequest;
+  const renderSearchRows = payload => {
+    const root = searchResults();
+    const info = searchInfo();
+    if (!root) return;
+    root.replaceChildren();
+    root.dataset.searchElapsedMs = String(payload.elapsed_ms);
+    root.dataset.filesScanned = String(payload.files_scanned);
+    if (info) {
+      info.style.display = 'block';
+      info.textContent = payload.query
+        ? `${payload.results.length}개 일치 · ${payload.elapsed_ms}ms`
+        : `최근 수정 문서 · ${payload.elapsed_ms}ms`;
+    }
+    if (!payload.results.length) {
+      const empty = document.createElement('p');
+      empty.className = 'folio-search-empty';
+      empty.textContent = '일치하는 문서가 없습니다. 기억나는 말을 줄여서 다시 찾아보세요.';
+      root.appendChild(empty);
+      return;
+    }
+    for (const row of payload.results) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'folio-search-result';
+      button.dataset.page = row.page;
+      button.dataset.line = String(row.line);
+      const title = document.createElement('span');
+      title.className = 'folio-search-title';
+      title.textContent = row.page;
+      const location = document.createElement('span');
+      location.className = 'folio-search-location';
+      location.textContent = `${row.match === 'title' ? '제목' : `${row.line}번째 줄`} · ${relativeDate(row.modified)}`;
+      const snippet = document.createElement('span');
+      snippet.className = 'folio-search-snippet';
+      snippet.textContent = row.snippet;
+      button.append(title, location, snippet);
+      button.addEventListener('click', () => {
+        closeSearchSurface();
+        getContent(`/${encodeURIComponent(row.page)}`);
+      });
+      root.appendChild(button);
+    }
+  };
+  const folioSearch = async query => {
+    searchRequest?.abort();
+    searchRequest = new AbortController();
+    const started = performance.now();
+    try {
+      const response = await fetch('/notes/_obs/search.php?q=' + encodeURIComponent(query || ''), {
+        credentials: 'same-origin', signal: searchRequest.signal
+      });
+      if (!response.ok) throw new Error(`search ${response.status}`);
+      const payload = await response.json();
+      payload.roundtrip_ms = Math.round((performance.now() - started) * 100) / 100;
+      renderSearchRows(payload);
+      searchResults()?.setAttribute('data-search-roundtrip-ms', String(payload.roundtrip_ms));
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      const root = searchResults();
+      if (root) {
+        root.replaceChildren();
+        const message = document.createElement('p');
+        message.className = 'folio-search-empty';
+        message.textContent = '검색 결과를 불러오지 못했습니다. 잠시 뒤 다시 시도하세요.';
+        root.appendChild(message);
+      }
+      console.error('folio search:', error);
+    }
+  };
+  window.search = folioSearch;
+  const showMobileSearch = () => {
+    let sheet = document.getElementById('folio-reader-search-sheet');
+    if (!sheet) {
+      sheet = document.createElement('section');
+      sheet.id = 'folio-reader-search-sheet';
+      sheet.setAttribute('aria-label', '문서 검색 결과');
+      sheet.innerHTML = `
+        <div class="folio-search-sheet-head">
+          <input id="folio-search-sheet-input" type="search" autocomplete="off"
+            aria-label="제목과 본문에서 문서 검색" placeholder="제목이나 본문에서 기억나는 말">
+          <button type="button" class="folio-search-sheet-close" aria-label="검색 닫기">×</button>
+        </div>
+        <p class="folio-search-sheet-meta" aria-live="polite"></p>
+        <div class="folio-search-results"></div>`;
+      document.body.appendChild(sheet);
+      sheet.querySelector('input')?.addEventListener('input', event => folioSearch(event.currentTarget.value));
+      sheet.querySelector('.folio-search-sheet-close')?.addEventListener('click', closeSearchSurface);
+    }
+    document.body.classList.add('folio-search-open');
+  };
+  const showNativeSearch = () => {
+    if (window.matchMedia('(max-width: 680px)').matches) {
+      showMobileSearch();
+      return;
+    }
+    document.body.classList.add('folio-search-open');
+    searchToggle()?.click();
+    const searchPane = document.querySelector('.workspace-leaf-content[data-type="search"]')?.parentElement;
+    const filesPane = document.querySelector('.workspace-leaf-content[data-type="file-explorer"]')?.parentElement;
+    if (searchPane) searchPane.style.display = '';
+    if (filesPane) filesPane.style.display = 'none';
+    document.querySelector('.workspace-tab-header[data-type="search"]')?.classList.add('is-active', 'mod-active');
+    document.querySelector('.workspace-tab-header[data-type="file-explorer"]')?.classList.remove('is-active', 'mod-active');
+  };
   const openSearch = () => {
     let input = searchInput();
-    if (input) { input.focus(); input.select?.(); return; }
-    searchToggle()?.click();
-    window.setTimeout(() => { input = searchInput(); input?.focus(); input?.select?.(); }, 0);
+    if (!input || input.offsetParent === null) showNativeSearch();
+    window.setTimeout(() => {
+      input = searchInput();
+      if (!input) return;
+      input.placeholder = '제목이나 본문에서 기억나는 말';
+      input.setAttribute('aria-label', '제목과 본문에서 문서 검색');
+      input.focus();
+      input.select?.();
+      folioSearch(input.value);
+    }, 0);
   };
   document.getElementById('folio-reader-search').addEventListener('click', openSearch);
+  document.querySelector('.folio-reader-brand')?.addEventListener('click', () => {
+    closeSearchSurface();
+  });
   document.addEventListener('keydown', event => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault(); openSearch();
+    } else if (event.key === 'Escape' && document.body.classList.contains('folio-search-open')) {
+      closeSearchSurface();
     }
   });
 
