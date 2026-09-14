@@ -110,7 +110,9 @@ PY
   grep -Fq -- '--env URI_PATH=/notes/' "$HERE/install.sh" || fail=1
   grep -Fq '/notes/_obs/edit-jump.js' "$out/router.conf" || fail=1
   grep -Fq '<script src="/notes/.js/perlite.js"></script>' "$out/router.conf" || fail=1
-  grep -Fq "document.title = 'Notes';" "$out/edit-jump.js" || fail=1
+  grep -Fq "document.title = 'Folio';" "$out/edit-jump.js" || fail=1
+  grep -Fq 'id="folio-reader-search"' "$out/edit-jump.js" || fail=1
+  grep -Fq "link.textContent = '편집';" "$out/edit-jump.js" || fail=1
   grep -Fq "'/assets/app-icons/notes.svg'" "$out/edit-jump.js" || fail=1
   grep -Fq "'/assets/app-icons/notes.png'" "$out/edit-jump.js" || fail=1
   if grep -R -E -n 'tailscale[[:space:]]+serve' "$HERE" >/dev/null; then fail=1; fi
