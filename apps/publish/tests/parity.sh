@@ -44,7 +44,7 @@ for marker in (
 ):
     assert marker in frontend, marker
 assert 'fileview-theme' not in frontend
-assert 'path = "/publish/"' in manifest
+assert 'path = "/publish/files/"' in manifest
 print('ok: Publish static parity contracts')
 PY
 

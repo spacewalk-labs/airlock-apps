@@ -87,7 +87,7 @@ webroot = ["publish/index.html"]
 # From hub/index.html's APPS table (publish row).
 [tile]
 label = "Publish"
-sub = "static publish"
+sub = "document library"
 cat = "docs"
-path = "/publish/"
+path = "/publish/files/"
 glyph = "app-publish"

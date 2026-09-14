@@ -3,6 +3,8 @@
 A static-share manager for your Airlock, plus an **optional, pluggable** way to
 publish a page to a public URL.
 
+- The launcher opens **`/publish/files/`**, the project-category document library
+  generated from the live share directory.
 - **`/publish/`** — manage the share directory (default `/opt/airlock/share`):
   list entries, unpublish (unlink symlinks, keeping the original), delete direct
   files (with a retype-to-confirm step), batch operations, and repair broken
