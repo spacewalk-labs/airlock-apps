@@ -166,7 +166,8 @@ security.limit_extensions = .php
 
 def render_jump() -> str:
     return r"""(() => {
-  document.title = 'Notes';
+  document.title = 'Folio';
+  document.documentElement.lang = 'ko';
   for (const [rel, href] of [
     ['icon', '/assets/app-icons/notes.svg'],
     ['apple-touch-icon', '/assets/app-icons/notes.png']
@@ -179,6 +180,102 @@ def render_jump() -> str:
     }
     link.href = href;
   }
+
+  const style = document.createElement('style');
+  style.textContent = `
+    :root {
+      --folio-ink: #252522;
+      --folio-muted: #686862;
+      --folio-paper: #fbfbf8;
+      --folio-quiet: #f3f3ef;
+      --folio-hover: #ecece6;
+      --folio-line: #deded7;
+      --folio-focus: #5b57c8;
+    }
+    html[data-theme="dark"] {
+      --folio-ink: #ecece7;
+      --folio-muted: #aaa9a2;
+      --folio-paper: #20201e;
+      --folio-quiet: #2c2c29;
+      --folio-hover: #373733;
+      --folio-line: #454540;
+      --folio-focus: #9b98ef;
+    }
+    #folio-reader-bar {
+      position: sticky; top: 0; z-index: 2147483000;
+      display: grid; grid-template-columns: minmax(72px, 1fr) minmax(220px, 520px) minmax(72px, 1fr);
+      align-items: center; gap: 16px; min-height: 52px; padding: 6px 18px;
+      box-sizing: border-box; border-bottom: 1px solid var(--folio-line);
+      background: var(--folio-paper);
+      background: color-mix(in srgb, var(--folio-paper) 96%, transparent);
+      color: var(--folio-ink); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }
+    #folio-reader-bar a { color: inherit; text-decoration: none; }
+    .folio-reader-brand { justify-self: start; font-weight: 720; letter-spacing: -.015em; }
+    #folio-reader-search {
+      display: flex; align-items: center; gap: 9px; width: 100%; min-height: 40px;
+      padding: 7px 10px; border: 1px solid var(--folio-line); border-radius: 10px;
+      background: var(--folio-quiet); color: var(--folio-muted); cursor: text; font: inherit;
+    }
+    #folio-reader-search:hover { background: var(--folio-hover); color: var(--folio-ink); }
+    #folio-reader-search:focus-visible, .folio-reader-edit:focus-visible, .folio-reader-brand:focus-visible {
+      outline: 3px solid var(--folio-focus); outline-offset: 2px;
+    }
+    #folio-reader-search svg { width: 17px; height: 17px; flex: none; }
+    #folio-reader-search span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #folio-reader-search kbd {
+      margin-left: auto; padding: 1px 5px; border: 1px solid var(--folio-line); border-radius: 5px;
+      background: var(--folio-paper); color: var(--folio-muted); font: 12px/1.4 inherit;
+    }
+    .folio-reader-actions { justify-self: end; display: flex; align-items: center; gap: 6px; }
+    .folio-reader-edit {
+      display: inline-flex; align-items: center; min-height: 40px; padding: 0 12px;
+      border-radius: 8px; color: var(--folio-ink); font-weight: 650;
+    }
+    .folio-reader-edit:hover { background: var(--folio-quiet); }
+    @media (max-width: 680px) {
+      #folio-reader-bar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; padding: 5px 10px; min-height: 50px; }
+      #folio-reader-search kbd { display: none; }
+      #folio-reader-search { min-height: 42px; }
+      .folio-reader-edit { min-height: 42px; padding-inline: 9px; }
+    }
+    @media (prefers-reduced-motion: reduce) { #folio-reader-bar * { scroll-behavior: auto !important; transition: none !important; } }
+  `;
+  document.head.appendChild(style);
+
+  const bar = document.createElement('header');
+  bar.id = 'folio-reader-bar';
+  bar.innerHTML = `
+    <a class="folio-reader-brand" href="/notes/" aria-label="Folio 문서 홈">Folio</a>
+    <button type="button" id="folio-reader-search" aria-label="문서 검색">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m20 20-3.7-3.7"></path></svg>
+      <span>문서 검색</span><kbd>⌘K</kbd>
+    </button>
+    <nav class="folio-reader-actions" aria-label="문서 행동"></nav>`;
+  document.body.prepend(bar);
+
+  const searchInput = () => [...document.querySelectorAll('input')].find(input => {
+    const words = `${input.type} ${input.placeholder} ${input.getAttribute('aria-label') || ''}`.toLowerCase();
+    return words.includes('search') || words.includes('검색');
+  });
+  const searchToggle = () => [...document.querySelectorAll('button, a')].find(control => {
+    if (control.id === 'folio-reader-search') return false;
+    const words = `${control.textContent} ${control.title} ${control.getAttribute('aria-label') || ''}`.toLowerCase();
+    return words.includes('search') || words.includes('검색');
+  });
+  const openSearch = () => {
+    let input = searchInput();
+    if (input) { input.focus(); input.select?.(); return; }
+    searchToggle()?.click();
+    window.setTimeout(() => { input = searchInput(); input?.focus(); input?.select?.(); }, 0);
+  };
+  document.getElementById('folio-reader-search').addEventListener('click', openSearch);
+  document.addEventListener('keydown', event => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault(); openSearch();
+    }
+  });
+
   const cookie = Object.fromEntries(document.cookie.split(';').map(v => v.trim().split('=')));
   fetch('/notes/_obs/vaults.json', {credentials: 'same-origin'})
     .then(r => { if (!r.ok) throw new Error(`registry ${r.status}`); return r.json(); })
@@ -189,14 +286,10 @@ def render_jump() -> str:
       if (!vault || !vault.writable || !vault.editor_path) return;
       const link = document.createElement('a');
       link.href = vault.editor_path;
-      link.textContent = 'Edit';
-      link.setAttribute('aria-label', `Edit ${vault.label} in SilverBullet`);
-      Object.assign(link.style, {
-        position: 'fixed', right: '1rem', bottom: '1rem', zIndex: '2147483647',
-        padding: '.55rem .8rem', borderRadius: '.5rem', color: 'white',
-        background: '#4338ca', textDecoration: 'none', font: '600 14px system-ui'
-      });
-      document.body.appendChild(link);
+      link.textContent = '편집';
+      link.className = 'folio-reader-edit';
+      link.setAttribute('aria-label', `${vault.label} 문서 편집`);
+      document.querySelector('.folio-reader-actions')?.appendChild(link);
     })
     .catch(error => console.error('notes editor link:', error));
 })();
