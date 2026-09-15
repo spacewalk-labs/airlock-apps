@@ -102,12 +102,18 @@
       const item = active.items[index];
       const selection = window.getSelection?.();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-      const text = active.target.value ?? active.target.textContent ?? '';
+      const target = active.target;
+      const text = target.value ?? target.textContent ?? '';
       const result = applySuggestion(text, active.context, item);
-      if (!result) return close();
-      onInsert({ target: active.target, result, range });
-      if (result.action) onAction(result.action, item);
+      // Close before inserting: onInsert dispatches a synthetic 'input' event
+      // that re-enters onInput synchronously on this same target. If close()
+      // ran after onInsert, it would wipe out any menu that reentrant call
+      // just opened (e.g. an insert whose text recreates its own trigger),
+      // and it would inspect a now-stale `active`.
       close();
+      if (!result) return;
+      onInsert({ target, result, range });
+      if (result.action) onAction(result.action, item);
     };
 
     const onInput = (event) => {
