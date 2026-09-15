@@ -62,6 +62,9 @@ def render_hub(plan: dict) -> str:
                 "    proxy_set_header Upgrade $http_upgrade;",
                 "    proxy_set_header Connection $connection_upgrade;",
                 "    proxy_read_timeout 86400s;",
+                "    proxy_set_header Accept-Encoding \"\";",
+                "    sub_filter_once on;",
+                "    sub_filter '</head>' '<link rel=\"stylesheet\" href=\"/notes/_obs/suggestion-foundation.css\"><script src=\"/notes/_obs/suggestion-foundation.js\" defer></script></head>';",
                 "}",
             ]
         )
@@ -124,6 +127,8 @@ http {{
 
         location = /_obs/vaults.json {{ try_files /_obs/vaults.json =404; }}
         location = /_obs/edit-jump.js {{ try_files /_obs/edit-jump.js =404; }}
+        location = /_obs/suggestion-foundation.js {{ try_files /_obs/suggestion-foundation.js =404; }}
+        location = /_obs/suggestion-foundation.css {{ try_files /_obs/suggestion-foundation.css =404; }}
         location ~ (^|/)\. {{ deny all; }}
         location ~* ^/notes/.+\.(png|jpe?g|gif|bmp|tiff?|webp|svg|pdf|mp4|m4a)$ {{
             rewrite ^ /_obs/raw.php last;
@@ -483,6 +488,10 @@ def main() -> int:
     (args.out / "router.conf").write_text(render_router(plan, args.uid, args.gid), encoding="utf-8")
     (args.out / "php-fpm.conf").write_text(render_fpm(args.uid, args.gid), encoding="utf-8")
     (args.out / "edit-jump.js").write_text(render_jump(), encoding="utf-8")
+    (args.out / "suggestion-foundation.css").write_text(
+        (Path(__file__).parent.parent / "editor" / "suggestion-foundation.css").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     args.unit.parent.mkdir(parents=True, exist_ok=True)
     args.fragment.parent.mkdir(parents=True, exist_ok=True)
     args.unit.write_text(

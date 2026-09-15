@@ -54,6 +54,7 @@ standalone() {
   PYTHONPYCACHEPREFIX="$tmp/pycache" python3 -m py_compile \
     "$HERE/bin/config-plan.py" "$HERE/bin/editor-supervisor.py" \
     "$HERE/bin/extract-image-path.py" "$HERE/bin/render.py" || fail=1
+  node "$HERE/tests/suggestion-foundation.test.mjs" || fail=1
   python3 - "$tmp/image.tar" <<'PY' || fail=1
 import io, json, tarfile, sys
 outer_path=sys.argv[1]
@@ -109,6 +110,8 @@ PY
   grep -Fq -- '--restart unless-stopped' "$HERE/install.sh" || fail=1
   grep -Fq -- '--env URI_PATH=/notes/' "$HERE/install.sh" || fail=1
   grep -Fq '/notes/_obs/edit-jump.js' "$out/router.conf" || fail=1
+  grep -Fq '/notes/_obs/suggestion-foundation.js' "$out/router.conf" || fail=1
+  grep -Fq '/notes/_obs/suggestion-foundation.css' "$out/router.conf" || fail=1
   grep -Fq '<script src="/notes/.js/perlite.js"></script>' "$out/router.conf" || fail=1
   grep -Fq "document.title = 'Folio';" "$out/edit-jump.js" || fail=1
   grep -Fq 'id="folio-reader-search"' "$out/edit-jump.js" || fail=1
