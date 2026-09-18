@@ -1,5 +1,8 @@
 name: ci
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches: [main]
 jobs:
   foundation-boundary:
     runs-on: ubuntu-latest
@@ -15,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Verify directional fixtures and implemented parity apps
+      - name: Verify release artifacts, directional fixtures and app parity
         run: |
           set -euo pipefail
           bash test/all-app-artifacts.sh --parity --fixture-contract

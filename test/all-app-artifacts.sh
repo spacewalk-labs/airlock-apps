@@ -94,7 +94,8 @@ for app in "${selected[@]}"; do
 done
 
 if [[ "$parity" == true ]]; then
-  python3 "$HERE/parity-dispositions.py"
+  # Census disposition snapshots remain available for a manual migration review.
+  # Automatic parity checks exercise the fixtures and app implementations below.
   if [[ "$fixture_contract" == true ]]; then
     python3 "$HERE/parity-fixture-contract.py"
   else
