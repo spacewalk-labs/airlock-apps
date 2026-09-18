@@ -110,7 +110,11 @@ PY
   grep -Fq -- '--env URI_PATH=/notes/' "$HERE/install.sh" || fail=1
   grep -Fq '/notes/_obs/edit-jump.js' "$out/router.conf" || fail=1
   grep -Fq '<script src="/notes/.js/perlite.js"></script>' "$out/router.conf" || fail=1
-  grep -Fq "document.title = 'Notes';" "$out/edit-jump.js" || fail=1
+  grep -Fq "document.title = 'Folio';" "$out/edit-jump.js" || fail=1
+  grep -Fq 'id="folio-reader-search"' "$out/edit-jump.js" || fail=1
+  grep -Fq "'/notes/_obs/search.php?q='" "$out/edit-jump.js" || fail=1
+  grep -Fq 'folio-search-location' "$out/edit-jump.js" || fail=1
+  grep -Fq "link.textContent = '편집';" "$out/edit-jump.js" || fail=1
   grep -Fq "'/assets/app-icons/notes.svg'" "$out/edit-jump.js" || fail=1
   grep -Fq "'/assets/app-icons/notes.png'" "$out/edit-jump.js" || fail=1
   if grep -R -E -n 'tailscale[[:space:]]+serve' "$HERE" >/dev/null; then fail=1; fi
@@ -147,6 +151,8 @@ PY
     "$tmp/install-render/units/airlock-notes-editor.service" || fail=1
   cmp -s "$HERE/reader/app.html" \
     "$tmp/install-render/runtime/runs/standalone-nonce-0001/obs/app.html" || fail=1
+  cmp -s "$HERE/reader/search.php" \
+    "$tmp/install-render/runtime/runs/standalone-nonce-0001/obs/search.php" || fail=1
 
   fakebin="$tmp/fakebin"; mkdir -p "$fakebin"
   fake_state="$tmp/fake-docker-state.json"
@@ -354,7 +360,7 @@ PY
   cat > "$cfg" <<EOF
 [auth]
 provider = "tailscale"
-owner = "owner@example.com"
+owner = "folio-fixture@example.test"
 [apps.hub]
 [apps.notes]
 reader_port = 19960
