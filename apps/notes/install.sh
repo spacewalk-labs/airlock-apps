@@ -204,7 +204,10 @@ python3 "$HERE/bin/render.py" \
   --silverbullet "$SB_BIN" \
   --supervisor "$HERE/bin/editor-supervisor.py" --uid "$(id -u)" --gid "$(id -g)"
 install -m 644 "$run_stage/edit-jump.js" "$run_stage/obs/edit-jump.js"
+install -m 644 "$HERE/editor/suggestion-foundation.js" "$run_stage/obs/suggestion-foundation.js"
+install -m 644 "$run_stage/suggestion-foundation.css" "$run_stage/obs/suggestion-foundation.css"
 install -m 644 "$HERE/reader/raw.php" "$run_stage/obs/raw.php"
+install -m 644 "$HERE/reader/search.php" "$run_stage/obs/search.php"
 install -m 644 "$HERE/reader/app.html" "$run_stage/obs/app.html"
 while IFS= read -r vault_id; do
   install -d -m 700 "$run_stage/sockets/$vault_id"

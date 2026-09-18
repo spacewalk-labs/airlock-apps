@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-14T13:45:00+09:00",
+  "title": "Design System: Folio",
+  "extensions": {
+    "colorMeta": {
+      "ink": {"role": "neutral", "displayName": "연필 먹색", "canonical": "oklch(26% 0.006 95)", "tonalRamp": ["#242421", "#3d3d38", "#5d5d56", "#7d7d74", "#a3a39a", "#c4c4bb", "#e3e3dc", "#f7f7f3"]},
+      "paper": {"role": "neutral", "displayName": "따뜻한 종이", "canonical": "oklch(99% 0.004 95)", "tonalRamp": ["#252522", "#42423d", "#686862", "#909088", "#b7b7ae", "#d8d8d0", "#ededE7", "#fbfbf8"]},
+      "focus": {"role": "primary", "displayName": "조용한 보라", "canonical": "oklch(50% 0.14 285)", "tonalRamp": ["#201c62", "#302a82", "#413ba2", "#5b57c8", "#7b78dc", "#a09ee9", "#cbc9f4", "#efeffc"]}
+    },
+    "typographyMeta": {
+      "body": {"displayName": "문서 본문", "purpose": "긴 문서를 편안하게 읽는다."},
+      "label": {"displayName": "조작 라벨", "purpose": "검색과 행동을 짧고 분명하게 알린다."}
+    },
+    "shadows": [{"name": "floating-menu", "value": "0 12px 32px rgba(35,35,30,.12)", "purpose": "검색 결과와 메뉴에만 사용한다."}],
+    "motion": [{"name": "state", "value": "180ms cubic-bezier(.25,1,.5,1)", "purpose": "포커스와 열림 상태만 전달한다."}],
+    "breakpoints": [{"name": "mobile", "value": "680px"}]
+  },
+  "components": [
+    {
+      "name": "검색 열기",
+      "kind": "button",
+      "refersTo": "search-trigger",
+      "description": "읽기와 편집 상단에서 항상 보이는 검색 입구",
+      "html": "<button class=\"ds-search-trigger\">문서 검색 <kbd>⌘K</kbd></button>",
+      "css": ".ds-search-trigger{min-height:40px;padding:9px 12px;border:1px solid #deded7;border-radius:10px;background:#f3f3ef;color:#252522;font:600 14px system-ui}.ds-search-trigger:hover{background:#ecece6}.ds-search-trigger:focus-visible{outline:3px solid #5b57c8;outline-offset:2px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "조용한 책상",
+    "overview": "종이와 검색창만 남은 정돈된 책상처럼, 읽고 찾고 쓰는 흐름을 앞세운다.",
+    "keyCharacteristics": ["차분한 중성색", "한 가지 보라색 포커스", "넉넉한 본문 호흡", "예측 가능한 조작"],
+    "rules": [{"name": "The One Accent Rule", "body": "포커스 색은 현재 선택, 주요 행동, 키보드 포커스에만 사용한다.", "section": "colors"}],
+    "dos": ["Do 첫 화면과 모바일에 검색 입구를 항상 보여준다."],
+    "donts": ["Don't 핵심 행동을 hover나 키보드 단축키에만 둔다."]
+  }
+}
