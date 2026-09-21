@@ -321,6 +321,110 @@
     };
   }
 
+  function starterTemplates(now = new Date()) {
+    const today = localDateValue(now);
+    return {
+      blank: {
+        id: 'blank',
+        label: '빈 문서',
+        description: '깨끗한 빈 페이지에서 바로 입력을 시작합니다',
+        content: '',
+      },
+      template: {
+        id: 'template',
+        label: '템플릿',
+        description: '기본 회의록 및 프로젝트 양식으로 시작합니다',
+        content: '# 회의록\n\n## 안건\n- \n\n## 결정 사항\n- \n\n## 다음 할 일\n- [ ] \n',
+      },
+      journal: {
+        id: 'journal',
+        label: '오늘 일지',
+        description: `오늘 날짜(${today})의 일일 업무 일지를 시작합니다`,
+        content: `# 일지 · ${today}\n\n## 오늘 할 일\n- [ ] \n\n## 기록 및 메모\n- \n`,
+      },
+    };
+  }
+
+  function isDocumentEmpty(text) {
+    if (typeof text !== 'string') return true;
+    const trimmed = text.trim();
+    return trimmed.length === 0 || /^#\s+[^\n]*\s*$/u.test(trimmed);
+  }
+
+  function applyStarter(text, starterId, options = {}) {
+    const templates = starterTemplates(options.now || new Date());
+    const choice = templates[starterId];
+    if (!choice) return null;
+    return {
+      text: choice.content,
+      cursor: choice.content.length,
+      starter: choice.id,
+    };
+  }
+
+  const QUICK_CAPTURE_DESTINATIONS = [
+    { id: 'inbox', label: '받은 메모', name: 'Inbox' },
+    { id: 'tasks', label: '할 일', name: '할 일' },
+    { id: 'journal', label: '오늘 일지', name: (now) => `일지/${localDateValue(now)}` },
+  ];
+
+  function formatQuickCaptureEntry(text, destination = 'inbox', now = new Date()) {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return null;
+    const today = localDateValue(now);
+    switch (destination) {
+      case 'tasks':
+        return /^\s*-\s*\[[ xX]\]/u.test(trimmed)
+          ? `${trimmed}\n`
+          : `- [ ] ${trimmed} 📅 ${today}\n`;
+      case 'journal':
+      case 'inbox':
+      default:
+        return `- ${trimmed}\n`;
+    }
+  }
+
+  function quickCapturePath(destination = 'inbox', now = new Date(), root = spaceRoot()) {
+    const today = localDateValue(now);
+    let name = 'Inbox';
+    if (destination === 'tasks') name = '할 일';
+    else if (destination === 'journal') name = `일지/${today}`;
+    return pagePath(root, name);
+  }
+
+  function createQuickCaptureAction({ fetchImpl = window.fetch?.bind(window), root = spaceRoot() } = {}) {
+    return async ({ text, destination = 'inbox', now = new Date() }) => {
+      if (!fetchImpl) throw new Error('fetch가 지원되지 않는 환경입니다');
+      const entry = formatQuickCaptureEntry(text, destination, now);
+      if (!entry) throw new Error('메모 내용이 비어 있습니다');
+      const path = quickCapturePath(destination, now, root);
+
+      let existingContent = '';
+      const check = await fetchImpl(path, { method: 'GET', headers: { 'X-Sync-Mode': 'true' } });
+      if (check.ok) {
+        existingContent = await check.text();
+      } else if (check.status !== 404) {
+        throw new Error(`메모 문서를 불러오지 못했습니다 (${check.status})`);
+      }
+
+      let newContent;
+      if (!existingContent) {
+        const title = destination === 'tasks' ? '할 일' : (destination === 'journal' ? `일지 · ${localDateValue(now)}` : '받은 메모');
+        newContent = `# ${title}\n\n${entry}`;
+      } else {
+        newContent = existingContent.endsWith('\n') ? `${existingContent}${entry}` : `${existingContent}\n${entry}`;
+      }
+
+      const saved = await fetchImpl(path, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+        body: newContent,
+      });
+      if (!saved.ok) throw new Error(`메모를 저장하지 못했습니다 (${saved.status})`);
+      return { ok: true, path, entry, destination };
+    };
+  }
+
   function applySuggestion(text, context, item) {
     if (!context || !item) return null;
     if (typeof item.apply === 'function') {
@@ -357,10 +461,31 @@
     target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
   }
 
-  function createController({ root = document, providers = defaultProviders(), onInsert = defaultInsert, onAction = createPageAction() } = {}) {
+  function createController({
+    root = document,
+    providers = defaultProviders(),
+    onInsert = defaultInsert,
+    onAction = createPageAction(),
+    onQuickCapture = createQuickCaptureAction(),
+    now = new Date(),
+  } = {}) {
     let active = null;
     let composing = false;
     let requestId = 0;
+
+    const banner = document.createElement('div');
+    banner.hidden = true;
+    banner.className = 'folio-activation-banner';
+    document.body.appendChild(banner);
+
+    const mobileBar = document.createElement('div');
+    mobileBar.className = 'folio-mobile-bar';
+    document.body.appendChild(mobileBar);
+
+    const qcModal = document.createElement('div');
+    qcModal.hidden = true;
+    qcModal.className = 'folio-quick-capture-modal';
+    document.body.appendChild(qcModal);
 
     const popup = document.createElement('div');
     popup.hidden = true;
@@ -374,6 +499,109 @@
       active = null;
       popup.hidden = true;
       popup.replaceChildren();
+    };
+
+    const checkActivation = (target) => {
+      if (!target) return;
+      const text = target.value ?? target.textContent ?? '';
+      if (isDocumentEmpty(text)) {
+        banner.replaceChildren();
+        const title = document.createElement('span');
+        title.className = 'folio-activation-title';
+        title.textContent = '문서 시작하기: ';
+        banner.appendChild(title);
+
+        ['blank', 'template', 'journal'].forEach((type) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'folio-activation-btn';
+          btn.dataset.starter = type;
+          const t = starterTemplates(now)[type];
+          btn.textContent = t.label;
+          btn.title = t.description;
+          btn.addEventListener('click', () => {
+            const started = applyStarter(text, type, { now });
+            if (started) {
+              onInsert({ target, result: started });
+              banner.hidden = true;
+              target.focus?.();
+            }
+          });
+          banner.appendChild(btn);
+        });
+        banner.hidden = false;
+      } else {
+        banner.hidden = true;
+      }
+    };
+
+    const openQuickCapture = (initialDest = 'inbox') => {
+      qcModal.hidden = false;
+      qcModal.replaceChildren();
+
+      const dialog = document.createElement('div');
+      dialog.className = 'folio-quick-capture-dialog';
+
+      const header = document.createElement('div');
+      header.className = 'folio-qc-header';
+      header.textContent = '빠른 메모 (기본: 받은 메모)';
+      dialog.appendChild(header);
+
+      let currentDest = initialDest;
+      const destGroup = document.createElement('div');
+      destGroup.className = 'folio-qc-dest-group';
+      const destButtons = [];
+
+      QUICK_CAPTURE_DESTINATIONS.forEach((d) => {
+        const destBtn = document.createElement('button');
+        destBtn.type = 'button';
+        destBtn.className = d.id === currentDest ? 'folio-qc-dest-btn active' : 'folio-qc-dest-btn';
+        destBtn.dataset.destination = d.id;
+        destBtn.textContent = d.label;
+        destBtn.addEventListener('click', () => {
+          currentDest = d.id;
+          destButtons.forEach((b) => {
+            b.className = b.dataset.destination === currentDest ? 'folio-qc-dest-btn active' : 'folio-qc-dest-btn';
+          });
+        });
+        destButtons.push(destBtn);
+        destGroup.appendChild(destBtn);
+      });
+      dialog.appendChild(destGroup);
+
+      const input = document.createElement('textarea');
+      input.className = 'folio-qc-input';
+      dialog.appendChild(input);
+
+      const footer = document.createElement('div');
+      footer.className = 'folio-qc-footer';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'folio-qc-cancel-btn';
+      cancelBtn.textContent = '취소';
+      cancelBtn.addEventListener('click', () => { qcModal.hidden = true; });
+
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.className = 'folio-qc-save-btn';
+      saveBtn.textContent = '저장';
+      saveBtn.addEventListener('click', async () => {
+        const text = input.value?.trim() || '';
+        if (!text) return;
+        try {
+          await onQuickCapture({ text, destination: currentDest, now });
+          qcModal.hidden = true;
+        } catch (err) {
+          console.error('Quick capture failed:', err);
+        }
+      });
+
+      footer.appendChild(cancelBtn);
+      footer.appendChild(saveBtn);
+      dialog.appendChild(footer);
+      qcModal.appendChild(dialog);
+      input.focus?.();
     };
 
     const renderItems = (target, context, items, renderRequestId) => {
@@ -436,11 +664,6 @@
       const target = active.target;
       const text = target.value ?? target.textContent ?? '';
       const result = applySuggestion(text, active.context, item);
-      // Close before inserting: onInsert dispatches a synthetic 'input' event
-      // that re-enters onInput synchronously on this same target. If close()
-      // ran after onInsert, it would wipe out any menu that reentrant call
-      // just opened (e.g. an insert whose text recreates its own trigger),
-      // and it would inspect a now-stale `active`.
       close();
       if (!result) return;
       onInsert({ target, result, range });
@@ -452,6 +675,7 @@
       const target = event.currentTarget;
       const text = target.value ?? target.textContent ?? '';
       const cursor = target.selectionStart ?? text.length;
+      checkActivation(target);
       const context = triggerAt(text, cursor);
       if (context && TRIGGERS.includes(context.trigger)) render(target, context);
       else close();
@@ -459,10 +683,23 @@
 
     const onKeydown = (event) => {
       if (event.isComposing || composing) return;
-      if (event.key === 'Escape' && active) {
+      if ((event.altKey && (event.key === 'n' || event.key === 'N')) ||
+          (event.ctrlKey && event.shiftKey && (event.key === 'c' || event.key === 'C'))) {
         event.preventDefault();
-        close();
+        openQuickCapture();
         return;
+      }
+      if (event.key === 'Escape') {
+        if (!qcModal.hidden) {
+          event.preventDefault();
+          qcModal.hidden = true;
+          return;
+        }
+        if (active) {
+          event.preventDefault();
+          close();
+          return;
+        }
       }
       if (!active) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -484,13 +721,75 @@
       target.addEventListener('compositionstart', onCompositionStart);
       target.addEventListener('compositionend', onCompositionEnd);
     });
-    return { close, destroy: () => { targets.forEach((target) => target.removeEventListener('input', onInput)); close(); popup.remove(); } };
+
+    // Mobile trigger buttons
+    const triggerButtons = [
+      { label: '@ 날짜', trigger: '@' },
+      { label: '/ 기능', trigger: '/' },
+      { label: '[[ 연결', trigger: '[[' },
+    ];
+    triggerButtons.forEach(({ label, trigger }) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'folio-mobile-btn';
+      btn.textContent = label;
+      btn.addEventListener('click', () => {
+        const activeTarget = targets[0];
+        if (!activeTarget) return;
+        const val = activeTarget.value ?? activeTarget.textContent ?? '';
+        const cursor = activeTarget.selectionStart ?? val.length;
+        const before = val.slice(0, cursor);
+        const needSpace = before.length > 0 && !/\s$/u.test(before);
+        const insertStr = (needSpace ? ' ' : '') + trigger;
+        const newText = val.slice(0, cursor) + insertStr + val.slice(cursor);
+        const newPos = cursor + insertStr.length;
+        if ('value' in activeTarget) {
+          activeTarget.value = newText;
+          activeTarget.setSelectionRange?.(newPos, newPos);
+          activeTarget.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        activeTarget.focus?.();
+      });
+      mobileBar.appendChild(btn);
+    });
+
+    const qcMobileBtn = document.createElement('button');
+    qcMobileBtn.type = 'button';
+    qcMobileBtn.className = 'folio-mobile-btn folio-mobile-qc-btn';
+    qcMobileBtn.textContent = '+ 빠른 메모';
+    qcMobileBtn.addEventListener('click', () => openQuickCapture());
+    mobileBar.appendChild(qcMobileBtn);
+
+    if (targets.length) checkActivation(targets[0]);
+
+    return {
+      close,
+      openQuickCapture,
+      checkActivation,
+      banner,
+      mobileBar,
+      qcModal,
+      destroy: () => {
+        targets.forEach((target) => {
+          target.removeEventListener('input', onInput);
+          target.removeEventListener('keydown', onKeydown);
+          target.removeEventListener('compositionstart', onCompositionStart);
+          target.removeEventListener('compositionend', onCompositionEnd);
+        });
+        close();
+        popup.remove?.();
+        banner.remove?.();
+        mobileBar.remove?.();
+        qcModal.remove?.();
+      },
+    };
   }
 
   window.FolioSuggestions = {
     TRIGGERS, triggerAt, filterSuggestions, applySuggestion, localDateValue, dateSuggestions,
     documentNames, documentSuggestions, validPageName, spaceRoot, pagePath, createDocumentProvider, createPageAction,
     inCodeBlock, lineContext, formatDueDateLabel, applyDueDate, toggleTaskItem, slashCommands, filterSlashCommands, createSlashProvider,
+    starterTemplates, isDocumentEmpty, applyStarter, QUICK_CAPTURE_DESTINATIONS, formatQuickCaptureEntry, quickCapturePath, createQuickCaptureAction,
     defaultProviders, createController,
   };
 
