@@ -15,11 +15,199 @@
     };
   }
 
-  function filterSuggestions(providers, trigger, query) {
+  function inCodeBlock(text, cursor = 0) {
+    const before = text.slice(0, cursor);
+    const fences = before.match(/(?:^|\n)```/g);
+    return Boolean(fences && fences.length % 2 === 1);
+  }
+
+  function lineContext(text, cursor = 0) {
+    const safeCursor = Math.max(0, Math.min(text.length, cursor));
+    const lineStart = text.lastIndexOf('\n', safeCursor - 1) + 1;
+    let lineEnd = text.indexOf('\n', safeCursor);
+    if (lineEnd === -1) lineEnd = text.length;
+    const line = text.slice(lineStart, lineEnd);
+    const beforeCursor = text.slice(lineStart, safeCursor);
+    const isTodo = /^\s*-\s*\[[ xX]\]/u.test(line);
+    const isHeading = /^\s*#{1,6}\s/u.test(line);
+    const isBullet = /^\s*-\s+/u.test(line) && !isTodo;
+    const isQuote = /^\s*>\s+/u.test(line);
+    const isEmpty = /^\s*$/u.test(beforeCursor.replace(/\/[^\s]*$/u, ''));
+    const hasDueDate = /📅\s*\d{4}-\d{2}-\d{2}/u.test(line);
+    return {
+      lineStart,
+      lineEnd,
+      line,
+      beforeCursor,
+      isTodo,
+      isHeading,
+      isBullet,
+      isQuote,
+      isEmpty,
+      hasDueDate,
+      inCode: inCodeBlock(text, safeCursor),
+    };
+  }
+
+  function formatDueDateLabel(dueDateStr, now = new Date()) {
+    if (typeof dueDateStr !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDateStr)) return '';
+    const [y, m, d] = dueDateStr.split('-').map(Number);
+    const target = new Date(y, m - 1, d);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffMs = target.getTime() - today.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return '오늘';
+    if (diffDays === 1) return '내일';
+    if (diffDays === -1) return '어제';
+    if (diffDays < -1) return `${Math.abs(diffDays)}일 지남`;
+    return `${diffDays}일 후`;
+  }
+
+  function applyDueDate(text, context, dueDateStr) {
+    const lineStart = text.lastIndexOf('\n', context.start - 1) + 1;
+    let lineEnd = text.indexOf('\n', context.end);
+    if (lineEnd === -1) lineEnd = text.length;
+    const line = text.slice(lineStart, lineEnd);
+
+    const relStart = context.start - lineStart;
+    const relEnd = context.end - lineStart;
+    const withoutTrigger = line.slice(0, relStart) + line.slice(relEnd);
+
+    const dueDateRegex = /\s*📅\s*\d{4}-\d{2}-\d{2}/u;
+    const hasExisting = dueDateRegex.test(withoutTrigger);
+    const cleaned = withoutTrigger.replace(dueDateRegex, '').trimEnd();
+
+    let newLine;
+    if (/^\s*-\s*\[[ xX]\]/u.test(cleaned)) {
+      newLine = `${cleaned} 📅 ${dueDateStr}`;
+    } else if (/^\s*-\s+/u.test(cleaned)) {
+      newLine = cleaned.replace(/^\s*-\s+/u, '- [ ] ') + ` 📅 ${dueDateStr}`;
+    } else if (cleaned.trim().length === 0) {
+      newLine = `- [ ] 📅 ${dueDateStr}`;
+    } else {
+      newLine = `- [ ] ${cleaned.trim()} 📅 ${dueDateStr}`;
+    }
+
+    const newText = text.slice(0, lineStart) + newLine + text.slice(lineEnd);
+    const newCursor = lineStart + newLine.length;
+    return {
+      text: newText,
+      cursor: newCursor,
+      undo: { text, cursor: context.start },
+      action: { type: 'set-due-date', date: dueDateStr, replaced: hasExisting },
+    };
+  }
+
+  function toggleTaskItem(text, cursorOrOffset = 0) {
+    const offset = typeof cursorOrOffset === 'number' ? cursorOrOffset : 0;
+    const lineStart = text.lastIndexOf('\n', offset - 1) + 1;
+    let lineEnd = text.indexOf('\n', offset);
+    if (lineEnd === -1) lineEnd = text.length;
+    const line = text.slice(lineStart, lineEnd);
+
+    let toggledLine = null;
+    let nextChecked = null;
+    if (/^\s*-\s*\[ \]/u.test(line)) {
+      toggledLine = line.replace(/^(\s*-\s*\[) (\])/u, '$1x$2');
+      nextChecked = true;
+    } else if (/^\s*-\s*\[[xX]\]/u.test(line)) {
+      toggledLine = line.replace(/^(\s*-\s*\[)[xX](\])/u, '$1 $2');
+      nextChecked = false;
+    }
+
+    if (!toggledLine) return null;
+
+    const newText = text.slice(0, lineStart) + toggledLine + text.slice(lineEnd);
+    return {
+      text: newText,
+      checked: nextChecked,
+      undo: { text, cursor: offset },
+      action: { type: 'toggle-task', checked: nextChecked },
+    };
+  }
+
+  function slashCommands({ now = new Date() } = {}) {
+    const today = localDateValue(now);
+    const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const tomorrow = localDateValue(tomorrowDate);
+
+    return [
+      { id: 'todo', label: '할 일 · 체크박스', description: '체크박스가 있는 할 일을 만듭니다', keywords: ['task', 'todo', '체크박스', '할일'], insert: '- [ ] ', group: 'task' },
+      { id: 'h1', label: '제목 1 · 대제목', description: '가장 큰 제목을 삽입합니다', keywords: ['h1', '대제목', '헤딩1'], insert: '# ', group: 'write' },
+      { id: 'h2', label: '제목 2 · 중제목', description: '중간 크기 제목을 삽입합니다', keywords: ['h2', '중제목', '헤딩2'], insert: '## ', group: 'write' },
+      { id: 'h3', label: '제목 3 · 소제목', description: '작은 크기 제목을 삽입합니다', keywords: ['h3', '소제목', '헤딩3'], insert: '### ', group: 'write' },
+      { id: 'bullet', label: '글머리 기호 목록', description: '단순 글머리 기호 목록을 만듭니다', keywords: ['bullet', '목록', '리스트'], insert: '- ', group: 'write' },
+      { id: 'quote', label: '인용구', description: '인용 블록을 작성합니다', keywords: ['quote', '인용', '인용문'], insert: '> ', group: 'write' },
+      { id: 'code', label: '코드 블록', description: '코드 블록을 삽입합니다', keywords: ['code', '코드', '스크립트'], insert: '```\n\n```', group: 'write' },
+      { id: 'divider', label: '구분선', description: '가로 구분선을 삽입합니다', keywords: ['divider', 'hr', '구분선'], insert: '---\n', group: 'write' },
+      { id: 'link', label: '링크', description: '외부 링크를 삽입합니다', keywords: ['link', '링크', 'url'], insert: '[](url)', group: 'organize' },
+      { id: 'toc', label: '목차', description: '문서 목차를 생성합니다', keywords: ['toc', '목차', '차례'], insert: '```toc\n```\n', group: 'organize' },
+      { id: 'template', label: '템플릿', description: '서식 템플릿을 불러옵니다', keywords: ['template', '템플릿', '서식'], insert: '{{template}}', group: 'organize' },
+      {
+        id: 'due',
+        label: `마감일 설정 · 오늘 (${today})`,
+        description: '할 일 마감일을 오늘로 설정하거나 교체합니다',
+        keywords: ['due', '마감', '오늘', '날짜'],
+        apply: (text, context) => applyDueDate(text, context, today),
+        group: 'task',
+      },
+      {
+        id: 'due-tomorrow',
+        label: `마감일 설정 · 내일 (${tomorrow})`,
+        description: '할 일 마감일을 내일로 설정하거나 교체합니다',
+        keywords: ['due', '내일', 'tomorrow', '마감'],
+        apply: (text, context) => applyDueDate(text, context, tomorrow),
+        group: 'task',
+      },
+    ];
+  }
+
+  function filterSlashCommands(items, query, contextInfo) {
+    if (contextInfo?.inCode) return [];
+
+    const needle = (query || '').trim().toLocaleLowerCase();
+
+    return items
+      .filter((item) => {
+        if (contextInfo?.isTodo) {
+          if (['h1', 'h2', 'h3', 'quote', 'divider', 'todo'].includes(item.id)) return false;
+        } else if (contextInfo?.isHeading) {
+          if (['todo', 'bullet', 'divider', 'quote', 'h1', 'h2', 'h3'].includes(item.id)) return false;
+        } else if (contextInfo && contextInfo.isEmpty === false) {
+          if (['divider', 'h1', 'h2', 'h3', 'quote', 'bullet'].includes(item.id)) return false;
+        }
+
+        if (!needle) return true;
+        const haystack = [item.label, item.id, ...(item.keywords || []), item.description || '']
+          .join(' ')
+          .toLocaleLowerCase();
+        return haystack.includes(needle);
+      })
+      .slice(0, 8);
+  }
+
+  function createSlashProvider(options = {}) {
+    const commands = slashCommands(options);
+    return {
+      trigger: '/',
+      getItems(query, context, lineCtx) {
+        return filterSlashCommands(commands, query, lineCtx);
+      },
+      items: commands,
+    };
+  }
+
+  function filterSuggestions(providers, trigger, query, lineCtx) {
     const needle = query.trim().toLocaleLowerCase();
     return providers
       .filter((provider) => provider.trigger === trigger)
-      .flatMap((provider) => provider.items || [])
+      .flatMap((provider) => {
+        if (typeof provider.getItems === 'function' && lineCtx) {
+          const res = provider.getItems(query, null, lineCtx);
+          if (Array.isArray(res)) return res;
+        }
+        return provider.items || [];
+      })
       .filter((item) => {
         const haystack = [item.label, item.id, ...(item.keywords || [])]
           .join(' ')
@@ -135,7 +323,13 @@
 
   function applySuggestion(text, context, item) {
     if (!context || !item) return null;
-    const replacement = typeof item.insert === 'function' ? item.insert(context) : item.insert;
+    if (typeof item.apply === 'function') {
+      return item.apply(text, context);
+    }
+    const replacement = typeof item.insert === 'function' ? item.insert(context, text) : item.insert;
+    if (typeof replacement === 'object' && replacement !== null) {
+      return replacement;
+    }
     if (typeof replacement !== 'string') return null;
     return {
       text: text.slice(0, context.start) + replacement + text.slice(context.end),
@@ -147,7 +341,7 @@
   function defaultProviders(options = {}) {
     return [
       { trigger: '@', items: dateSuggestions(options.now || new Date()) },
-      { trigger: '/', items: [{ id: 'todo', label: '할 일', keywords: ['task'], insert: '- [ ] ' }] },
+      createSlashProvider(options),
       createDocumentProvider(options),
     ];
   }
@@ -207,19 +401,30 @@
     const render = (target, context) => {
       const renderRequestId = ++requestId;
       const matching = providers.filter((provider) => provider.trigger === context.trigger);
-      const immediate = filterSuggestions(matching, context.trigger, context.query);
-      const pending = matching
-        .filter((provider) => typeof provider.getItems === 'function')
-        .map((provider) => Promise.resolve(provider.getItems(context.query, context)));
-      if (!pending.length) return renderItems(target, context, immediate, renderRequestId);
+      const text = 'value' in target ? target.value : (target.textContent || '');
+      const ctxInfo = lineContext(text, context.start);
+      const syncProviders = matching.filter((p) => typeof p.getItems !== 'function');
+      const asyncProviders = matching.filter((p) => typeof p.getItems === 'function');
+      const immediate = filterSuggestions(syncProviders, context.trigger, context.query, ctxInfo);
+      if (!asyncProviders.length) return renderItems(target, context, immediate, renderRequestId);
       if (immediate.length) renderItems(target, context, immediate, renderRequestId);
       else {
         active = null;
         popup.hidden = true;
         popup.replaceChildren();
       }
+      const pending = asyncProviders.map((p) => Promise.resolve(p.getItems(context.query, context, ctxInfo, text)));
       Promise.all(pending)
-        .then((groups) => renderItems(target, context, [...immediate, ...groups.flat()].slice(0, 8), renderRequestId))
+        .then((groups) => {
+          const combined = [...immediate, ...groups.flat()];
+          const seen = new Set();
+          const unique = combined.filter((item) => {
+            if (!item || seen.has(item.id)) return false;
+            seen.add(item.id);
+            return true;
+          });
+          renderItems(target, context, unique.slice(0, 8), renderRequestId);
+        })
         .catch(() => { if (renderRequestId === requestId) close(); });
     };
 
@@ -285,6 +490,7 @@
   window.FolioSuggestions = {
     TRIGGERS, triggerAt, filterSuggestions, applySuggestion, localDateValue, dateSuggestions,
     documentNames, documentSuggestions, validPageName, spaceRoot, pagePath, createDocumentProvider, createPageAction,
+    inCodeBlock, lineContext, formatDueDateLabel, applyDueDate, toggleTaskItem, slashCommands, filterSlashCommands, createSlashProvider,
     defaultProviders, createController,
   };
 
