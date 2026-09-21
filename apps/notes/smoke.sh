@@ -57,6 +57,7 @@ standalone() {
   node "$HERE/tests/suggestion-foundation.test.mjs" || fail=1
   node "$HERE/tests/mention-link-flow.test.mjs" || fail=1
   node "$HERE/tests/slash-task-flow.test.mjs" || fail=1
+  node "$HERE/tests/activation-capture.test.mjs" || fail=1
   python3 - "$tmp/image.tar" <<'PY' || fail=1
 import io, json, tarfile, sys
 outer_path=sys.argv[1]
