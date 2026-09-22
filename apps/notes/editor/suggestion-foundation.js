@@ -48,6 +48,14 @@
     ];
   }
 
+  // Replacing the whole value drops the browser's native undo stack: Ctrl+Z
+  // after a suggestion undoes the user's typing rather than the insert.
+  // Repairing that needs SilverBullet's CodeMirror 6 dispatch, which this
+  // overlay cannot reach - it is injected from outside the app by the nginx
+  // sub_filter in bin/render.py and only ever sees the DOM. The textarea-only
+  // execCommand('insertText') fallback would keep undo, but it cannot be
+  // verified without a live browser against an installed stack, and installing
+  // is out of this repository's scope. Left open on purpose; see #22.
   function defaultInsert({ target, result }) {
     if ('value' in target) {
       target.value = result.text;
