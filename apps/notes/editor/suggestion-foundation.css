@@ -1,0 +1,215 @@
+.folio-suggestion-menu {
+  position: fixed;
+  z-index: 2147483647;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid #deded7;
+  border-radius: 10px;
+  background: #fbfbf8;
+  box-shadow: 0 10px 28px rgb(37 37 34 / 14%);
+  color: #252522;
+  font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+.folio-suggestion-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.folio-suggestion-item:hover,
+.folio-suggestion-item[aria-selected="true"] { background: #f3f3ef; }
+
+.folio-suggestion-item:focus-visible {
+  outline: 3px solid #5b57c8;
+  outline-offset: -1px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .folio-suggestion-menu { border-color: #454540; background: #20201e; color: #ecece7; }
+  .folio-suggestion-item:hover,
+  .folio-suggestion-item[aria-selected="true"] { background: #2c2c29; }
+}
+
+.folio-activation-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0;
+  padding: 8px 12px;
+  background: #f3f3ef;
+  border: 1px solid #deded7;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #686862;
+}
+
+.folio-activation-btn {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  background: #fbfbf8;
+  border: 1px solid #deded7;
+  border-radius: 6px;
+  color: #252522;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.folio-activation-btn:hover {
+  background: #ffffff;
+  border-color: #5b57c8;
+  color: #5b57c8;
+}
+
+.folio-mobile-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 8px;
+  background: #fbfbf8;
+  border-top: 1px solid #deded7;
+  z-index: 10000;
+  box-shadow: 0 -2px 10px rgb(37 37 34 / 5%);
+}
+
+.folio-mobile-btn {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #252522;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.folio-mobile-btn:hover,
+.folio-mobile-btn:active {
+  background: #f3f3ef;
+}
+
+.folio-mobile-qc-btn {
+  color: #5b57c8;
+}
+
+.folio-quick-capture-modal {
+  position: fixed;
+  inset: 0;
+  background: rgb(37 37 34 / 40%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2147483647;
+  padding: 16px;
+}
+
+.folio-quick-capture-dialog {
+  width: 100%;
+  max-width: 440px;
+  background: #fbfbf8;
+  border: 1px solid #deded7;
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: 0 16px 36px rgb(37 37 34 / 18%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.folio-qc-header {
+  font-size: 15px;
+  font-weight: 600;
+  color: #252522;
+}
+
+.folio-qc-dest-group {
+  display: flex;
+  gap: 6px;
+}
+
+.folio-qc-dest-btn {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid #deded7;
+  border-radius: 6px;
+  background: transparent;
+  color: #686862;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.folio-qc-dest-btn.active {
+  background: #5b57c8;
+  border-color: #5b57c8;
+  color: #ffffff;
+}
+
+.folio-qc-input {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px;
+  border: 1px solid #deded7;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #252522;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.folio-qc-input:focus {
+  outline: 2px solid #5b57c8;
+}
+
+.folio-qc-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.folio-qc-cancel-btn {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 0;
+  background: transparent;
+  color: #686862;
+  cursor: pointer;
+}
+
+.folio-qc-save-btn {
+  min-height: 36px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 6px;
+  background: #5b57c8;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (prefers-color-scheme: dark) {
+  .folio-activation-banner { background: #262624; border-color: #454540; color: #a0a09a; }
+  .folio-activation-btn { background: #20201e; border-color: #454540; color: #ecece7; }
+  .folio-mobile-bar { background: #20201e; border-color: #454540; }
+  .folio-mobile-btn { color: #ecece7; }
+  .folio-quick-capture-dialog { background: #20201e; border-color: #454540; }
+  .folio-qc-header { color: #ecece7; }
+  .folio-qc-input { background: #262624; border-color: #454540; color: #ecece7; }
+}
