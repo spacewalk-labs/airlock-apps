@@ -1,13 +1,22 @@
 --- a/model-manifest.js
 +++ b/model-manifest.js
-@@ -12,6 +12,7 @@
+@@ -12,7 +12,15 @@
  export const CLAUDE_DISABLED_THINKING_OPTION_ID = "off";
  export const CLAUDE_ULTRACODE_THINKING_OPTION_ID = "ultracode";
  export const CLAUDE_MODEL_MANIFEST = [
-+    // [airlock-model-prune] removed 6 superseded models (picker only — execution does not consult the manifest).
++    // [airlock-model-prune] picker roster: superseded models removed, claude-opus-5-5 added (picker only — execution does not consult the manifest).
++    {
++        id: "claude-opus-5-5",
++        label: "Opus 5.5",
++        description: "Opus 5.5 · Latest release",
++        contextWindowMaxTokens: 1000000,
++        effortLevels: CLAUDE_EFFORT_LEVELS.xhigh,
++    },
      {
          id: "claude-opus-5",
          label: "Opus 5",
+-        description: "Opus 5 · Latest release",
++        description: "Opus 5 · Previous release",
 @@ -74,58 +75,6 @@
          supportsThinkingDisabled: true,
      },
