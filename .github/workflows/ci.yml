@@ -1,8 +1,13 @@
 name: ci
 on:
+  # 문서만 바뀐 변경에는 돌지 않는다(2026-09-25 cho 지시). 재포함 = 코드가 읽는 문서.
+  # test/foundation-boundary.sh 가 abi/core-app-manifest.md, lock/schema.md, TRANSFER.md 를
+  # 바이트 단위로 읽어 foundation.json 의 pinned digest 와 대조한다 — 이 세 파일은 콘텐츠다.
   pull_request:
+    paths: ['**', '!**/*.md', '!**/*.mdx', '!docs/**', 'abi/core-app-manifest.md', 'lock/schema.md', 'TRANSFER.md']
   push:
     branches: [main]
+    paths: ['**', '!**/*.md', '!**/*.mdx', '!docs/**', 'abi/core-app-manifest.md', 'lock/schema.md', 'TRANSFER.md']
 jobs:
   foundation-boundary:
     runs-on: ubuntu-latest
