@@ -450,15 +450,163 @@
     ];
   }
 
-  function defaultInsert({ target, result }) {
-    if ('value' in target) {
-      target.value = result.text;
-      target.setSelectionRange?.(result.cursor, result.cursor);
-      target.dispatchEvent(new Event('input', { bubbles: true }));
-      return;
+  // --- Editor-transaction insert path (SilverBullet/CodeMirror 6 repair) ---
+  //
+  // The overlay used to rewrite `.cm-content.textContent` wholesale, which
+  // drops the newlines CodeMirror renders as element boundaries (a 3-line
+  // document collapses to 1 line) and reads the cursor via `selectionStart`,
+  // which a contenteditable never has. When the target lives inside a
+  // CodeMirror 6 EditorView (SilverBullet exposes it as
+  // `window.client.editorView`), every write below goes through one editor
+  // transaction instead, so the change lands at the cursor, other lines are
+  // untouched, and a single Ctrl-Z reverts it.
+
+  function resolveEditorView(target) {
+    try {
+      const view = window.client && window.client.editorView;
+      if (!view || typeof view.dispatch !== 'function' || !view.state || !view.state.doc) return null;
+      if (view.dom && target && typeof view.dom.contains === 'function' && !view.dom.contains(target)) return null;
+      return view;
+    } catch {
+      return null;
     }
-    target.textContent = result.text;
-    target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+  }
+
+  function targetText(target, view) {
+    if (view) {
+      try { return view.state.doc.toString(); } catch { /* fall through */ }
+    }
+    if (target && 'value' in target && typeof target.value === 'string') return target.value;
+    return (target && target.textContent) || '';
+  }
+
+  function targetCursor(target, view, text) {
+    if (view) {
+      try {
+        const head = view.state.selection.main.head;
+        if (typeof head === 'number') return Math.max(0, Math.min(text.length, head));
+      } catch { /* fall through */ }
+    }
+    if (target && typeof target.selectionStart === 'number') {
+      return Math.max(0, Math.min(text.length, target.selectionStart));
+    }
+    return text.length;
+  }
+
+  // Smallest single-span replacement turning oldText into newText, so every
+  // write (editor transaction, execCommand, Range) carries the same edit
+  // without re-reading the trigger context.
+  function spanForReplace(oldText, newText) {
+    const oldLen = oldText.length;
+    const newLen = newText.length;
+    let prefix = 0;
+    while (prefix < oldLen && prefix < newLen && oldText[prefix] === newText[prefix]) prefix += 1;
+    let suffix = 0;
+    while (suffix < oldLen - prefix && suffix < newLen - prefix
+      && oldText[oldLen - 1 - suffix] === newText[newLen - 1 - suffix]) suffix += 1;
+    return {
+      from: prefix,
+      to: oldLen - suffix,
+      insert: newText.slice(prefix, newLen - suffix),
+    };
+  }
+
+  function textNodesOf(node, out = []) {
+    if (!node) return out;
+    if (node.nodeType === 3) { out.push(node); return out; }
+    const children = node.childNodes || node.children || [];
+    for (const child of children) textNodesOf(child, out);
+    return out;
+  }
+
+  function offsetToPoint(target, offset) {
+    const nodes = textNodesOf(target);
+    let rest = Math.max(0, offset);
+    for (const node of nodes) {
+      const len = (node.textContent || '').length;
+      if (rest <= len) return { node, offset: rest };
+      rest -= len;
+    }
+    const last = nodes[nodes.length - 1];
+    if (last) return { node: last, offset: (last.textContent || '').length };
+    return { node: target, offset: 0 };
+  }
+
+  function selectOffset(target, anchor, head = anchor) {
+    const selection = window.getSelection?.();
+    if (!selection || typeof document.createRange !== 'function') return false;
+    try {
+      const range = document.createRange();
+      const a = offsetToPoint(target, anchor);
+      const h = offsetToPoint(target, head);
+      range.setStart(a.node, a.offset);
+      range.setEnd(h.node, h.offset);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Fallback write for a plain (non-CodeMirror) contenteditable. Never
+  // assigns textContent: the element structure (and its newlines) stays
+  // untouched and only the trigger span is replaced. Returns 'exec' when the
+  // browser applied it as one native undo step, 'range' for the manual
+  // Range path (which announces itself with a synthetic 'input' so host
+  // models stay in sync), or false when neither is available.
+  function insertIntoContentEditable(target, span, cursor) {
+    if (target && typeof document.execCommand === 'function') {
+      try {
+        if (selectOffset(target, span.from, span.to)
+          && document.execCommand('insertText', false, span.insert)) {
+          selectOffset(target, cursor);
+          return 'exec';
+        }
+      } catch { /* fall through to the Range path */ }
+    }
+    try {
+      if (!target || typeof document.createRange !== 'function' || !window.getSelection?.()) return false;
+      const range = document.createRange();
+      const from = offsetToPoint(target, span.from);
+      const to = offsetToPoint(target, span.to);
+      range.setStart(from.node, from.offset);
+      range.setEnd(to.node, to.offset);
+      range.deleteContents();
+      const point = offsetToPoint(target, span.from);
+      range.setStart(point.node, point.offset);
+      range.collapse(true);
+      range.insertNode(document.createTextNode(span.insert));
+      selectOffset(target, cursor);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'range';
+    } catch {
+      return false;
+    }
+  }
+
+  function defaultInsert({ target, result, edit }) {
+    const view = resolveEditorView(target);
+    const text = targetText(target, view);
+    const span = edit || spanForReplace(text, result.text);
+    const cursor = Math.max(0, Math.min(result.text.length, result.cursor));
+    if (view) {
+      view.dispatch({
+        changes: { from: span.from, to: span.to, insert: span.insert },
+        selection: { anchor: cursor },
+      });
+      if (typeof view.focus === 'function') view.focus();
+      return 'editor';
+    }
+    if (target && 'value' in target) {
+      target.value = result.text;
+      target.setSelectionRange?.(cursor, cursor);
+      target.dispatchEvent(new Event('input', { bubbles: true }));
+      return 'value';
+    }
+    const fallback = insertIntoContentEditable(target, span, cursor);
+    if (fallback) return fallback;
+    return 'noop';
   }
 
   function createController({
@@ -480,6 +628,7 @@
 
     const mobileBar = document.createElement('div');
     mobileBar.className = 'folio-mobile-bar';
+    mobileBar.hidden = true;
     document.body.appendChild(mobileBar);
 
     const qcModal = document.createElement('div');
@@ -503,7 +652,7 @@
 
     const checkActivation = (target) => {
       if (!target) return;
-      const text = target.value ?? target.textContent ?? '';
+      const text = targetText(target, resolveEditorView(target));
       if (isDocumentEmpty(text)) {
         banner.replaceChildren();
         const title = document.createElement('span');
@@ -520,9 +669,14 @@
           btn.textContent = t.label;
           btn.title = t.description;
           btn.addEventListener('click', () => {
-            const started = applyStarter(text, type, { now });
+            // Re-read the document at click time: the banner was rendered
+            // for an older snapshot, and a stale full-text span would merge
+            // the template with whatever arrived since.
+            const current = targetText(target, resolveEditorView(target));
+            const started = applyStarter(current, type, { now });
             if (started) {
-              onInsert({ target, result: started });
+              const how = onInsert({ target, result: started, context: null, edit: spanForReplace(current, started.text) });
+              if (how === 'editor') handleText(target);
               banner.hidden = true;
               target.focus?.();
             }
@@ -629,7 +783,7 @@
     const render = (target, context) => {
       const renderRequestId = ++requestId;
       const matching = providers.filter((provider) => provider.trigger === context.trigger);
-      const text = 'value' in target ? target.value : (target.textContent || '');
+      const text = targetText(target, resolveEditorView(target));
       const ctxInfo = lineContext(text, context.start);
       const syncProviders = matching.filter((p) => typeof p.getItems !== 'function');
       const asyncProviders = matching.filter((p) => typeof p.getItems === 'function');
@@ -662,23 +816,63 @@
       const selection = window.getSelection?.();
       const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
       const target = active.target;
-      const text = target.value ?? target.textContent ?? '';
-      const result = applySuggestion(text, active.context, item);
+      const context = active.context;
+      const view = resolveEditorView(target);
+      const text = targetText(target, view);
+      const result = applySuggestion(text, context, item);
+      const edit = result ? spanForReplace(text, result.text) : null;
       close();
       if (!result) return;
-      onInsert({ target, result, range });
+      // The editor transaction fires no 'input' event of its own, so re-run
+      // trigger detection directly; every other path re-enters through the
+      // target's own 'input' event (native or synthetic).
+      const how = onInsert({ target, result, range, context, edit });
       if (result.action) Promise.resolve(onAction(result.action, item)).catch((error) => console.error('folio suggestion action:', error));
+      if (how === 'editor') handleText(target);
     };
 
-    const onInput = (event) => {
-      if (composing) return;
-      const target = event.currentTarget;
-      const text = target.value ?? target.textContent ?? '';
-      const cursor = target.selectionStart ?? text.length;
+    const handleText = (target) => {
+      if (!target || composing) return;
+      const view = resolveEditorView(target);
+      const text = targetText(target, view);
+      const cursor = targetCursor(target, view, text);
       checkActivation(target);
       const context = triggerAt(text, cursor);
       if (context && TRIGGERS.includes(context.trigger)) render(target, context);
       else close();
+    };
+
+    // CodeMirror folds a keystroke into its state after the synchronous
+    // 'input' listeners run (reading view.state there lags one character),
+    // so editor targets re-read one microtask later; plain fields stay
+    // synchronous.
+    const scheduleHandleText = (target) => {
+      if (!target) return;
+      if (resolveEditorView(target) && typeof queueMicrotask === 'function') {
+        queueMicrotask(() => handleText(target));
+      } else {
+        handleText(target);
+      }
+    };
+
+    const onInput = (event) => {
+      if (composing) return;
+      const target = event.target || event.currentTarget;
+      if (!target || !attachedSet.has(target)) return;
+      scheduleHandleText(target);
+    };
+
+    const moveActive = (delta) => {
+      active.index = (active.index + delta + active.items.length) % active.items.length;
+      [...popup.children].forEach((child, index) => child.setAttribute('aria-selected', String(index === active.index)));
+    };
+
+    const closeModalIfOpen = () => {
+      if (!qcModal.hidden) {
+        qcModal.hidden = true;
+        return true;
+      }
+      return false;
     };
 
     const onKeydown = (event) => {
@@ -690,9 +884,8 @@
         return;
       }
       if (event.key === 'Escape') {
-        if (!qcModal.hidden) {
+        if (closeModalIfOpen()) {
           event.preventDefault();
-          qcModal.hidden = true;
           return;
         }
         if (active) {
@@ -704,8 +897,7 @@
       if (!active) return;
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
-        active.index = (active.index + (event.key === 'ArrowDown' ? 1 : -1) + active.items.length) % active.items.length;
-        [...popup.children].forEach((child, index) => child.setAttribute('aria-selected', String(index === active.index)));
+        moveActive(event.key === 'ArrowDown' ? 1 : -1);
       } else if (event.key === 'Enter' || event.key === 'Tab') {
         event.preventDefault();
         choose(active.index);
@@ -713,14 +905,83 @@
     };
 
     const onCompositionStart = () => { composing = true; };
-    const onCompositionEnd = (event) => { composing = false; onInput(event); };
-    const targets = root.querySelectorAll?.('textarea, input[type="text"], [contenteditable="true"]') || [];
-    targets.forEach((target) => {
+    const onCompositionEnd = (event) => {
+      composing = false;
+      const target = event.target || event.currentTarget;
+      if (target && attachedSet.has(target)) scheduleHandleText(target);
+    };
+
+    // SilverBullet boots its CodeMirror editor long after a deferred overlay
+    // script runs (and swaps the static `.cm-content` skeleton), so targets
+    // are attached as they appear, not just once at boot.
+    const attached = [];
+    const attachedSet = new Set();
+    const attachOne = (target) => {
+      if (!target || attachedSet.has(target)) return;
+      attachedSet.add(target);
+      attached.push(target);
       target.addEventListener('input', onInput);
       target.addEventListener('keydown', onKeydown);
       target.addEventListener('compositionstart', onCompositionStart);
       target.addEventListener('compositionend', onCompositionEnd);
-    });
+      mobileBar.hidden = false;
+      // Late editors (the normal SilverBullet case) must arm the starter
+      // banner exactly like boot-time targets do.
+      checkActivation(target);
+    };
+    const TARGET_SELECTOR = 'textarea, input[type="text"], [contenteditable="true"]';
+    const scanTargets = (scope) => {
+      const found = scope?.querySelectorAll?.(TARGET_SELECTOR) || [];
+      found.forEach(attachOne);
+    };
+    scanTargets(root);
+
+    const hostDoc = (root && root.ownerDocument) || (typeof document !== 'undefined' ? document : null);
+    let observer = null;
+    if (hostDoc && typeof MutationObserver === 'function') {
+      observer = new MutationObserver(() => scanTargets(hostDoc));
+      const scope = hostDoc.body || hostDoc.documentElement || hostDoc;
+      if (scope && typeof observer.observe === 'function') {
+        observer.observe(scope, { childList: true, subtree: true });
+      }
+    }
+
+    // Document-capture shield: while our menu is open, the keystroke that
+    // picks or dismisses it must never reach the editor underneath
+    // (CodeMirror keymaps and its own autocomplete listen on the same node,
+    // where a bubble listener cannot preempt them). The shield performs the
+    // same menu action as the target-level handler, which stays as the path
+    // for environments without a document listener.
+    const onDocumentKeydown = (event) => {
+      if ((!active && qcModal.hidden) || event.isComposing || composing) return;
+      if (!event.target || !attachedSet.has(event.target)) return;
+      if (event.key === 'Escape') {
+        if (!qcModal.hidden) {
+          event.preventDefault();
+          event.stopPropagation();
+          closeModalIfOpen();
+          return;
+        }
+        if (active) {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }
+        return;
+      }
+      if (!active) return;
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        event.stopPropagation();
+        moveActive(event.key === 'ArrowDown' ? 1 : -1);
+      } else if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault();
+        event.stopPropagation();
+        choose(active.index);
+      }
+    };
+    const canShield = !!hostDoc && typeof hostDoc.addEventListener === 'function';
+    if (canShield) hostDoc.addEventListener('keydown', onDocumentKeydown, true);
 
     // Mobile trigger buttons
     const triggerButtons = [
@@ -734,20 +995,32 @@
       btn.className = 'folio-mobile-btn';
       btn.textContent = label;
       btn.addEventListener('click', () => {
-        const activeTarget = targets[0];
+        // The focused field wins; otherwise the most recently attached one
+        // (the editor outlives earlier inputs like search boxes). Never the
+        // merely-first target.
+        const focused = (hostDoc && hostDoc.activeElement) || null;
+        const activeTarget = (focused && focused.isConnected !== false && attached.includes(focused))
+          ? focused
+          : [...attached].reverse().find((candidate) => candidate.isConnected !== false);
         if (!activeTarget) return;
-        const val = activeTarget.value ?? activeTarget.textContent ?? '';
-        const cursor = activeTarget.selectionStart ?? val.length;
-        const before = val.slice(0, cursor);
+        // Same insert path as a menu pick: resolve the editor transaction
+        // when the target lives in CodeMirror, keep the value path for
+        // plain fields, and never rewrite a contenteditable wholesale.
+        const view = resolveEditorView(activeTarget);
+        const text = targetText(activeTarget, view);
+        const cursor = targetCursor(activeTarget, view, text);
+        const before = text.slice(0, cursor);
         const needSpace = before.length > 0 && !/\s$/u.test(before);
         const insertStr = (needSpace ? ' ' : '') + trigger;
-        const newText = val.slice(0, cursor) + insertStr + val.slice(cursor);
+        const newText = text.slice(0, cursor) + insertStr + text.slice(cursor);
         const newPos = cursor + insertStr.length;
-        if ('value' in activeTarget) {
-          activeTarget.value = newText;
-          activeTarget.setSelectionRange?.(newPos, newPos);
-          activeTarget.dispatchEvent(new Event('input', { bubbles: true }));
-        }
+        const how = onInsert({
+          target: activeTarget,
+          result: { text: newText, cursor: newPos, action: null },
+          context: null,
+          edit: { from: cursor, to: cursor, insert: insertStr },
+        });
+        if (how === 'editor') handleText(activeTarget);
         activeTarget.focus?.();
       });
       mobileBar.appendChild(btn);
@@ -760,8 +1033,6 @@
     qcMobileBtn.addEventListener('click', () => openQuickCapture());
     mobileBar.appendChild(qcMobileBtn);
 
-    if (targets.length) checkActivation(targets[0]);
-
     return {
       close,
       openQuickCapture,
@@ -770,12 +1041,16 @@
       mobileBar,
       qcModal,
       destroy: () => {
-        targets.forEach((target) => {
+        if (observer) observer.disconnect();
+        if (canShield) hostDoc.removeEventListener('keydown', onDocumentKeydown, true);
+        attached.forEach((target) => {
           target.removeEventListener('input', onInput);
           target.removeEventListener('keydown', onKeydown);
           target.removeEventListener('compositionstart', onCompositionStart);
           target.removeEventListener('compositionend', onCompositionEnd);
         });
+        attached.length = 0;
+        if (typeof attachedSet.clear === 'function') attachedSet.clear();
         close();
         popup.remove?.();
         banner.remove?.();
@@ -790,13 +1065,26 @@
     documentNames, documentSuggestions, validPageName, spaceRoot, pagePath, createDocumentProvider, createPageAction,
     inCodeBlock, lineContext, formatDueDateLabel, applyDueDate, toggleTaskItem, slashCommands, filterSlashCommands, createSlashProvider,
     starterTemplates, isDocumentEmpty, applyStarter, QUICK_CAPTURE_DESTINATIONS, formatQuickCaptureEntry, quickCapturePath, createQuickCaptureAction,
-    defaultProviders, createController,
+    defaultProviders, createController, defaultInsert,
+    resolveEditorView, targetText, targetCursor, spanForReplace,
   };
 
+  let booted = false;
   const boot = () => {
-    const targets = document.querySelectorAll?.('textarea, input[type="text"], [contenteditable="true"]') || [];
-    if (targets.length) createController();
+    if (booted) return;
+    booted = true;
+    // The controller observes for late editors itself, so boot unconditionally:
+    // on a SilverBullet page the real editor only appears after this script runs.
+    createController();
   };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
-  else boot();
+  // Auto-boot only where a real document exists; unit tests load this module
+  // with a bare `{}` document and drive createController() directly.
+  const canAutoBoot = typeof document !== 'undefined'
+    && typeof document.createElement === 'function'
+    && !!document.body
+    && typeof document.addEventListener === 'function';
+  if (canAutoBoot) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+    else boot();
+  }
 })();

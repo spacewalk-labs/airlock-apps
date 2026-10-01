@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Emulates the hub nginx sub_filter injection: the overlay boots before
+     the editor exists (deferred head script), exactly like SilverBullet. -->
+<script src="/editor/suggestion-foundation.js" defer></script>
+</head>
+<body>
+<div id="ed"></div>
+<script type="module">
+import {EditorView, basicSetup} from "https://esm.sh/codemirror@6.0.1";
+const params = new URLSearchParams(location.search);
+const make = () => {
+  window.view = new EditorView({
+    doc: params.get('doc') === 'empty' ? '' : "# 회의록\n첫 줄 내용\n둘째 줄 ",
+    extensions: [basicSetup],
+    parent: document.getElementById('ed'),
+  });
+  // SilverBullet exposure the overlay relies on (window.client.editorView).
+  window.client = { editorView: window.view };
+  window.harnessReady = true;
+};
+if (params.get('mode') === 'late') setTimeout(make, 2000);
+else make();
+</script>
+</body>
+</html>
