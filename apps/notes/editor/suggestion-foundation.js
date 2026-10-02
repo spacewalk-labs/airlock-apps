@@ -806,6 +806,34 @@
       input.focus?.();
     };
 
+    const positionPopup = (target, context) => {
+      const view = resolveEditorView(target);
+      const anchor = view?.coordsAtPos?.(context.end) || target.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const width = viewport?.width || window.innerWidth;
+      const height = viewport?.height || window.innerHeight;
+      const leftEdge = (viewport?.offsetLeft || 0) + 8;
+      const topEdge = (viewport?.offsetTop || 0) + 8;
+      if (height) {
+        popup.style.maxHeight = `${Math.max(0, height - 16)}px`;
+        popup.style.overflowY = 'auto';
+      }
+      const box = popup.getBoundingClientRect();
+      const rightEdge = leftEdge + (width || box.width + 16) - 16;
+      const bottomEdge = topEdge + (height || box.height + 16) - 16;
+      const left = Math.max(leftEdge, Math.min(anchor.left, rightEdge - box.width));
+      const below = anchor.bottom + 6;
+      const above = anchor.top - box.height - 6;
+      const top = height ? Math.max(topEdge, Math.min(below + box.height <= bottomEdge ? below : above, bottomEdge - box.height)) : below;
+      popup.style.left = `${left}px`;
+      popup.style.top = `${top}px`;
+    };
+    const onMenuScroll = () => {
+      if (!active || popup.hidden) return;
+      if (targetText(active.target, resolveEditorView(active.target)) !== active.snapshotText) return close();
+      positionPopup(active.target, active.context);
+    };
+
     const renderItems = (target, context, items, renderRequestId, snapshotText) => {
       if (renderRequestId !== requestId) return;
       if (!items.length) return close();
@@ -826,8 +854,7 @@
         popup.appendChild(button);
       });
       popup.hidden = false;
-      popup.style.left = `${Math.max(8, target.getBoundingClientRect().left)}px`;
-      popup.style.top = `${target.getBoundingClientRect().bottom + 6}px`;
+      positionPopup(target, context);
     };
 
     const render = (target, context) => {
@@ -1049,7 +1076,10 @@
       }
     };
     const canShield = !!hostDoc && typeof hostDoc.addEventListener === 'function';
-    if (canShield) hostDoc.addEventListener('keydown', onDocumentKeydown, true);
+    if (canShield) {
+      hostDoc.addEventListener('keydown', onDocumentKeydown, true);
+      hostDoc.addEventListener('scroll', onMenuScroll, true);
+    }
 
     // Mobile trigger buttons
     const triggerButtons = [
@@ -1112,7 +1142,10 @@
       qcModal,
       destroy: () => {
         if (observer) observer.disconnect();
-        if (canShield) hostDoc.removeEventListener('keydown', onDocumentKeydown, true);
+        if (canShield) {
+          hostDoc.removeEventListener('keydown', onDocumentKeydown, true);
+          hostDoc.removeEventListener('scroll', onMenuScroll, true);
+        }
         attached.forEach((target) => {
           target.removeEventListener('focus', onEditorFocus);
           target.removeEventListener('input', onInput);

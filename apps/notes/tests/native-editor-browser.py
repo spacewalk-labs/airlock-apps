@@ -9,6 +9,7 @@ parser.add_argument('--evidence-dir', required=True)
 parser.add_argument('--width', type=int, default=1280)
 parser.add_argument('--touch', action='store_true')
 parser.add_argument('--lose-save-ack', action='store_true')
+parser.add_argument('--long-menu', action='store_true')
 args = parser.parse_args()
 WT = pathlib.Path(__file__).resolve().parents[3]
 BINARY = str(pathlib.Path(args.binary).resolve())
@@ -105,6 +106,30 @@ with tempfile.TemporaryDirectory(prefix='folio-native-') as tmp:
             assert any('retry native capture' in file.read_text() for file in (vault/'Inbox').glob('*.md'))
             pg.locator('.cm-content').tap() if args.touch else pg.locator('.cm-content').click()
             print('PASS native capture save/open and actual editor usability; server-ack-loss=' + str(args.lose_save_ack),flush=True)
+            if args.long_menu:
+                for line in [1, 60, 120]:
+                    for trigger in ['@to', '/todo', '[[Meeting']:
+                        pg.evaluate("""line => {
+                          const view = window.client.editorView;
+                          const text = Array.from({length:120}, (_, i) => `Line ${i + 1} content`).join(String.fromCharCode(10));
+                          view.dispatch({changes:{from:0,to:view.state.doc.length,insert:text}});
+                          const pos = view.state.doc.line(line).to;
+                          view.dispatch({selection:{anchor:pos},effects:view.constructor.scrollIntoView(pos,{y:'center'})});
+                          view.focus();
+                        }""", line)
+                        pg.wait_for_timeout(150)
+                        pg.keyboard.type(' ' + trigger,delay=30)
+                        pg.wait_for_selector('.folio-suggestion-menu:not([hidden]) button')
+                        # Scroll while the menu is open; its cursor anchor
+                        # remains in the visible vicinity of the same line.
+                        pg.evaluate("window.client.editorView.scrollDOM.scrollTop += 12")
+                        pg.wait_for_timeout(100)
+                        button=pg.locator('.folio-suggestion-menu button').first
+                        if args.touch:button.tap(timeout=3000)
+                        else:button.click(timeout=3000)
+                        count=pg.evaluate('window.client.editorView.state.doc.lines')
+                        assert count==120, (line,trigger,count)
+                        print(f'PASS long menu line={line} trigger={trigger} touch={args.touch}',flush=True)
             assert errors == [], errors
             pg.screenshot(path=str(OUT/'native.png'))
             print(f'PASS native overlay width={args.width} touch={args.touch} lost_ack={args.lose_save_ack}',flush=True)
