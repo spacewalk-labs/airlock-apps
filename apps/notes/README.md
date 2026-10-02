@@ -54,3 +54,8 @@ shows the saved page and links to it. It does not append to or overwrite an
 existing Inbox, task page, or journal: the pinned editor file API replaces whole
 files and provides no atomic append. Independent pages preserve simultaneous
 captures and edits to existing documents without a new server or lock protocol.
+
+A new wiki-link candidate inserts a link into the current page. Opening that
+link uses SilverBullet's native new-page editor; writing there creates the page.
+The overlay does not create a fixed page title with a GET-then-PUT sequence, so
+it cannot replace content that another tab saved in between.

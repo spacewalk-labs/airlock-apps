@@ -213,3 +213,9 @@
   .folio-qc-header { color: #ecece7; }
   .folio-qc-input { background: #262624; border-color: #454540; color: #ecece7; }
 }
+
+/* Author display rules must preserve the controller's hidden contract. */
+.folio-suggestion-menu[hidden],
+.folio-activation-banner[hidden],
+.folio-mobile-bar[hidden],
+.folio-quick-capture-modal[hidden] { display: none; }

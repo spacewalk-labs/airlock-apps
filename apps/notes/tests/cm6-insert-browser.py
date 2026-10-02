@@ -19,6 +19,7 @@ import threading
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 EDITOR_JS = os.path.join(REPO_ROOT, "apps", "notes", "editor", "suggestion-foundation.js")
+EDITOR_CSS = os.path.join(REPO_ROOT, "apps", "notes", "editor", "suggestion-foundation.css")
 HARNESS_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "cm6-harness.html")
 INDEX_JSON = json.dumps({"files": [{"name": "Inbox.md"}, {"name": "회의록.md"}]})
 TODAY = datetime.date.today().strftime("%Y-%m-%d")
@@ -42,6 +43,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/editor/suggestion-foundation.js":
             with open(EDITOR_JS, encoding="utf-8") as f:
                 self._send(f.read(), "application/javascript")
+        elif path == "/editor/suggestion-foundation.css":
+            with open(EDITOR_CSS, encoding="utf-8") as f:
+                self._send(f.read(), "text/css")
         elif path == "/harness.html":
             with open(HARNESS_HTML, encoding="utf-8") as f:
                 self._send(f.read(), "text/html; charset=utf-8")
@@ -260,6 +264,7 @@ def run_quick_capture():
         save()
         pg.wait_for_timeout(100)
         ok &= check('new draft begins its own save', len(pending), 1)
+        failed_path = pending[0].request.url
         pending.pop(0).fulfill(status=503, body='')
         pg.wait_for_timeout(100)
         ok &= check('failed save preserves draft', pg.locator('.folio-qc-input').input_value(), 'second unsaved draft')
@@ -268,6 +273,7 @@ def run_quick_capture():
         save()
         pg.wait_for_timeout(100)
         ok &= check('retry sends one request', len(pending), 1)
+        ok &= check('retry keeps the draft page identity', pending[0].request.url, failed_path)
         pending.pop(0).fulfill(status=200, body='')
         pg.wait_for_timeout(100)
         ok &= check('saved page has an open link', pg.locator('.folio-quick-capture-dialog a').count(), 1)

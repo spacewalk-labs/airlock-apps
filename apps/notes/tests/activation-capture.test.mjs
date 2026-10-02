@@ -116,7 +116,7 @@ const fixedDate = new Date(2026, 8, 22); // 2026-09-22
   class InputEventLike extends Event {
     constructor(type, opts = {}) { super(type, opts); this.inputType = opts.inputType; }
   }
-  const domCtx = { window: { getSelection: () => undefined }, document: fakeDocument, Event, InputEvent: InputEventLike, console };
+  const domCtx = { window: { getSelection: () => undefined, crypto: {randomUUID: () => 'test-draft'} }, document: fakeDocument, Event, InputEvent: InputEventLike, console };
   vm.runInNewContext(source, domCtx);
 
   const container = new FakeElement('div');

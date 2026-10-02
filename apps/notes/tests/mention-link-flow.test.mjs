@@ -51,51 +51,46 @@ const equalJson = (actual, expected) => assert.equal(JSON.stringify(actual), JSO
   equalJson(documentSuggestions(index, '../private').map((item) => item.id), []);
 }
 
-// The provider uses SilverBullet's authenticated file-list endpoint and caches it
-// while the user narrows a query.
+// The provider reads the current authenticated file list, so pages created
+// through the native editor appear without reloading the overlay.
 {
   const calls = [];
   const provider = createDocumentProvider({
     root: '/notes/editor/main/',
     fetchImpl: async (url, options) => {
       calls.push({ url, options });
-      return { ok: true, json: async () => [{ name: '제품 계획.md' }, { name: '회고.md' }] };
+      return { ok: true, json: async () => [{ name: '제품 계획.md' }, ...(calls.length > 1 ? [{ name: '회고.md' }] : [])] };
     },
   });
   assert.equal((await provider.getItems('제품'))[0].insert, '[[제품 계획]]');
-  await provider.getItems('회고');
-  assert.equal(calls.length, 1);
+  assert.equal((await provider.getItems('회고'))[0].id, 'page:회고');
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].url, '/notes/editor/main/.fs');
   assert.equal(calls[0].options.headers['X-Sync-Mode'], 'true');
 }
 
-// A missing title is created without overwriting an existing document. The inserted
-// [[wiki link]] is the backlink contract; SilverBullet indexes it bidirectionally.
+// New titles insert links; native page opening owns creation. The overlay
+// never overwrites a title that another tab may have created concurrently.
 {
   assert.equal(spaceRoot('/notes/editor/main/제품'), '/notes/editor/main/');
   assert.equal(pagePath('/notes/editor/main/', '회의/주간 계획'), '/notes/editor/main/.fs/%ED%9A%8C%EC%9D%98/%EC%A3%BC%EA%B0%84%20%EA%B3%84%ED%9A%8D.md');
   assert.equal(validPageName('../private'), false);
   assert.throws(() => pagePath('/', '../private'));
-
   const calls = [];
-  const action = createPageAction({
-    root: '/notes/editor/main/',
-    fetchImpl: async (url, options) => {
-      calls.push({ url, options });
-      return calls.length === 1 ? { ok: false, status: 404 } : { ok: true, status: 200 };
-    },
-  });
-  await action({ type: 'create-page', name: '새 문서' });
-  assert.equal(calls[0].options.method, 'GET');
-  assert.equal(calls[1].options.method, 'PUT');
-  assert.equal(calls[1].options.body, '# 새 문서\n');
-
-  const existingCalls = [];
-  const preserveExisting = createPageAction({
-    fetchImpl: async (url, options) => { existingCalls.push({ url, options }); return { ok: true, status: 200 }; },
-  });
-  await preserveExisting({ type: 'create-page', name: '기존 문서' });
-  assert.equal(existingCalls.length, 1);
+  const action = createPageAction({ root: '/notes/editor/main/', fetchImpl: (...args) => calls.push(args) });
+  const result = await action({type: 'create-page', name: '새 문서'});
+  assert.equal(result.url, '/notes/editor/main/%EC%83%88%20%EB%AC%B8%EC%84%9C');
+  assert.equal(calls.length, 0);
 }
 
 console.log('mention-link-flow: PASS');
+
+// Native SilverBullet pairs [[ automatically; complete that same pair.
+{
+  const text = '회의 [[NativeNew]] 뒤 본문';
+  const cursor = text.indexOf(']]');
+  const item = documentSuggestions([], 'NativeNew')[0];
+  const result = applySuggestion(text, triggerAt(text, cursor), item);
+  assert.equal(result.text, '회의 [[NativeNew]] 뒤 본문');
+  assert.equal(result.cursor, text.indexOf(']]') + 2);
+}

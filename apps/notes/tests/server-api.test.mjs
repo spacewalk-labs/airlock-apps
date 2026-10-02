@@ -17,9 +17,16 @@ if (!base) {
   const provider = createDocumentProvider({root, fetchImpl});
   assert.ok((await provider.getItems('Meeting')).some(item => item.id === 'page:Meeting'));
   const create = createPageAction({root, fetchImpl});
-  await create({type: 'create-page', name: '회의/새 문서'});
-  const created = await fetchImpl(`${root}.fs/${encodeURIComponent('회의')}/${encodeURIComponent('새 문서')}.md`);
-  assert.equal(await created.text(), '# 회의/새 문서\n');
+  const nativePage = await create({type: 'create-page', name: '회의/새 문서'});
+  assert.equal(nativePage.url, root + encodeURIComponent('회의') + '/' + encodeURIComponent('새 문서'));
+  const target = `${root}.fs/${encodeURIComponent('회의')}/${encodeURIComponent('새 문서')}.md`;
+  assert.equal((await fetchImpl(target)).status, 404);
+  // Other-tab/native-editor writes cannot be overwritten by link selection.
+  await Promise.all([
+    create({type: 'create-page', name: '회의/새 문서'}),
+    fetchImpl(target, {method: 'PUT', body: '# Important native page\nOther-tab content\n'}),
+  ]);
+  assert.equal(await (await fetchImpl(target)).text(), '# Important native page\nOther-tab content\n');
   await create({type: 'create-page', name: 'Meeting'});
   assert.equal(await (await fetchImpl(`${root}.fs/Meeting.md`)).text(), '# Existing meeting\n');
   const capture = createQuickCaptureAction({root, fetchImpl});
@@ -37,5 +44,5 @@ if (!base) {
     const name = decodeURIComponent(saved.path.slice(`${root}.fs/`.length));
     assert.ok(listing.some(file => file.name === name), name);
   }
-  console.log('server-api: PASS listing, Unicode creation, existing preservation, concurrent captures and editor autosave');
+  console.log('server-api: PASS listing, native Unicode reference, competing-title preservation, concurrent captures and editor autosave');
 }

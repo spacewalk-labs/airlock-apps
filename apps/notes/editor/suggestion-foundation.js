@@ -285,7 +285,7 @@
     if (cleanQuery && !exact && validPageName(cleanQuery)) {
       matches.push({
         id: `create:${cleanQuery}`,
-        label: `새 문서 만들기 · ${cleanQuery}`,
+        label: `새 문서로 연결 · ${cleanQuery}`,
         insert: `[[${cleanQuery}]]`,
         kind: 'create-page',
         action: { type: 'create-page', name: cleanQuery },
@@ -314,34 +314,25 @@
   }
 
   function createDocumentProvider({ fetchImpl = window.fetch?.bind(window), root = spaceRoot() } = {}) {
-    let cachedIndex = null;
     return {
       trigger: '[[',
       async getItems(query) {
         if (!fetchImpl) return [];
-        if (!cachedIndex) {
-          const response = await fetchImpl(`${root}.fs`, { headers: { 'X-Sync-Mode': 'true' } });
-          if (!response.ok) throw new Error(`문서 목록을 불러오지 못했습니다 (${response.status})`);
-          cachedIndex = await response.json();
-        }
-        return documentSuggestions(cachedIndex, query);
+        const response = await fetchImpl(`${root}.fs`, { headers: { 'X-Sync-Mode': 'true' } });
+        if (!response.ok) throw new Error(`문서 목록을 불러오지 못했습니다 (${response.status})`);
+        return documentSuggestions(await response.json(), query);
       },
     };
   }
 
-  function createPageAction({ fetchImpl = window.fetch?.bind(window), root = spaceRoot() } = {}) {
+  function createPageAction({ root = spaceRoot() } = {}) {
     return async (action) => {
-      if (action?.type !== 'create-page' || !fetchImpl) return;
+      if (action?.type !== 'create-page') return;
+      // Selecting inserts a wiki link into the current editor. Opening that
+      // link hands creation to SilverBullet's normal page flow; an overlay
+      // GET-then-PUT cannot safely create a fixed title across tabs.
       const path = pagePath(root, action.name);
-      const existing = await fetchImpl(path, { method: 'GET', headers: { 'X-Get-Meta': 'true', 'X-Sync-Mode': 'true' } });
-      if (existing.ok) return;
-      if (existing.status !== 404) throw new Error(`문서를 확인하지 못했습니다 (${existing.status})`);
-      const created = await fetchImpl(path, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
-        body: `# ${action.name}\n`,
-      });
-      if (!created.ok) throw new Error(`문서를 만들지 못했습니다 (${created.status})`);
+      return { url: path.replace(`${root}.fs/`, root).replace(/\.md$/u, '') };
     };
   }
 
@@ -416,18 +407,18 @@
   }
 
   function createQuickCaptureAction({ fetchImpl = window.fetch?.bind(window), root = spaceRoot(), newId = () => window.crypto.randomUUID() } = {}) {
-    return async ({ text, destination = 'inbox', now = new Date() }) => {
+    return async ({ text, destination = 'inbox', now = new Date(), captureId = newId() }) => {
       if (!fetchImpl) throw new Error('fetch가 지원되지 않는 환경입니다');
       const entry = formatQuickCaptureEntry(text, destination, now);
       if (!entry) throw new Error('메모 내용이 비어 있습니다');
       // The pinned file API replaces whole documents and has no atomic
       // append/CAS. Each capture owns a fresh file, preserving concurrent
       // captures and editor autosaves without locking existing documents.
-      const path = quickCapturePath(destination, now, root, newId());
+      const path = quickCapturePath(destination, now, root, captureId);
       const title = destination === 'tasks' ? '할 일' : (destination === 'journal' ? `일지 · ${localDateValue(now)}` : '받은 메모');
       const saved = await fetchImpl(path, {
         method: 'PUT',
-        headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+        headers: { 'Content-Type': 'text/markdown; charset=utf-8', 'X-Sync-Mode': 'true' },
         body: `# ${title}\n\n${entry}`,
       });
       if (!saved.ok) throw new Error(`메모를 저장하지 못했습니다 (${saved.status})`);
@@ -445,8 +436,12 @@
       return replacement;
     }
     if (typeof replacement !== 'string') return null;
+    // SilverBullet may already have paired the opening [[ with ]]. Consume
+    // that pair instead of duplicating it beside the completed wiki link.
+    const end = context.trigger === '[[' && text.slice(context.end, context.end + 2) === ']]'
+      ? context.end + 2 : context.end;
     return {
-      text: text.slice(0, context.start) + replacement + text.slice(context.end),
+      text: text.slice(0, context.start) + replacement + text.slice(end),
       cursor: context.start + replacement.length,
       action: item.action || null,
     };
@@ -759,6 +754,8 @@
       saveError.hidden = true;
       footer.appendChild(saveError);
       let saving = false;
+      let draftId;
+      let draftDate;
       saveBtn.addEventListener('click', async () => {
         if (saving) return;
         const text = input.value?.trim() || '';
@@ -769,7 +766,9 @@
         destButtons.forEach(button => { button.disabled = true; });
         saveError.hidden = true;
         try {
-          const saved = await onQuickCapture({ text, destination: currentDest, now: currentDate() });
+          draftId ||= window.crypto.randomUUID();
+          draftDate ||= currentDate();
+          const saved = await onQuickCapture({ text, destination: currentDest, now: draftDate, captureId: draftId });
           // A cancelled/reopened modal belongs to another draft. An older
           // response must not replace its unsaved input.
           if (qcModal.hidden || qcModal.children[0] !== dialog) return;
