@@ -629,6 +629,8 @@
   } = {}) {
     const currentDate = () => now || new Date();
     let active = null;
+    let lastEditorTarget = null;
+    const onEditorFocus = (event) => { lastEditorTarget = event.target || event.currentTarget; };
     let composing = false;
     let requestId = 0;
 
@@ -787,6 +789,7 @@
           confirmation.appendChild(link);
           confirmation.appendChild(done);
           qcModal.appendChild(confirmation);
+          link.focus?.();
         } catch (err) {
           saving = false;
           saveBtn.disabled = false;
@@ -924,6 +927,15 @@
       return false;
     };
 
+    const onModalKeydown = (event) => {
+      if (event.key === 'Escape' && !event.isComposing && closeModalIfOpen()) {
+        event.preventDefault();
+        event.stopPropagation();
+        lastEditorTarget?.focus?.();
+      }
+    };
+    qcModal.addEventListener('keydown', onModalKeydown);
+
     const onKeydown = (event) => {
       if (event.isComposing || composing) return;
       if ((event.altKey && (event.key === 'n' || event.key === 'N')) ||
@@ -966,9 +978,10 @@
     const attached = [];
     const attachedSet = new Set();
     const attachOne = (target) => {
-      if (!target || attachedSet.has(target)) return;
+      if (!target || attachedSet.has(target) || qcModal.contains?.(target)) return;
       attachedSet.add(target);
       attached.push(target);
+      target.addEventListener('focus', onEditorFocus);
       target.addEventListener('input', onInput);
       target.addEventListener('keydown', onKeydown);
       target.addEventListener('compositionstart', onCompositionStart);
@@ -1055,9 +1068,11 @@
         // (the editor outlives earlier inputs like search boxes). Never the
         // merely-first target.
         const focused = (hostDoc && hostDoc.activeElement) || null;
-        const activeTarget = (focused && focused.isConnected !== false && attached.includes(focused))
-          ? focused
-          : [...attached].reverse().find((candidate) => candidate.isConnected !== false);
+        const eligible = (candidate) => candidate && candidate.isConnected !== false
+          && !qcModal.contains?.(candidate) && !candidate.closest?.('[hidden]')
+          && (typeof candidate.getClientRects !== 'function' || candidate.getClientRects().length > 0);
+        const activeTarget = (attached.includes(focused) && eligible(focused)) ? focused
+          : (eligible(lastEditorTarget) ? lastEditorTarget : [...attached].reverse().find(eligible));
         if (!activeTarget) return;
         // Same insert path as a menu pick: resolve the editor transaction
         // when the target lives in CodeMirror, keep the value path for
@@ -1100,6 +1115,7 @@
         if (observer) observer.disconnect();
         if (canShield) hostDoc.removeEventListener('keydown', onDocumentKeydown, true);
         attached.forEach((target) => {
+          target.removeEventListener('focus', onEditorFocus);
           target.removeEventListener('input', onInput);
           target.removeEventListener('keydown', onKeydown);
           target.removeEventListener('compositionstart', onCompositionStart);
@@ -1111,6 +1127,7 @@
         popup.remove?.();
         banner.remove?.();
         mobileBar.remove?.();
+        qcModal.removeEventListener('keydown', onModalKeydown);
         qcModal.remove?.();
       },
     };

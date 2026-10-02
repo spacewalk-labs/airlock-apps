@@ -271,7 +271,49 @@ def run_quick_capture():
         pending.pop(0).fulfill(status=200, body='')
         pg.wait_for_timeout(100)
         ok &= check('saved page has an open link', pg.locator('.folio-quick-capture-dialog a').count(), 1)
+        pg.keyboard.press('Escape')
+        ok &= check('capture confirmation closes with Escape', pg.locator('.folio-quick-capture-modal').is_visible(), False)
+        open_modal()
+        pg.keyboard.press('Escape')
+        ok &= check('capture textarea closes with Escape', pg.locator('.folio-quick-capture-modal').is_visible(), False)
         ok &= check('quick capture has no unhandled errors', errors, [])
+        browser.close()
+    return ok
+
+
+def run_mobile_after_capture_cancel(touch):
+    from playwright.sync_api import sync_playwright
+    ok = True
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        pg = browser.new_page(viewport={"width": 390, "height": 844}, is_mobile=touch, has_touch=touch)
+        errors = []
+        pg.on("pageerror", lambda error: errors.append(str(error)))
+        pg.goto(f"{BASE}/harness.html?mode=late", wait_until="domcontentloaded")
+        pg.wait_for_function("window.harnessReady === true", timeout=30000)
+        pg.wait_for_selector('.folio-mobile-bar:not([hidden])')
+        pg.get_by_role('button', name='+ 빠른 메모', exact=True).click()
+        pg.locator('.folio-qc-input').fill('capture draft')
+        pg.get_by_role('button', name='취소', exact=True).click()
+        original = "# 회의록\n첫 줄 내용\n둘째 줄 "
+        for label in ['@ 날짜', '/ 기능', '[[ 연결']:
+            pg.evaluate("""text => {
+              window.view.dispatch({changes:{from:0,to:window.view.state.doc.length,insert:text}});
+              window.view.dispatch({selection:{anchor:window.view.state.doc.line(2).to}});
+              window.view.focus();
+            }""", original)
+            button = pg.get_by_role('button', name=label, exact=True)
+            if touch: button.tap()
+            else: button.click()
+            pg.wait_for_selector('.folio-suggestion-menu:not([hidden]) button')
+            choice = pg.locator('.folio-suggestion-menu button').first
+            if touch: choice.tap()
+            else: choice.click()
+            value = pg.evaluate('window.view.state.doc.toString()')
+            lines = value.split('\n')
+            ok &= check(f'{label} selects visible editor after cancel (touch={touch})', len(lines) == 3 and lines[0] == '# 회의록' and lines[2] == '둘째 줄 ' and lines[1] != '첫 줄 내용', True)
+            ok &= check('hidden capture draft remains untouched', pg.locator('.folio-qc-input').input_value(), 'capture draft')
+        ok &= check('mobile cancel has no unhandled errors', errors, [])
         browser.close()
     return ok
 
@@ -295,5 +337,7 @@ if __name__ == "__main__":
     all_ok &= run_viewport(390, 844, mobile=True)
     print("== quick capture delayed responses and retry ==")
     all_ok &= run_quick_capture()
+    all_ok &= run_mobile_after_capture_cancel(False)
+    all_ok &= run_mobile_after_capture_cancel(True)
     print("cm6-insert-browser: " + ("PASS" if all_ok else "FAIL"))
     sys.exit(0 if all_ok else 1)
