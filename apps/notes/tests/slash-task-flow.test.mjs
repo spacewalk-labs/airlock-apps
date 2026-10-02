@@ -160,3 +160,17 @@ const fixedDate = new Date(2026, 8, 22); // 2026-09-22
 }
 
 console.log('slash-task-flow: PASS');
+
+// Legacy short/full dates and periods are replaced as a whole.
+for (const old of ['09-11', '09-11~09-15', '2026-09-11~2026-09-15']) {
+  const text = `- [ ] 업무 📅 ${old} /due`;
+  const result = applyDueDate(text, triggerAt(text, text.length), '2026-10-02');
+  assert.equal(result.text, '- [ ] 업무 📅 2026-10-02');
+}
+for (const entered of ['09-15', '09-11~09-15', '2026-09-11~2026-09-15']) {
+  const custom = slashCommands({ promptImpl: () => entered }).find((item) => item.id === 'due-custom');
+  const text = '- [ ] 업무 📅 09-01~09-03 /due';
+  assert.equal(applySuggestion(text, triggerAt(text, text.length), custom).text, `- [ ] 업무 📅 ${entered}`);
+}
+const cancelled = slashCommands({ promptImpl: () => null }).find((item) => item.id === 'due-custom');
+assert.equal(applySuggestion('/due', triggerAt('/due', 4), cancelled), null);

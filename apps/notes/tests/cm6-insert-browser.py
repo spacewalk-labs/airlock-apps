@@ -45,7 +45,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/harness.html":
             with open(HARNESS_HTML, encoding="utf-8") as f:
                 self._send(f.read(), "text/html; charset=utf-8")
-        elif path == "/index.json":
+        elif path == "/.fs":
             self._send(INDEX_JSON, "application/json")
         else:
             self.send_response(404)
@@ -104,7 +104,7 @@ def run_viewport(width, height, mobile):
         pg.keyboard.press("Enter")
         pg.wait_for_timeout(500)
         after = doc()
-        ok &= check("end insert text", after, ORIGINAL + "@to".replace("@to", f"[[{TODAY}]]"))
+        ok &= check("end insert text", after, ORIGINAL + "@to".replace("@to", TODAY))
         ok &= check("end insert keeps 3 lines", after.count("\n"), 2)
 
         # (d) one Ctrl-Z restores the exact original
@@ -124,7 +124,7 @@ def run_viewport(width, height, mobile):
         lines = mid.split("\n")
         ok &= check("mid keeps 3 lines", len(lines), 3)
         ok &= check("mid line 1 intact", lines[0], "# 회의록")
-        ok &= check("mid line 2 inserted", lines[1], f"첫 줄 내용 [[{TODAY}]]")
+        ok &= check("mid line 2 inserted", lines[1], f"첫 줄 내용 {TODAY}")
         ok &= check("mid line 3 intact", lines[2], "둘째 줄 ")
 
         # (e) IME composition: no menu mid-syllable, menu after commit
@@ -143,7 +143,7 @@ def run_viewport(width, height, mobile):
         ok &= check("menu filters after commit",
                     pg.evaluate("[...document.querySelectorAll("
                                "'.folio-suggestion-menu button')].map(b=>b.dataset.id)"),
-                    ["todo", "due", "due-tomorrow"])
+                    ["todo", "due", "due-custom", "due-tomorrow"])
         pg.keyboard.press("Escape")
         pg.wait_for_timeout(300)
 
@@ -185,6 +185,18 @@ def run_empty_banner():
                     pg.evaluate("!document.querySelector('.folio-activation-banner').hidden"), True)
         ok &= check("banner offers three starters",
                     pg.evaluate("document.querySelectorAll('.folio-activation-btn').length"), 3)
+        # A model-driven late document load emits no DOM input. Clicking
+        # the stale button in that same turn must preserve the loaded text.
+        loaded = "# 기존 문서\n보존할 본문"
+        pg.evaluate("""text => {
+          const stale = document.querySelector('[data-starter="blank"]');
+          window.view.dispatch({changes: {from: 0, to: window.view.state.doc.length, insert: text}});
+          stale.click();
+        }""", loaded)
+        ok &= check("stale starter preserves loaded document",
+                    pg.evaluate("window.view.state.doc.toString()"), loaded)
+        pg.wait_for_function("document.querySelector('.folio-activation-banner').hidden")
+        ok &= check("model update hides starter", pg.evaluate("document.querySelector('.folio-activation-banner').hidden"), True)
         ok &= check("console errors", errors, [])
         browser.close()
     return ok

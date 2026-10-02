@@ -2,6 +2,7 @@
   'use strict';
 
   const TRIGGERS = ['@', '/', '[[' ];
+  const DUE_PERIOD = /\s*📅\s*(?:\d{4}-)?\d{2}-\d{2}(?:\s*~\s*(?:\d{4}-)?\d{2}-\d{2})?/u;
 
   function triggerAt(text, cursor) {
     const before = text.slice(0, cursor);
@@ -33,7 +34,7 @@
     const isBullet = /^\s*-\s+/u.test(line) && !isTodo;
     const isQuote = /^\s*>\s+/u.test(line);
     const isEmpty = /^\s*$/u.test(beforeCursor.replace(/\/[^\s]*$/u, ''));
-    const hasDueDate = /📅\s*\d{4}-\d{2}-\d{2}/u.test(line);
+    const hasDueDate = DUE_PERIOD.test(line);
     return {
       lineStart,
       lineEnd,
@@ -73,7 +74,7 @@
     const relEnd = context.end - lineStart;
     const withoutTrigger = line.slice(0, relStart) + line.slice(relEnd);
 
-    const dueDateRegex = /\s*📅\s*\d{4}-\d{2}-\d{2}/u;
+    const dueDateRegex = DUE_PERIOD;
     const hasExisting = dueDateRegex.test(withoutTrigger);
     const cleaned = withoutTrigger.replace(dueDateRegex, '').trimEnd();
 
@@ -126,7 +127,7 @@
     };
   }
 
-  function slashCommands({ now = new Date() } = {}) {
+  function slashCommands({ now = new Date(), promptImpl = window.prompt?.bind(window) } = {}) {
     const today = localDateValue(now);
     const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     const tomorrow = localDateValue(tomorrowDate);
@@ -149,6 +150,20 @@
         description: '할 일 마감일을 오늘로 설정하거나 교체합니다',
         keywords: ['due', '마감', '오늘', '날짜'],
         apply: (text, context) => applyDueDate(text, context, today),
+        group: 'task',
+      },
+      {
+        id: 'due-custom',
+        label: '마감일 · 직접 입력',
+        description: '할 일 날짜 또는 기간을 직접 입력합니다',
+        keywords: ['due', '마감', '날짜', '기간', '직접'],
+        apply: (text, context) => {
+          const value = promptImpl?.('날짜 또는 기간 (09-15, 09-11~09-15, YYYY-MM-DD)');
+          if (!value) return null;
+          const period = value.trim();
+          if (!/^(?:\d{4}-)?\d{2}-\d{2}(?:\s*~\s*(?:\d{4}-)?\d{2}-\d{2})?$/u.test(period)) return null;
+          return applyDueDate(text, context, period);
+        },
         group: 'task',
       },
       {
@@ -232,7 +247,7 @@
     ].map(({ offset, ...item }) => {
       const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
       const value = localDateValue(date);
-      return { ...item, label: `${item.label} · ${value}`, insert: `[[${value}]]`, kind: 'date' };
+      return { ...item, label: `${item.label} · ${value}`, insert: value, kind: 'date' };
     });
   }
 
@@ -286,7 +301,7 @@
 
   function pagePath(root, name) {
     if (!validPageName(name)) throw new Error('올바른 문서 제목이 아닙니다');
-    return `${root}${name.split('/').map(encodeURIComponent).join('/')}.md`;
+    return `${root}.fs/${name.split('/').map(encodeURIComponent).join('/')}.md`;
   }
 
   function createDocumentProvider({ fetchImpl = window.fetch?.bind(window), root = spaceRoot() } = {}) {
@@ -296,7 +311,7 @@
       async getItems(query) {
         if (!fetchImpl) return [];
         if (!cachedIndex) {
-          const response = await fetchImpl(`${root}index.json`, { headers: { 'X-Sync-Mode': 'true' } });
+          const response = await fetchImpl(`${root}.fs`, { headers: { 'X-Sync-Mode': 'true' } });
           if (!response.ok) throw new Error(`문서 목록을 불러오지 못했습니다 (${response.status})`);
           cachedIndex = await response.json();
         }
@@ -352,6 +367,7 @@
   }
 
   function applyStarter(text, starterId, options = {}) {
+    if (!isDocumentEmpty(text)) return null;
     const templates = starterTemplates(options.now || new Date());
     const choice = templates[starterId];
     if (!choice) return null;
@@ -385,10 +401,8 @@
   }
 
   function quickCapturePath(destination = 'inbox', now = new Date(), root = spaceRoot()) {
-    const today = localDateValue(now);
-    let name = 'Inbox';
-    if (destination === 'tasks') name = '할 일';
-    else if (destination === 'journal') name = `일지/${today}`;
+    const chosen = QUICK_CAPTURE_DESTINATIONS.find((item) => item.id === destination) || QUICK_CAPTURE_DESTINATIONS[0];
+    const name = typeof chosen.name === 'function' ? chosen.name(now) : chosen.name;
     return pagePath(root, name);
   }
 
@@ -673,6 +687,7 @@
             // for an older snapshot, and a stale full-text span would merge
             // the template with whatever arrived since.
             const current = targetText(target, resolveEditorView(target));
+            if (!isDocumentEmpty(current)) { banner.hidden = true; return; }
             const started = applyStarter(current, type, { now });
             if (started) {
               const how = onInsert({ target, result: started, context: null, edit: spanForReplace(current, started.text) });
@@ -939,7 +954,14 @@
     const hostDoc = (root && root.ownerDocument) || (typeof document !== 'undefined' ? document : null);
     let observer = null;
     if (hostDoc && typeof MutationObserver === 'function') {
-      observer = new MutationObserver(() => scanTargets(hostDoc));
+      observer = new MutationObserver((records) => {
+        scanTargets(hostDoc);
+        // Model-driven document loads do not emit DOM input. Only editor
+        // mutations refresh activation, so banner DOM changes do not loop.
+        for (const target of attached) {
+          if (target.isConnected !== false && records.some((record) => record.target === target || target.contains?.(record.target))) checkActivation(target);
+        }
+      });
       const scope = hostDoc.body || hostDoc.documentElement || hostDoc;
       if (scope && typeof observer.observe === 'function') {
         observer.observe(scope, { childList: true, subtree: true });

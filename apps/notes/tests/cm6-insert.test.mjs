@@ -267,7 +267,7 @@ const keydown = (target, key) => {
 }
 
 // Starter buttons re-read the document at click time: a draft that arrived
-// after the banner opened is replaced, never merged.
+// after the banner opened is preserved, never replaced.
 {
   const view = makeFakeView('', 0);
   const { controller } = mountEditor(view);
@@ -275,9 +275,10 @@ const keydown = (target, key) => {
   view._text = 'draft';
   view._head = 5;
   buttons[1].dispatchEvent(new Event('click'));
-  assert.ok(view._text.startsWith('# 회의록\n\n## 안건'));
-  assert.equal(view._text.includes('draft'), false);
-  console.log('cm6-insert: PASS starter click replaces the current document');
+  assert.equal(view._text, 'draft');
+  assert.equal(view.dispatches.length, 0);
+  assert.equal(controller.banner.hidden, true);
+  console.log('cm6-insert: PASS stale starter preserves current document');
 }
 
 // Manual Range fallback announces itself with a synthetic input so host

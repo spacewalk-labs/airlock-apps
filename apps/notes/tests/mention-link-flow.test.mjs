@@ -20,17 +20,17 @@ const {
 const equalJson = (actual, expected) => assert.equal(JSON.stringify(actual), JSON.stringify(expected));
 
 // Dates are calculated in the user's local calendar, including month/year boundaries,
-// and inserted as ordinary wiki links so SilverBullet indexes their backlinks.
+// and preserve the existing plain date storage format.
 {
   const items = dateSuggestions(new Date(2026, 11, 31, 23, 59));
   equalJson(items.map(({ id, insert }) => ({ id, insert })), [
-    { id: 'today', insert: '[[2026-12-31]]' },
-    { id: 'tomorrow', insert: '[[2027-01-01]]' },
-    { id: 'yesterday', insert: '[[2026-12-30]]' },
+    { id: 'today', insert: '2026-12-31' },
+    { id: 'tomorrow', insert: '2027-01-01' },
+    { id: 'yesterday', insert: '2026-12-30' },
   ]);
   const input = '회의 @내';
   const result = applySuggestion(input, triggerAt(input, input.length), items[1]);
-  equalJson(result, { text: '회의 [[2027-01-01]]', cursor: 17, action: null });
+  equalJson(result, { text: '회의 2027-01-01', cursor: 13, action: null });
 }
 
 // Existing Markdown pages become wiki-link suggestions; non-page files and hidden
@@ -65,7 +65,7 @@ const equalJson = (actual, expected) => assert.equal(JSON.stringify(actual), JSO
   assert.equal((await provider.getItems('제품'))[0].insert, '[[제품 계획]]');
   await provider.getItems('회고');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, '/notes/editor/main/index.json');
+  assert.equal(calls[0].url, '/notes/editor/main/.fs');
   assert.equal(calls[0].options.headers['X-Sync-Mode'], 'true');
 }
 
@@ -73,7 +73,7 @@ const equalJson = (actual, expected) => assert.equal(JSON.stringify(actual), JSO
 // [[wiki link]] is the backlink contract; SilverBullet indexes it bidirectionally.
 {
   assert.equal(spaceRoot('/notes/editor/main/제품'), '/notes/editor/main/');
-  assert.equal(pagePath('/notes/editor/main/', '회의/주간 계획'), '/notes/editor/main/%ED%9A%8C%EC%9D%98/%EC%A3%BC%EA%B0%84%20%EA%B3%84%ED%9A%8D.md');
+  assert.equal(pagePath('/notes/editor/main/', '회의/주간 계획'), '/notes/editor/main/.fs/%ED%9A%8C%EC%9D%98/%EC%A3%BC%EA%B0%84%20%EA%B3%84%ED%9A%8D.md');
   assert.equal(validPageName('../private'), false);
   assert.throws(() => pagePath('/', '../private'));
 
