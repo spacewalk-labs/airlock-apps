@@ -120,7 +120,7 @@ function folio_search(string $root, string $query): array
             $matches++;
         }
         foreach ($lines as $index => $line) {
-            if ($matches >= FOLIO_MATCHES_PER_FILE || count($rows) >= FOLIO_MAX_RESULTS) {
+            if ($matches >= FOLIO_MATCHES_PER_FILE) {
                 break;
             }
             if (trim($line) === '' || !folio_contains_all($line, $tokens)) {
@@ -134,9 +134,6 @@ function folio_search(string $root, string $query): array
                 'match' => 'body',
             ];
             $matches++;
-        }
-        if (count($rows) >= FOLIO_MAX_RESULTS) {
-            break;
         }
     }
 

@@ -78,3 +78,18 @@ print(
     f"p95_ms={p95:.2f} max_ms={max(values):.2f} threshold=unset"
 )
 PY
+
+# A late exact-title hit must survive more than 80 earlier body matches.
+for number in $(seq 1 30); do
+  printf '# Other title\nneedle-title one\nneedle-title two\nneedle-title three\n' > "$FIXTURE/body-$number.md"
+done
+printf '# Target\nexact title regression\n' > "$FIXTURE/needle-title.md"
+ranking_json="$(run_search 'needle-title')"
+python3 - "$ranking_json" <<'PYTEST'
+import json, sys
+result = json.loads(sys.argv[1])['results']
+assert result[0]['page'] == 'needle-title', result[:3]
+assert result[0]['match'] == 'title'
+assert len(result) == 80
+print('FOLIO_SEARCH_LATE_TITLE_OK results=80')
+PYTEST

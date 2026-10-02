@@ -349,3 +349,19 @@ const keydown = (target, key) => {
 }
 
 console.log('cm6-insert: PASS');
+
+// A suggestion rendered for an old model must not replace text in a new one.
+{
+  const view = makeFakeView('draft @to', 9);
+  const { controller, editor, popup } = mountEditor(view);
+  editor.dispatchEvent(new Event('input'));
+  await Promise.resolve();
+  const button = popup.children[0];
+  assert.ok(button);
+  view._text = '소중한 원문 전체입니다';
+  view._head = view._text.length;
+  button.dispatchEvent(new Event('click'));
+  assert.equal(view._text, '소중한 원문 전체입니다');
+  assert.equal(view.dispatches.length, 0);
+  assert.equal(popup.hidden, true);
+}

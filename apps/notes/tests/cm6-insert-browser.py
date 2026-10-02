@@ -127,6 +127,31 @@ def run_viewport(width, height, mobile):
         ok &= check("mid line 2 inserted", lines[1], f"첫 줄 내용 {TODAY}")
         ok &= check("mid line 3 intact", lines[2], "둘째 줄 ")
 
+        # An already-open menu must not apply old offsets to a model loaded
+        # without an input event. Click in the same turn, before observers run.
+        pg.evaluate(focus_end)
+        pg.keyboard.type(" @to", delay=40)
+        pg.wait_for_function("!document.querySelector('.folio-suggestion-menu').hidden")
+        replacement = "소중한 원문 전체입니다"
+        pg.evaluate("""text => {
+          const stale = document.querySelector('.folio-suggestion-menu button');
+          window.view.dispatch({changes: {from: 0, to: window.view.state.doc.length, insert: text}});
+          stale.click();
+        }""", replacement)
+        ok &= check("stale menu preserves loaded document", doc(), replacement)
+
+        pg.evaluate(focus_end)
+        pg.keyboard.type(" @to", delay=40)
+        pg.wait_for_function("!document.querySelector('.folio-suggestion-menu').hidden")
+        before_move = doc()
+        pg.evaluate("""() => {
+          const stale = document.querySelector('.folio-suggestion-menu button');
+          window.view.dispatch({selection: {anchor: 0}});
+          stale.click();
+        }""")
+        ok &= check("stale menu preserves text after cursor move", doc(), before_move)
+        pg.evaluate(focus_end)
+
         # (e) IME composition: no menu mid-syllable, menu after commit
         pg.evaluate(focus_end)
         pg.keyboard.press("Enter")

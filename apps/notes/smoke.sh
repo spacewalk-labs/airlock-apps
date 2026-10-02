@@ -115,8 +115,10 @@ PY
   grep -Fq -- '--restart unless-stopped' "$HERE/install.sh" || fail=1
   grep -Fq -- '--env URI_PATH=/notes/' "$HERE/install.sh" || fail=1
   grep -Fq '/notes/_obs/edit-jump.js' "$out/router.conf" || fail=1
-  grep -Fq '/notes/_obs/suggestion-foundation.js' "$out/router.conf" || fail=1
-  grep -Fq '/notes/_obs/suggestion-foundation.css' "$out/router.conf" || fail=1
+  grep -Fq '/notes/_obs/suggestion-foundation.js' "$out/notes.conf" || fail=1
+  grep -Fq '/notes/_obs/suggestion-foundation.css' "$out/notes.conf" || fail=1
+  grep -Fq 'location = /_obs/suggestion-foundation.js' "$out/router.conf" || fail=1
+  grep -Fq 'location = /_obs/suggestion-foundation.css' "$out/router.conf" || fail=1
   grep -Fq '<script src="/notes/.js/perlite.js"></script>' "$out/router.conf" || fail=1
   grep -Fq "document.title = 'Folio';" "$out/edit-jump.js" || fail=1
   grep -Fq 'id="folio-reader-search"' "$out/edit-jump.js" || fail=1

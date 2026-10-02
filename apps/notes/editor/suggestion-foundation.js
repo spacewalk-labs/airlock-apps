@@ -773,10 +773,12 @@
       input.focus?.();
     };
 
-    const renderItems = (target, context, items, renderRequestId) => {
+    const renderItems = (target, context, items, renderRequestId, snapshotText) => {
       if (renderRequestId !== requestId) return;
       if (!items.length) return close();
-      active = { target, context, items, index: 0 };
+      const view = resolveEditorView(target);
+      if (targetText(target, view) !== snapshotText || targetCursor(target, view, snapshotText) !== context.end) return close();
+      active = { target, context, items, index: 0, snapshotText };
       popup.replaceChildren();
       items.forEach((item, index) => {
         const button = document.createElement('button');
@@ -803,8 +805,8 @@
       const syncProviders = matching.filter((p) => typeof p.getItems !== 'function');
       const asyncProviders = matching.filter((p) => typeof p.getItems === 'function');
       const immediate = filterSuggestions(syncProviders, context.trigger, context.query, ctxInfo);
-      if (!asyncProviders.length) return renderItems(target, context, immediate, renderRequestId);
-      if (immediate.length) renderItems(target, context, immediate, renderRequestId);
+      if (!asyncProviders.length) return renderItems(target, context, immediate, renderRequestId, text);
+      if (immediate.length) renderItems(target, context, immediate, renderRequestId, text);
       else {
         active = null;
         popup.hidden = true;
@@ -820,7 +822,7 @@
             seen.add(item.id);
             return true;
           });
-          renderItems(target, context, unique.slice(0, 8), renderRequestId);
+          renderItems(target, context, unique.slice(0, 8), renderRequestId, text);
         })
         .catch(() => { if (renderRequestId === requestId) close(); });
     };
@@ -834,6 +836,7 @@
       const context = active.context;
       const view = resolveEditorView(target);
       const text = targetText(target, view);
+      if (text !== active.snapshotText || targetCursor(target, view, text) !== context.end) { close(); return; }
       const result = applySuggestion(text, context, item);
       const edit = result ? spanForReplace(text, result.text) : null;
       close();
