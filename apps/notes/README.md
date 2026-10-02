@@ -45,3 +45,17 @@ and editor location explicitly returns 403 when `$owner_ok = 0`; the package
 does not create a Tailscale serve mapping. Container removal belongs to the
 Airlock ledger (contract D9), not `deactivate.sh`, so package loss and an
 intent-only crash still use immutable runtime IDs and exact ownership labels.
+
+## Quick Capture storage
+
+Quick Capture saves each note as a separate Markdown page under the selected
+destination, with the local date and a fresh UUID in its name. The confirmation
+shows the saved page and links to it. It does not append to or overwrite an
+existing Inbox, task page, or journal: the pinned editor file API replaces whole
+files and provides no atomic append. Independent pages preserve simultaneous
+captures and edits to existing documents without a new server or lock protocol.
+
+A new wiki-link candidate inserts a link into the current page. Opening that
+link uses SilverBullet's native new-page editor; writing there creates the page.
+The overlay does not create a fixed page title with a GET-then-PUT sequence, so
+it cannot replace content that another tab saved in between.
