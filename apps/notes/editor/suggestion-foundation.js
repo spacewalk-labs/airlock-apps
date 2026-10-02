@@ -127,7 +127,10 @@
     };
   }
 
-  function slashCommands({ now = new Date(), promptImpl = window.prompt?.bind(window) } = {}) {
+  function slashCommands(options = {}) {
+    const currentDate = () => options.now || new Date();
+    const now = currentDate();
+    const promptImpl = options.promptImpl || window.prompt?.bind(window);
     const today = localDateValue(now);
     const tomorrowDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
     const tomorrow = localDateValue(tomorrowDate);
@@ -149,7 +152,7 @@
         label: `마감일 설정 · 오늘 (${today})`,
         description: '할 일 마감일을 오늘로 설정하거나 교체합니다',
         keywords: ['due', '마감', '오늘', '날짜'],
-        apply: (text, context) => applyDueDate(text, context, today),
+        apply: (text, context) => applyDueDate(text, context, localDateValue(currentDate())),
         group: 'task',
       },
       {
@@ -171,7 +174,10 @@
         label: `마감일 설정 · 내일 (${tomorrow})`,
         description: '할 일 마감일을 내일로 설정하거나 교체합니다',
         keywords: ['due', '내일', 'tomorrow', '마감'],
-        apply: (text, context) => applyDueDate(text, context, tomorrow),
+        apply: (text, context) => {
+          const current = currentDate();
+          return applyDueDate(text, context, localDateValue(new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1)));
+        },
         group: 'task',
       },
     ];
@@ -202,13 +208,12 @@
   }
 
   function createSlashProvider(options = {}) {
-    const commands = slashCommands(options);
     return {
       trigger: '/',
       getItems(query, context, lineCtx) {
-        return filterSlashCommands(commands, query, lineCtx);
+        return filterSlashCommands(slashCommands(options), query, lineCtx);
       },
-      items: commands,
+      get items() { return slashCommands(options); },
     };
   }
 
@@ -239,7 +244,8 @@
     return `${year}-${month}-${day}`;
   }
 
-  function dateSuggestions(now = new Date()) {
+  function dateSuggestions(fixedNow) {
+    const now = fixedNow || new Date();
     return [
       { id: 'today', label: '오늘', offset: 0, keywords: ['today', '금일'] },
       { id: 'tomorrow', label: '내일', offset: 1, keywords: ['tomorrow', '익일'] },
@@ -247,7 +253,10 @@
     ].map(({ offset, ...item }) => {
       const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
       const value = localDateValue(date);
-      return { ...item, label: `${item.label} · ${value}`, insert: value, kind: 'date' };
+      return { ...item, label: `${item.label} · ${value}`, get insert() {
+        const current = fixedNow || new Date();
+        return localDateValue(new Date(current.getFullYear(), current.getMonth(), current.getDate() + offset));
+      }, kind: 'date' };
     });
   }
 
@@ -400,42 +409,29 @@
     }
   }
 
-  function quickCapturePath(destination = 'inbox', now = new Date(), root = spaceRoot()) {
+  function quickCapturePath(destination = 'inbox', now = new Date(), root = spaceRoot(), captureId = window.crypto.randomUUID()) {
     const chosen = QUICK_CAPTURE_DESTINATIONS.find((item) => item.id === destination) || QUICK_CAPTURE_DESTINATIONS[0];
     const name = typeof chosen.name === 'function' ? chosen.name(now) : chosen.name;
-    return pagePath(root, name);
+    return pagePath(root, `${name}/${localDateValue(now)}-${captureId}`);
   }
 
-  function createQuickCaptureAction({ fetchImpl = window.fetch?.bind(window), root = spaceRoot() } = {}) {
+  function createQuickCaptureAction({ fetchImpl = window.fetch?.bind(window), root = spaceRoot(), newId = () => window.crypto.randomUUID() } = {}) {
     return async ({ text, destination = 'inbox', now = new Date() }) => {
       if (!fetchImpl) throw new Error('fetch가 지원되지 않는 환경입니다');
       const entry = formatQuickCaptureEntry(text, destination, now);
       if (!entry) throw new Error('메모 내용이 비어 있습니다');
-      const path = quickCapturePath(destination, now, root);
-
-      let existingContent = '';
-      const check = await fetchImpl(path, { method: 'GET', headers: { 'X-Sync-Mode': 'true' } });
-      if (check.ok) {
-        existingContent = await check.text();
-      } else if (check.status !== 404) {
-        throw new Error(`메모 문서를 불러오지 못했습니다 (${check.status})`);
-      }
-
-      let newContent;
-      if (!existingContent) {
-        const title = destination === 'tasks' ? '할 일' : (destination === 'journal' ? `일지 · ${localDateValue(now)}` : '받은 메모');
-        newContent = `# ${title}\n\n${entry}`;
-      } else {
-        newContent = existingContent.endsWith('\n') ? `${existingContent}${entry}` : `${existingContent}\n${entry}`;
-      }
-
+      // The pinned file API replaces whole documents and has no atomic
+      // append/CAS. Each capture owns a fresh file, preserving concurrent
+      // captures and editor autosaves without locking existing documents.
+      const path = quickCapturePath(destination, now, root, newId());
+      const title = destination === 'tasks' ? '할 일' : (destination === 'journal' ? `일지 · ${localDateValue(now)}` : '받은 메모');
       const saved = await fetchImpl(path, {
         method: 'PUT',
         headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
-        body: newContent,
+        body: `# ${title}\n\n${entry}`,
       });
       if (!saved.ok) throw new Error(`메모를 저장하지 못했습니다 (${saved.status})`);
-      return { ok: true, path, entry, destination };
+      return { ok: true, path, entry, destination, url: path.replace(`${root}.fs/`, root).replace(/\.md$/u, '') };
     };
   }
 
@@ -458,7 +454,7 @@
 
   function defaultProviders(options = {}) {
     return [
-      { trigger: '@', items: dateSuggestions(options.now || new Date()) },
+      { trigger: '@', get items() { return dateSuggestions(options.now); } },
       createSlashProvider(options),
       createDocumentProvider(options),
     ];
@@ -629,8 +625,9 @@
     onInsert = defaultInsert,
     onAction = createPageAction(),
     onQuickCapture = createQuickCaptureAction(),
-    now = new Date(),
+    now,
   } = {}) {
+    const currentDate = () => now || new Date();
     let active = null;
     let composing = false;
     let requestId = 0;
@@ -679,7 +676,7 @@
           btn.type = 'button';
           btn.className = 'folio-activation-btn';
           btn.dataset.starter = type;
-          const t = starterTemplates(now)[type];
+          const t = starterTemplates(currentDate())[type];
           btn.textContent = t.label;
           btn.title = t.description;
           btn.addEventListener('click', () => {
@@ -688,7 +685,7 @@
             // the template with whatever arrived since.
             const current = targetText(target, resolveEditorView(target));
             if (!isDocumentEmpty(current)) { banner.hidden = true; return; }
-            const started = applyStarter(current, type, { now });
+            const started = applyStarter(current, type, { now: currentDate() });
             if (started) {
               const how = onInsert({ target, result: started, context: null, edit: spanForReplace(current, started.text) });
               if (how === 'editor') handleText(target);
@@ -759,8 +756,23 @@
         const text = input.value?.trim() || '';
         if (!text) return;
         try {
-          await onQuickCapture({ text, destination: currentDest, now });
-          qcModal.hidden = true;
+          const saved = await onQuickCapture({ text, destination: currentDest, now: currentDate() });
+          qcModal.replaceChildren();
+          const confirmation = document.createElement('div');
+          confirmation.className = 'folio-quick-capture-dialog';
+          const message = document.createElement('p');
+          message.textContent = '메모를 저장했습니다. 저장한 문서를 열어 이어 쓰세요.';
+          const link = document.createElement('a');
+          link.href = saved.url;
+          link.textContent = decodeURIComponent(saved.url);
+          const done = document.createElement('button');
+          done.type = 'button';
+          done.textContent = '닫기';
+          done.addEventListener('click', () => { qcModal.hidden = true; });
+          confirmation.appendChild(message);
+          confirmation.appendChild(link);
+          confirmation.appendChild(done);
+          qcModal.appendChild(confirmation);
         } catch (err) {
           console.error('Quick capture failed:', err);
         }

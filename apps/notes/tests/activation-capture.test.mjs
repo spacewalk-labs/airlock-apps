@@ -3,7 +3,8 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../editor/suggestion-foundation.js', import.meta.url), 'utf8');
-const context = { window: {}, document: {}, console, Date };
+let noteId = 0;
+const context = { window: {crypto: {randomUUID: () => `capture-${++noteId}`}}, document: {}, console, Date };
 vm.runInNewContext(source, context);
 const {
   starterTemplates,
@@ -53,9 +54,9 @@ const fixedDate = new Date(2026, 8, 22); // 2026-09-22
   assert.equal(QUICK_CAPTURE_DESTINATIONS[0].label, '받은 메모');
 
   // Path resolution
-  assert.ok(quickCapturePath('inbox', fixedDate, '/notes/editor/main/').endsWith('Inbox.md'));
-  assert.ok(quickCapturePath('tasks', fixedDate, '/notes/editor/main/').includes('%ED%95%A0%20%EC%9D%BC.md'));
-  assert.ok(quickCapturePath('journal', fixedDate, '/notes/editor/main/').includes('2026-09-22.md'));
+  assert.ok(quickCapturePath('inbox', fixedDate, '/notes/editor/main/').includes('Inbox/2026-09-22-'));
+  assert.ok(quickCapturePath('tasks', fixedDate, '/notes/editor/main/').includes('%ED%95%A0%20%EC%9D%BC/2026-09-22-'));
+  assert.ok(quickCapturePath('journal', fixedDate, '/notes/editor/main/').includes('2026-09-22/2026-09-22-'));
 
   // Entry formatting
   const inboxEntry = formatQuickCaptureEntry('아이디어 메모', 'inbox', fixedDate);
@@ -68,41 +69,22 @@ const fixedDate = new Date(2026, 8, 22); // 2026-09-22
   assert.equal(existingTaskEntry, '- [x] 이미 완료된 작업\n');
 }
 
-// 3. Quick Capture persistence flow: GET existing (or 404), append entry, PUT
+// 3. Each capture writes a distinct file; existing documents are untouched.
 {
   const calls = [];
   const capture = createQuickCaptureAction({
     root: '/notes/editor/main/',
-    fetchImpl: async (url, options) => {
-      calls.push({ url, options });
-      if (options.method === 'GET') {
-        return { ok: false, status: 404 }; // first time, creates new file
-      }
-      return { ok: true, status: 200 };
-    },
+    fetchImpl: async (url, options) => {calls.push({url, options}); return {ok: true, status: 200};},
   });
-
-  const res = await capture({ text: '첫 빠른 메모', destination: 'inbox', now: fixedDate });
-  assert.equal(res.ok, true);
-  assert.equal(calls[0].options.method, 'GET');
-  assert.equal(calls[1].options.method, 'PUT');
-  assert.ok(calls[1].options.body.includes('# 받은 메모\n\n- 첫 빠른 메모\n'));
-
-  // Appending to existing content
-  const calls2 = [];
-  const captureExisting = createQuickCaptureAction({
-    root: '/notes/editor/main/',
-    fetchImpl: async (url, options) => {
-      calls2.push({ url, options });
-      if (options.method === 'GET') {
-        return { ok: true, status: 200, text: async () => '# 받은 메모\n\n- 이전 메모\n' };
-      }
-      return { ok: true, status: 200 };
-    },
-  });
-
-  await captureExisting({ text: '두 번째 메모', destination: 'inbox', now: fixedDate });
-  assert.equal(calls2[1].options.body, '# 받은 메모\n\n- 이전 메모\n- 두 번째 메모\n');
+  const first = await capture({text: '첫 메모', destination: 'inbox', now: fixedDate});
+  const second = await capture({text: '두 번째 메모', destination: 'inbox', now: fixedDate});
+  assert.notEqual(first.path, second.path);
+  assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.options.method === 'PUT' && call.url !== '/notes/editor/main/.fs/Inbox.md'));
+  assert.equal(calls[0].options.body, '# 받은 메모\n\n- 첫 메모\n');
+  assert.equal(calls[1].options.body, '# 받은 메모\n\n- 두 번째 메모\n');
+  assert.ok(first.url.startsWith('/notes/editor/main/Inbox/'));
+  assert.equal(first.url.endsWith('.md'), false);
 }
 
 // 4. DOM integration: activation banner, mobile action bar, quick capture modal
@@ -172,6 +154,41 @@ const fixedDate = new Date(2026, 8, 22); // 2026-09-22
   assert.equal(controller.qcModal.hidden, true);
 
   controller.destroy();
+
+  // A controller and its already-rendered choices outlive local midnight.
+  let clock = new Date(2026, 9, 2, 23, 59).getTime();
+  class ClockDate extends Date {
+    constructor(...args) { super(...(args.length ? args : [clock])); }
+    static now() { return clock; }
+  }
+  domCtx.Date = ClockDate;
+  const api = domCtx.window.FolioSuggestions;
+  const providers = api.defaultProviders();
+  const oldDate = providers[0].items[0];
+  const oldDue = providers[1].items.find(item => item.id === 'due');
+  textarea.value = '';
+  let capturedDate;
+  const lateController = api.createController({
+    root: {querySelectorAll: () => [textarea]},
+    onQuickCapture: async ({now}) => { capturedDate = now; return {url: '/notes/editor/main/Inbox/saved-note'}; },
+  });
+  const journal = lateController.banner.children.find(button => button.dataset.starter === 'journal');
+  lateController.openQuickCapture('tasks');
+  clock = new Date(2026, 9, 3, 0, 1).getTime();
+  assert.equal(oldDate.insert, '2026-10-03');
+  assert.ok(providers[0].items[0].label.includes('2026-10-03'));
+  const dueText = '- [ ] 업무 /due';
+  assert.equal(api.applySuggestion(dueText, api.triggerAt(dueText, dueText.length), oldDue).text, '- [ ] 업무 📅 2026-10-03');
+  journal.dispatchEvent(new Event('click'));
+  assert.ok(textarea.value.startsWith('# 일지 · 2026-10-03'));
+  const dialog = lateController.qcModal.children[0];
+  dialog.children.find(child => child._tag === 'textarea').value = '자정 뒤 메모';
+  dialog.children.at(-1).children.find(child => child.textContent === '저장').dispatchEvent(new Event('click'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(capturedDate.getDate(), 3);
+  const confirmation = lateController.qcModal.children[0];
+  assert.equal(confirmation.children.find(child => child._tag === 'a').href, '/notes/editor/main/Inbox/saved-note');
+  lateController.destroy();
 }
 
 console.log('activation-capture: PASS');

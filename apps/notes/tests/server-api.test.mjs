@@ -3,12 +3,13 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {randomUUID} from 'node:crypto';
 
 const base = process.env.FOLIO_TEST_BASE_URL;
 if (!base) {
   console.log('server-api: SKIP (FOLIO_TEST_BASE_URL is not set)');
 } else {
-  const context = {window: {}, document: {}, console, Date};
+  const context = {window: {crypto: {randomUUID}}, document: {}, console, Date};
   vm.runInNewContext(fs.readFileSync(new URL('../editor/suggestion-foundation.js', import.meta.url), 'utf8'), context);
   const {createDocumentProvider, createPageAction, createQuickCaptureAction} = context.window.FolioSuggestions;
   const root = '/notes/editor/main/';
@@ -22,7 +23,19 @@ if (!base) {
   await create({type: 'create-page', name: 'Meeting'});
   assert.equal(await (await fetchImpl(`${root}.fs/Meeting.md`)).text(), '# Existing meeting\n');
   const capture = createQuickCaptureAction({root, fetchImpl});
-  await capture({text: 'new note', destination: 'inbox'});
-  assert.equal(await (await fetchImpl(`${root}.fs/Inbox.md`)).text(), '# Inbox\n- existing note\n- new note\n');
-  console.log('server-api: PASS listing, Unicode page creation, existing page preservation and append');
+  const [first, second] = await Promise.all([
+    capture({text: 'first captured note', destination: 'inbox'}),
+    capture({text: 'second captured note', destination: 'inbox'}),
+    fetchImpl(`${root}.fs/Inbox.md`, {method: 'PUT', body: '# Inbox\n- simultaneous editor autosave\n'}),
+  ]);
+  assert.notEqual(first.path, second.path);
+  assert.ok((await (await fetchImpl(first.path)).text()).includes('first captured note'));
+  assert.ok((await (await fetchImpl(second.path)).text()).includes('second captured note'));
+  assert.equal(await (await fetchImpl(`${root}.fs/Inbox.md`)).text(), '# Inbox\n- simultaneous editor autosave\n');
+  const listing = await (await fetchImpl(`${root}.fs`)).json();
+  for (const saved of [first, second]) {
+    const name = decodeURIComponent(saved.path.slice(`${root}.fs/`.length));
+    assert.ok(listing.some(file => file.name === name), name);
+  }
+  console.log('server-api: PASS listing, Unicode creation, existing preservation, concurrent captures and editor autosave');
 }
