@@ -752,11 +752,25 @@
       saveBtn.type = 'button';
       saveBtn.className = 'folio-qc-save-btn';
       saveBtn.textContent = '저장';
+      const saveError = document.createElement('p');
+      saveError.setAttribute('role', 'alert');
+      saveError.hidden = true;
+      footer.appendChild(saveError);
+      let saving = false;
       saveBtn.addEventListener('click', async () => {
+        if (saving) return;
         const text = input.value?.trim() || '';
         if (!text) return;
+        saving = true;
+        saveBtn.disabled = true;
+        input.disabled = true;
+        destButtons.forEach(button => { button.disabled = true; });
+        saveError.hidden = true;
         try {
           const saved = await onQuickCapture({ text, destination: currentDest, now: currentDate() });
+          // A cancelled/reopened modal belongs to another draft. An older
+          // response must not replace its unsaved input.
+          if (qcModal.hidden || qcModal.children[0] !== dialog) return;
           qcModal.replaceChildren();
           const confirmation = document.createElement('div');
           confirmation.className = 'folio-quick-capture-dialog';
@@ -774,7 +788,12 @@
           confirmation.appendChild(done);
           qcModal.appendChild(confirmation);
         } catch (err) {
-          console.error('Quick capture failed:', err);
+          saving = false;
+          saveBtn.disabled = false;
+          input.disabled = false;
+          destButtons.forEach(button => { button.disabled = false; });
+          saveError.textContent = err.message || '저장하지 못했습니다. 다시 시도해 주세요.';
+          saveError.hidden = false;
         }
       });
 

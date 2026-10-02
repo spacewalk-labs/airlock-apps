@@ -227,6 +227,55 @@ def run_empty_banner():
     return ok
 
 
+def run_quick_capture():
+    from playwright.sync_api import sync_playwright
+    ok = True
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        pg = browser.new_page(viewport={"width": 390, "height": 844})
+        errors, pending = [], []
+        pg.on("pageerror", lambda e: errors.append(str(e)))
+        pg.route("**/.fs/**", lambda route: pending.append(route))
+        pg.goto(f"{BASE}/harness.html?mode=late", wait_until="domcontentloaded")
+        pg.wait_for_function("window.harnessReady === true", timeout=30000)
+        pg.wait_for_selector('.folio-mobile-bar:not([hidden])')
+        open_modal = lambda: pg.click('text=+ 빠른 메모')
+        save = lambda: pg.get_by_role('button', name='저장', exact=True).click()
+        open_modal()
+        pg.locator('.folio-qc-input').fill('first draft')
+        save()
+        pg.wait_for_timeout(100)
+        ok &= check('capture begins one request', len(pending), 1)
+        # A second click during the same save is ignored, even if invoked
+        # directly rather than through the disabled native button.
+        pg.evaluate("document.querySelector('.folio-qc-save-btn').dispatchEvent(new MouseEvent('click', {bubbles: true}))")
+        pg.wait_for_timeout(100)
+        ok &= check('pending save has no duplicate request', len(pending), 1)
+        pg.get_by_role('button', name='취소', exact=True).click()
+        open_modal()
+        pg.locator('.folio-qc-input').fill('second unsaved draft')
+        pending.pop(0).fulfill(status=200, body='')
+        pg.wait_for_timeout(100)
+        ok &= check('old response preserves reopened draft', pg.locator('.folio-qc-input').input_value(), 'second unsaved draft')
+        save()
+        pg.wait_for_timeout(100)
+        ok &= check('new draft begins its own save', len(pending), 1)
+        pending.pop(0).fulfill(status=503, body='')
+        pg.wait_for_timeout(100)
+        ok &= check('failed save preserves draft', pg.locator('.folio-qc-input').input_value(), 'second unsaved draft')
+        ok &= check('failed save re-enables button', pg.locator('.folio-qc-save-btn').is_enabled(), True)
+        ok &= check('failed save shows retry error', pg.get_by_role('alert').is_visible(), True)
+        save()
+        pg.wait_for_timeout(100)
+        ok &= check('retry sends one request', len(pending), 1)
+        pending.pop(0).fulfill(status=200, body='')
+        pg.wait_for_timeout(100)
+        ok &= check('saved page has an open link', pg.locator('.folio-quick-capture-dialog a').count(), 1)
+        ok &= check('quick capture has no unhandled errors', errors, [])
+        browser.close()
+    return ok
+
+
 if __name__ == "__main__":
     try:
         import playwright  # noqa: F401
@@ -244,5 +293,7 @@ if __name__ == "__main__":
     all_ok &= run_viewport(1280, 800, mobile=False)
     print("== viewport mobile 390x844 ==")
     all_ok &= run_viewport(390, 844, mobile=True)
+    print("== quick capture delayed responses and retry ==")
+    all_ok &= run_quick_capture()
     print("cm6-insert-browser: " + ("PASS" if all_ok else "FAIL"))
     sys.exit(0 if all_ok else 1)
