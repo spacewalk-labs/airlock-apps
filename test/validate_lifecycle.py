@@ -8,7 +8,7 @@ from pathlib import Path
 
 APPS = (
     "code-server", "dev-monitor", "devterm", "feedback",
-    "fileview", "learning", "notepad", "notes", "orca", "paseo", "publish",
+    "fileview", "learning", "notepad", "orca", "paseo", "publish",
 )
 REQUIRED = (
     "id", "state", "quiesce", "snapshot", "forward",
@@ -37,7 +37,6 @@ EXPECTED_PATHS = {
     "learning": ("~/learning/", "~/.local/state/airlock-learning/"),
     "fileview": ("~/.config/airlock-fileview/",),
     "notepad": (),
-    "notes": (),
     "orca": (),
     "paseo": ("~/.paseo/",),
     "publish": (
