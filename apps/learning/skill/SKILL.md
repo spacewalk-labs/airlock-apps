@@ -1,6 +1,6 @@
 ---
 name: learning-ingest
-description: 유튜브 링크 하나를 학습자료 문서로 만들어 라이브러리에 저장한다. Airlock learning 앱의 적재 워커가 부른다.
+description: Airlock Learning에서 유튜브 자료를 학습 문서로 만들고 라이브러리에 넣을 때 사용한다.
 ---
 
 # learning-ingest — 링크 하나를 학습자료로
