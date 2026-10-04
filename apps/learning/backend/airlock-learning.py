@@ -1687,7 +1687,7 @@ def create_ingest_plan(url):
         "url": url,
         "video_id": video_id,
         "cwd": paths["repo"],
-        "execution": "/learning-ingest",
+        "execution": "앱 적재 계약으로 학습자료 작성",
         "account": anthropic_account_diagnostic(),
     }
     if item is not None:
