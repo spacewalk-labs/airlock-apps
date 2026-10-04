@@ -172,7 +172,8 @@ fi
 if [ "${AIRLOCK_DRY_RUN:-0}" = 1 ]; then
   log "[dry] remove former app-owned ingest skill links"
 else
-  bash "$HERE/deactivate.sh"
+  bash "$HERE/deactivate.sh" \
+    || log "note: could not retire all former ingest links — package contract loading is independent; leaving directory permissions unchanged"
 fi
 
 # --- 5c. an agent CLI is not required to install, but say so when there is none ---

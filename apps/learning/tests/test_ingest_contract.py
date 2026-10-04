@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 
 APP = Path(__file__).resolve().parents[1]
@@ -24,6 +25,35 @@ class IngestContractTests(unittest.TestCase):
             self.assertFalse(prompt.startswith("/learning-ingest"))
             for provider in runner.PROVIDERS.PROVIDERS:
                 self.assertIn(prompt, provider.build_argv(provider.command, prompt))
+
+    def test_plan_describes_current_execution(self):
+        with mock.patch.object(runner.BACKEND, "_open_queue"), \
+             mock.patch.object(runner.BACKEND, "_assert_video_available", return_value=(None, None)), \
+             mock.patch.object(runner.BACKEND, "anthropic_account_diagnostic", return_value="subscription"):
+            plan = runner.BACKEND.create_ingest_plan("https://youtu.be/contract001")
+        self.assertEqual(plan["execution"], "앱 적재 계약으로 학습자료 작성")
+
+    def test_upgrade_continues_when_legacy_link_cannot_be_removed(self):
+        if os.getuid() == 0:
+            self.skipTest("permission denial needs unprivileged uid")
+        with tempfile.TemporaryDirectory() as home:
+            home = Path(home)
+            target = home / ".claude/skills/learning-ingest"
+            target.parent.mkdir(parents=True)
+            target.symlink_to(home / ".local/share/airlock-learning/skill")
+            target.parent.chmod(0o500)
+            source = (APP / "install.sh").read_text()
+            section = source.split("# --- 5. retire former app-owned global skill links ---", 1)[1].split("# --- 5c.", 1)[0]
+            try:
+                proc = subprocess.run(["bash", "-c", 'set -e; log() { echo "$*"; }; HERE="$1"; ' + section,
+                                       "test", str(APP)], env=dict(os.environ, HOME=str(home)),
+                                      text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertTrue(target.is_symlink())
+                self.assertIn("could not retire", proc.stdout)
+                self.assertEqual(target.parent.stat().st_mode & 0o777, 0o500)
+            finally:
+                target.parent.chmod(0o700)
 
     def test_retires_only_owned_links_including_dangling_and_relative(self):
         with tempfile.TemporaryDirectory() as home:
