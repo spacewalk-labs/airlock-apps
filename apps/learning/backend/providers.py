@@ -282,12 +282,7 @@ def streams_json(provider):
 
 
 def skill_roots(home=None):
-    """옛 앱 소유 스킬 링크를 회수할 디렉터리들. 설치·해제 시에만 쓴다.
-
-    🔴 설치가 `~/.claude/skills` 를 직접 적으면 자리를 아는 곳이 둘이 된다. 새 CLI 를
-    붙일 때 어댑터만 고치고 설치를 잊으면, 그 CLI 는 스킬을 못 찾는데 아무 데서도
-    실패하지 않는다 — 조용히 안 되는 종류다.
-    """
+    """설치·해제에서 회수할 옛 링크의 자리. 새 전역 스킬을 등록하지 않는다."""
     return [os.path.dirname(provider.skill_target(home)) for provider in PROVIDERS]
 
 
